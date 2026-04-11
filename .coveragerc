@@ -1,0 +1,9 @@
+[run]
+omit =
+    venv/*
+    tests/*
+    alembic/*
+    _private/*
+
+[report]
+fail_under = 45

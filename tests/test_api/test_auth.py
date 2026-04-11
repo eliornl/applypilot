@@ -156,14 +156,20 @@ class TestLogin:
     @pytest.mark.asyncio
     async def test_login_unverified_email_returns_403(self):
         """Fresh registrations have email_verified=False → login returns 403."""
+        import api.auth as _auth_module
+
         payload = _reg_payload("_login_unverified")
-        async with _make_client() as client:
-            r = await client.post(f"{BASE}/register", json=payload)
-            assert r.status_code == 200, r.text
-            resp = await client.post(
-                f"{BASE}/login",
-                json={"email": payload["email"], "password": payload["password"]},
-            )
+        # Force email verification to be required for both registration and login so the
+        # user stays unverified and the 403 gate fires — even when
+        # DISABLE_EMAIL_VERIFICATION=true in .env.
+        with patch.object(_auth_module.settings, "disable_email_verification", False):
+            async with _make_client() as client:
+                r = await client.post(f"{BASE}/register", json=payload)
+                assert r.status_code == 200, r.text
+                resp = await client.post(
+                    f"{BASE}/login",
+                    json={"email": payload["email"], "password": payload["password"]},
+                )
         assert resp.status_code == 403  # email not verified
 
     @pytest.mark.asyncio
