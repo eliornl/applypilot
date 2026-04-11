@@ -1,0 +1,29 @@
+{# Dashboard home navbar: logo + Help + Settings + Logout #}
+<nav class="navbar navbar-expand-lg">
+    <div class="container">
+        <a class="navbar-brand" href="/dashboard">
+            <div class="brand-icon">
+                <i class="fas fa-rocket"></i>
+            </div>
+            <span class="brand-text">Apply<span class="brand-accent">Pilot</span></span>
+        </a>
+
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#dashboardNavMenu" aria-controls="dashboardNavMenu" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="dashboardNavMenu">
+            <div class="user-info ms-auto">
+                <a href="/help?from=dashboard" class="btn btn-outline-secondary btn-sm nav-btn" title="Help & FAQ">
+                    <i class="fas fa-question-circle me-1"></i>Help
+                </a>
+                <a href="/dashboard/settings" class="btn btn-outline-secondary btn-sm nav-btn">
+                    <i class="fas fa-cog me-1"></i>Settings
+                </a>
+                <button class="btn btn-outline-secondary btn-sm nav-btn" data-action="logout">
+                    <i class="fas fa-sign-out-alt me-1"></i>Logout
+                </button>
+            </div>
+        </div>
+    </div>
+</nav>

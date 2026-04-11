@@ -1,0 +1,1230 @@
+{% extends "base.html" %}
+{% block title %}Settings - ApplyPilot{% endblock %}
+{% block description %}Manage your account settings and preferences{% endblock %}
+{% block extra_head %}
+<!-- Page Specific Styles -->
+    <style nonce="{{ request.state.csp_nonce | default('') }}">
+        body {
+            background: var(--bg-primary);
+            min-height: 100vh;
+            font-family: var(--font-primary);
+        }
+
+        .navbar {
+            background: var(--bg-card) !important;
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 0;
+        }
+
+        .navbar-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            text-decoration: none;
+        }
+
+        .brand-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: var(--radius-md);
+            background: var(--accent-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1rem;
+        }
+
+        .brand-text {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .brand-accent {
+            color: var(--accent-primary);
+        }
+
+        .settings-container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .settings-header {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-xl);
+            padding: 2rem;
+            margin-bottom: 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .settings-header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--accent-gradient);
+        }
+
+        .settings-header h2 {
+            color: var(--text-primary);
+        }
+
+        .settings-header p {
+            color: var(--text-secondary);
+        }
+
+        .settings-nav {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-xl);
+            padding: 0.75rem;
+            margin-bottom: 2rem;
+        }
+
+        .settings-nav .nav-link {
+            color: var(--text-secondary);
+            border-radius: 8px;
+            margin: 0 0.25rem;
+            padding: 0.6rem 1rem;
+            transition: all 0.2s ease;
+            border: none !important;
+            outline: none !important;
+            box-shadow: none !important;
+            background: transparent;
+        }
+
+        .settings-nav .nav-link:hover {
+            background: rgba(255,255,255,0.05);
+            color: var(--accent-primary);
+        }
+
+        .settings-nav .nav-link:focus,
+        .settings-nav .nav-link:focus-visible,
+        .settings-nav .nav-link:active {
+            outline: none !important;
+            box-shadow: none !important;
+            border: none !important;
+        }
+
+        .settings-nav .nav-link.active {
+            background: var(--accent-gradient);
+            color: white;
+            border: none !important;
+            outline: none !important;
+            box-shadow: none !important;
+        }
+
+        /* Remove any Bootstrap focus ring */
+        .settings-nav *:focus {
+            outline: none !important;
+            box-shadow: none !important;
+        }
+
+        .settings-content {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-xl);
+            padding: 2rem;
+        }
+
+        .settings-section {
+            display: none;
+        }
+
+        .settings-section.active {
+            display: block;
+        }
+
+        .section-title {
+            color: var(--text-primary);
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .action-card:hover {
+            border-color: var(--accent-primary) !important;
+            background: var(--bg-card) !important;
+            transform: translateY(-1px);
+        }
+
+        a.action-card:hover h6 {
+            color: var(--accent-primary) !important;
+        }
+
+        .account-card {
+            background: var(--bg-tertiary);
+            border-radius: 10px;
+            padding: 1rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .account-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .account-title {
+            color: var(--text-primary);
+            font-weight: 500;
+            font-size: 0.95rem;
+        }
+
+        .account-subtitle {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+
+        .account-card:hover {
+            border-color: var(--border-accent);
+        }
+
+        a.account-card:hover .account-title {
+            color: var(--accent-primary);
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-label {
+            color: var(--text-secondary);
+        }
+
+        .form-control, .form-select {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.75rem 1rem;
+            transition: all var(--transition-base);
+            color: var(--text-primary);
+        }
+
+        .form-control:focus, .form-select:focus {
+            background-color: var(--bg-secondary);
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.15);
+            color: var(--text-primary);
+        }
+
+        .form-control::placeholder {
+            color: var(--text-muted);
+        }
+
+        .form-control:read-only {
+            background-color: var(--bg-tertiary);
+            color: var(--text-muted);
+        }
+
+        /* Password field styling to match login/register */
+        .form-floating {
+            position: relative;
+        }
+
+        /* Form input styling to match login/register - using IDs for max specificity */
+        #currentPassword,
+        #newPassword,
+        #confirmPassword {
+            background: #0a0a0f !important;
+            background-color: #0a0a0f !important;
+            border: 2px solid var(--border-color) !important;
+            border-radius: var(--radius-md);
+            color: var(--text-primary) !important;
+            height: 3.5rem;
+            padding: 1.5rem 0.75rem 0.5rem 0.75rem;
+        }
+
+        #currentPassword:focus,
+        #newPassword:focus,
+        #confirmPassword:focus {
+            border-color: var(--accent-primary) !important;
+            box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.15) !important;
+            background: #0a0a0f !important;
+            background-color: #0a0a0f !important;
+        }
+
+        /* Override browser autofill background */
+        #currentPassword:-webkit-autofill,
+        #currentPassword:-webkit-autofill:hover,
+        #currentPassword:-webkit-autofill:focus,
+        #newPassword:-webkit-autofill,
+        #newPassword:-webkit-autofill:hover,
+        #newPassword:-webkit-autofill:focus,
+        #confirmPassword:-webkit-autofill,
+        #confirmPassword:-webkit-autofill:hover,
+        #confirmPassword:-webkit-autofill:focus {
+            -webkit-box-shadow: 0 0 0 30px #0a0a0f inset !important;
+            -webkit-text-fill-color: #e8e6e3 !important;
+            caret-color: #e8e6e3 !important;
+            background-color: #0a0a0f !important;
+        }
+
+        .password-form-content .form-floating > label {
+            color: var(--text-muted);
+            padding: 1rem 0.75rem;
+            background: transparent !important;
+            background-color: transparent !important;
+            border: none !important;
+        }
+
+        /* CRITICAL: Hide Bootstrap's label pseudo-elements that create white background */
+        .password-form-content .form-floating > label::before,
+        .password-form-content .form-floating > label::after {
+            display: none !important;
+            background: none !important;
+            background-color: transparent !important;
+        }
+
+        .password-form-content .form-floating > .form-control:focus ~ label,
+        .password-form-content .form-floating > .form-control:not(:placeholder-shown) ~ label {
+            color: var(--accent-primary);
+            background: transparent !important;
+            background-color: transparent !important;
+            padding: 0.25rem 0.5rem;
+            margin-left: 0.25rem;
+            transform: scale(0.85) translateY(-0.1rem);
+        }
+
+        .password-form-content .form-control::placeholder {
+            color: transparent;
+        }
+
+        /* Collapsible password section */
+        .password-header {
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .password-header:hover {
+            opacity: 0.8;
+        }
+
+        .password-header .collapse-icon {
+            transition: transform 0.3s ease;
+        }
+
+        .password-header.collapsed .collapse-icon {
+            transform: rotate(-90deg);
+        }
+
+        .password-form-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease, padding 0.3s ease, margin 0.3s ease;
+            padding-top: 0;
+            margin-top: 0;
+        }
+
+        .password-form-content.expanded {
+            max-height: 500px;
+            padding-top: 1rem;
+            margin-top: 0.5rem;
+        }
+
+        .password-field {
+            position: relative;
+        }
+
+        .password-field .password-toggle {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 5px;
+            z-index: 10;
+        }
+
+        .password-field .password-toggle:hover {
+            color: var(--accent-primary);
+        }
+
+        .password-field .form-control {
+            padding-right: 45px;
+        }
+
+        /* Validation icons */
+        .password-validation-container {
+            position: relative;
+        }
+
+        .password-validation-container .validation-icon {
+            position: absolute;
+            right: 45px;
+            top: 50%;
+            transform: translateY(-50%);
+            display: none;
+            z-index: 5;
+        }
+
+        .password-validation-container .validation-icon.valid i {
+            color: #10b981;
+            font-size: 1rem;
+        }
+
+        .password-validation-container.is-valid .validation-icon.valid {
+            display: block;
+        }
+
+        .password-validation-container.is-valid .form-control {
+            border-color: #10b981;
+        }
+
+        .password-validation-container.is-invalid .form-control {
+            border-color: #ef4444;
+        }
+
+        /* Password requirements list */
+        .password-requirements {
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-md);
+            padding: 0.75rem 1rem;
+        }
+
+        .password-requirements small {
+            font-size: 0.8rem;
+        }
+
+        .password-requirements ul {
+            margin: 0.5rem 0 0 0;
+            padding-left: 0;
+            list-style: none;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.25rem;
+        }
+
+        .password-requirements li {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+        }
+
+        .password-requirements li i {
+            font-size: 0.4rem;
+            margin-right: 0.5rem;
+        }
+
+        .password-requirements li.valid {
+            color: #10b981;
+        }
+
+        .password-requirements li.valid i::before {
+            content: "\f00c";
+            font-size: 0.7rem;
+        }
+
+        .btn-primary {
+            background: var(--accent-gradient);
+            border: none;
+            border-radius: var(--radius-md);
+            padding: 0.75rem 2rem;
+            font-weight: 600;
+            transition: all var(--transition-base);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--glow-accent);
+        }
+
+        .btn-outline-primary {
+            color: var(--accent-primary);
+            border-color: var(--accent-primary);
+        }
+
+        .btn-outline-primary:hover {
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
+            color: white;
+        }
+
+        .btn-outline-danger {
+            border-radius: var(--radius-md);
+            padding: 0.75rem 2rem;
+            font-weight: 600;
+        }
+
+        .alert {
+            border-radius: var(--radius-md);
+            border: none;
+            padding: 1rem 1.5rem;
+        }
+
+        .alert-success {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+        }
+
+        .alert-danger {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+        }
+
+        .alert-warning {
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--warning);
+        }
+
+        .alert-info {
+            background: rgba(59, 130, 246, 0.1);
+            color: var(--info);
+        }
+
+        .usage-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--accent-primary);
+            margin-bottom: 0.5rem;
+            font-family: var(--font-mono);
+        }
+
+        .stat-label {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        .danger-zone {
+            background: rgba(239, 68, 68, 0.05);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .danger-zone h6 {
+            color: var(--danger);
+            margin-bottom: 1rem;
+        }
+
+        .danger-zone p {
+            color: var(--text-secondary);
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: var(--bg-tertiary);
+            transition: var(--transition-base);
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: var(--text-muted);
+            transition: var(--transition-base);
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background: var(--accent-gradient);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(26px);
+            background-color: white;
+        }
+
+        .preference-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            margin-bottom: 1rem;
+        }
+
+        .preference-info h6 {
+            margin: 0;
+            color: var(--text-primary);
+        }
+
+        .preference-info p {
+            margin: 0;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 768px) {
+            .settings-container {
+                margin: 1rem auto;
+                padding: 0 0.5rem;
+            }
+
+            .settings-header {
+                padding: 1.25rem;
+            }
+
+            .settings-nav {
+                overflow-x: auto;
+                flex-wrap: nowrap;
+                padding-bottom: 0.25rem;
+                scrollbar-width: none;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .settings-nav::-webkit-scrollbar {
+                display: none;
+            }
+
+            .settings-nav .nav-link {
+                white-space: nowrap;
+                margin: 0 0.1rem;
+                padding: 0.5rem 0.6rem;
+                font-size: 0.82rem;
+            }
+
+            .usage-stats {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .preference-item {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 1rem;
+            }
+
+            .account-item {
+                flex-direction: column;
+                gap: 0.75rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .settings-nav .nav-link {
+                padding: 0.45rem 0.5rem;
+                font-size: 0.75rem;
+            }
+
+            .usage-stats {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* ── Custom range slider ── */
+        .pref-range {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            outline: none;
+            cursor: pointer;
+            background: linear-gradient(
+                to right,
+                var(--accent-primary) 0%,
+                var(--accent-primary) var(--val, 50%),
+                rgba(255,255,255,0.08) var(--val, 50%),
+                rgba(255,255,255,0.08) 100%
+            );
+        }
+        .pref-range::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(0,212,255,0.2);
+            cursor: pointer;
+            transition: box-shadow 0.15s;
+        }
+        .pref-range::-webkit-slider-thumb:hover {
+            box-shadow: 0 0 0 5px rgba(0,212,255,0.3);
+        }
+        .pref-range::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: var(--accent-primary);
+            border: none;
+            box-shadow: 0 0 0 3px rgba(0,212,255,0.2);
+            cursor: pointer;
+        }
+        .pref-range::-moz-range-track {
+            height: 6px;
+            border-radius: 3px;
+            background: rgba(255,255,255,0.08);
+        }
+
+        /* ── Custom toggle ── */
+        .pref-toggle {
+            position: relative;
+            display: inline-flex;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        .pref-toggle input {
+            position: absolute;
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .pref-toggle-track {
+            display: inline-flex;
+            align-items: center;
+            width: 44px;
+            height: 24px;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.08);
+            transition: background 0.2s, border-color 0.2s;
+            position: relative;
+        }
+        .pref-toggle input:checked + .pref-toggle-track {
+            background: linear-gradient(135deg, #00d4ff 0%, #7c3aed 100%);
+            border-color: transparent;
+        }
+        .pref-toggle-thumb {
+            position: absolute;
+            left: 2px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #fff;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+            transition: transform 0.2s;
+        }
+        .pref-toggle input:checked + .pref-toggle-track .pref-toggle-thumb {
+            transform: translateX(20px);
+        }
+        .pref-toggle:focus-within .pref-toggle-track {
+            outline: 2px solid var(--accent-primary);
+            outline-offset: 2px;
+        }
+
+        /* ── Styled selects (preferences + model) ── */
+        .pref-select {
+            width: 100%;
+            padding: 0.6rem 2.2rem 0.6rem 0.9rem;
+            background-color: #0a0a0f;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            color: var(--text-primary);
+            font-size: 0.88rem;
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2300d4ff' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.75rem center;
+            transition: border-color 0.15s, box-shadow 0.15s;
+            color-scheme: dark;
+        }
+        .pref-select:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(0,212,255,0.15);
+        }
+        .pref-select option {
+            background-color: #0a0a0f;
+            color: var(--text-primary);
+        }
+        .pref-select-inline {
+            width: auto;
+            min-width: 150px;
+            flex-shrink: 0;
+        }
+
+        /* ── Account icon color variants (replaces inline style= attributes) ── */
+        a.account-card { text-decoration: none; display: block; }
+        .account-card[role="button"] { cursor: pointer; }
+        .account-card--danger { border-color: rgba(239, 68, 68, 0.2); }
+        .account-card--warning { border-color: rgba(245, 158, 11, 0.3); }
+
+        .account-icon--cyan { background: rgba(0, 212, 255, 0.12); }
+        .account-icon--cyan i { color: var(--accent-primary); }
+        .account-icon--green { background: rgba(16, 185, 129, 0.15); }
+        .account-icon--green i { color: #10b981; }
+        .account-icon--purple { background: rgba(124, 58, 237, 0.15); }
+        .account-icon--purple i { color: #a78bfa; }
+        .account-icon--amber { background: rgba(245, 158, 11, 0.15); }
+        .account-icon--amber i { color: #f59e0b; }
+        .account-icon--red { background: rgba(239, 68, 68, 0.15); }
+        .account-icon--red i { color: #ef4444; }
+        .account-icon--google { background: rgba(66, 133, 244, 0.15); }
+        .account-title--green { color: #10b981; }
+        .account-title--red { color: #ef4444; }
+        .save-indicator {
+            font-size: 0.78rem;
+            color: #10b981;
+            opacity: 0;
+            transition: opacity 0.4s;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .save-indicator--mt { margin-top: 0.5rem; }
+        .section-divider-row {
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .section-divider-row .section-title { border-bottom: none; padding-bottom: 0; }
+        .threshold-display {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--accent-primary);
+            min-width: 44px;
+            text-align: right;
+        }
+        .text-muted-xs { color: var(--text-muted); font-size: 0.78rem; }
+    </style>
+{% endblock %}
+{% block navbar %}
+{% include "partials/navbar_subpage.html" %}
+{% endblock %}
+{% block content %}
+<!-- Main Content -->
+    <div class="settings-container">
+        <!-- Header -->
+        <div class="settings-header">
+            <h2><i class="fas fa-cog me-2"></i>Settings</h2>
+            <p class="mb-0">Manage your account settings, preferences, and privacy options</p>
+        </div>
+
+        <!-- Settings Navigation -->
+        <div class="settings-nav">
+            <ul class="nav nav-pills nav-fill">
+                <li class="nav-item">
+                    <a class="nav-link active" href="#" data-section="profile">
+                        <i class="fas fa-user me-2"></i>Profile
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#" data-section="apiKeys">
+                        <i class="fas fa-microchip me-2"></i>AI Setup
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#" data-section="preferences">
+                        <i class="fas fa-sliders-h me-2"></i>Preferences
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#" data-section="privacy">
+                        <i class="fas fa-shield-alt me-2"></i>Privacy
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#" data-section="account">
+                        <i class="fas fa-user-cog me-2"></i>Account
+                    </a>
+                </li>
+            </ul>
+        </div>
+
+        <!-- Settings Content -->
+        <div class="settings-content">
+            <!-- Alert Container -->
+            <div id="alertContainer"></div>
+
+            <!-- Profile Section -->
+            <div id="profileSection" class="settings-section active">
+                <h4 class="section-title">Profile</h4>
+
+                <!-- Edit Profile -->
+                <a href="/profile/setup?edit=true" class="account-card mb-3">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="account-icon account-icon--cyan">
+                            <i class="fas fa-user-edit"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="account-title">Edit Profile</div>
+                            <div class="account-subtitle">Update info, experience, skills & preferences</div>
+                        </div>
+                        <i class="fas fa-chevron-right text-muted"></i>
+                    </div>
+                </a>
+
+                <!-- Upload Resume -->
+                <div class="account-card" role="button" tabindex="0" data-action="triggerResumeUpload" aria-label="Upload resume">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="account-icon account-icon--green">
+                            <i class="fas fa-file-upload"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="account-title">Upload New Resume</div>
+                            <div class="account-subtitle">Parse resume to update profile automatically</div>
+                        </div>
+                        <i class="fas fa-chevron-right text-muted"></i>
+                    </div>
+                </div>
+                <input type="file" id="resumeUploadInput" accept=".pdf,.docx,.txt" class="is-hidden">
+            </div>
+
+            <!-- AI Setup Section -->
+            <div id="apiKeysSection" class="settings-section">
+                <h4 class="section-title">AI Setup</h4>
+
+                <!-- Server has key - ready to use -->
+                <div id="serverKeyNotice" class="account-card is-hidden">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="account-icon account-icon--green">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="account-title account-title--green">Ready to Use</div>
+                            <div class="account-subtitle">AI features are enabled. No setup needed.</div>
+                        </div>
+                        <span class="badge bg-success">Active</span>
+                    </div>
+                </div>
+
+                <!-- User needs to add key -->
+                <div id="byokNotice" class="account-card is-hidden">
+                    <div class="d-flex align-items-center gap-3 mb-3">
+                        <div class="account-icon account-icon--amber">
+                            <i class="fas fa-key"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="account-title">Setup Required</div>
+                            <div class="account-subtitle">Add your own Gemini API key to enable AI</div>
+                        </div>
+                        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="btn btn-outline-primary btn-sm">
+                            Get API Key
+                        </a>
+                    </div>
+                    <form id="apiKeyForm" class="pt-3 mt-1 border-top border-secondary">
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="geminiApiKey" 
+                                   placeholder="Paste your API key here..."
+                                   autocomplete="off">
+                            <button type="button" class="btn btn-outline-secondary" data-action="toggleApiKeyVisibility" aria-label="Toggle API key visibility">
+                                <i class="fas fa-eye" id="toggleApiKeyIcon"></i>
+                            </button>
+                            <button type="submit" class="btn btn-primary">Save</button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- User has their own key -->
+                <div id="userKeyNotice" class="account-card is-hidden">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="account-icon account-icon--cyan" id="userKeyIcon">
+                            <i class="fas fa-key"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="account-title">Your API Key</div>
+                            <div class="account-subtitle" id="apiKeyStatusText">Loading...</div>
+                        </div>
+                        <button type="button" class="btn btn-danger btn-sm" data-action="deleteApiKey" id="deleteApiKeyBtn">
+                            Remove
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Model Selector — shown only when user has their own API key (BYOK) -->
+                <div id="modelSelectorCard" class="account-card mt-3 is-hidden">
+                    <div class="d-flex align-items-start gap-3 mb-3">
+                        <div class="account-icon account-icon--purple">
+                            <i class="fas fa-brain"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="account-title">Preferred Model</div>
+                            <div class="account-subtitle">Choose which Gemini model to use for your requests. Faster models save more API quota; smarter models give better results.</div>
+                        </div>
+                    </div>
+                    <select class="pref-select" id="preferredModelSelect" aria-label="Preferred AI model">
+                        <optgroup label="Gemini 3">
+                            <option value="gemini-3-flash-preview">Gemini 3 Flash Preview — Best speed &amp; quality balance (recommended)</option>
+                            <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview — Most capable, advanced reasoning</option>
+                            <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash Lite — Fastest &amp; lightest, lowest quota usage</option>
+                        </optgroup>
+                        <optgroup label="Gemini 2.5">
+                            <option value="gemini-2.5-flash">Gemini 2.5 Flash — Fast &amp; efficient</option>
+                            <option value="gemini-2.5-pro">Gemini 2.5 Pro — Highly capable</option>
+                        </optgroup>
+                        <optgroup label="Gemini 2.0 (stable)">
+                            <option value="gemini-2.0-flash">Gemini 2.0 Flash — Stable, well-tested</option>
+                        </optgroup>
+                    </select>
+                    <div id="modelSavedIndicator" class="save-indicator save-indicator--mt">
+                        <i class="fas fa-check-circle"></i> Saved
+                    </div>
+                </div>
+
+                <!-- Hidden elements for backwards compatibility -->
+                <div id="apiKeyBadge" class="is-hidden"></div>
+                <div id="apiKeyValidationResult" class="is-hidden"></div>
+            </div>
+
+            <!-- Preferences Section -->
+            <div id="preferencesSection" class="settings-section">
+                <div class="d-flex align-items-center justify-content-between mb-0 section-divider-row">
+                    <h4 class="section-title mb-0">Workflow Preferences</h4>
+                    <span id="prefsSavedIndicator" class="save-indicator">
+                        <i class="fas fa-check-circle"></i> Saved
+                    </span>
+                </div>
+                <div class="mt-4"></div>
+
+                <!-- Match Threshold -->
+                <div class="account-card mb-3">
+                    <div class="d-flex align-items-start gap-3 mb-3">
+                        <div class="account-icon account-icon--cyan">
+                            <i class="fas fa-sliders-h"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="account-title">Minimum Match Threshold</div>
+                            <div class="account-subtitle">Only continue the workflow when your profile matches this percentage of the job requirements. Jobs below the threshold stop early to save AI credits.</div>
+                        </div>
+                        <span id="gateThresholdDisplay" class="threshold-display">50%</span>
+                    </div>
+                    <input type="range" class="pref-range" id="gateThresholdSlider"
+                           min="0" max="100" step="5" value="50"
+                           aria-label="Minimum match threshold percentage">
+                    <div class="d-flex justify-content-between mt-1">
+                        <small class="text-muted">0% — Any job</small>
+                        <small class="text-muted">100% — Perfect match</small>
+                    </div>
+                    <div class="mt-2 text-muted-xs">
+                        Recommended: <strong class="text-secondary">40–60%</strong>. Setting too high may skip good opportunities.
+                    </div>
+                </div>
+
+                <!-- Auto-Generate Documents -->
+                <div class="account-card mb-3">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="account-icon account-icon--green">
+                            <i class="fas fa-file-alt"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="account-title">Auto-Generate Resume &amp; Cover Letter</div>
+                            <div class="account-subtitle">When on, the workflow automatically generates resume advice and a cover letter after analysis. When off, you trigger it manually.</div>
+                        </div>
+                        <label class="pref-toggle" aria-label="Auto-generate documents">
+                            <input type="checkbox" id="autoGenerateDocsToggle" role="switch">
+                            <span class="pref-toggle-track"><span class="pref-toggle-thumb"></span></span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Cover Letter Tone -->
+                <div class="account-card mb-3">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="account-icon account-icon--purple">
+                            <i class="fas fa-pen-fancy"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="account-title">Cover Letter Tone</div>
+                            <div class="account-subtitle">Writing style the AI uses for cover letters.</div>
+                        </div>
+                        <select class="pref-select pref-select-inline" id="coverLetterToneSelect" aria-label="Cover letter tone">
+                            <option value="professional">Professional</option>
+                            <option value="conversational">Conversational</option>
+                            <option value="enthusiastic">Enthusiastic</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Resume Advice Style -->
+                <div class="account-card mb-3">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="account-icon account-icon--amber">
+                            <i class="fas fa-align-left"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="account-title">Resume Advice Style</div>
+                            <div class="account-subtitle">Tight bullets or full detailed rewrites.</div>
+                        </div>
+                        <select class="pref-select pref-select-inline" id="resumeLengthSelect" aria-label="Resume advice style">
+                            <option value="concise">Concise</option>
+                            <option value="detailed">Detailed</option>
+                        </select>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Privacy Section -->
+            <div id="privacySection" class="settings-section">
+                <h4 class="section-title">Privacy & Data</h4>
+
+                <!-- Export Data -->
+                <div class="account-card mb-3">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="account-icon account-icon--cyan">
+                            <i class="fas fa-download"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="account-title">Export Your Data</div>
+                            <div class="account-subtitle">Download profile, applications & settings</div>
+                        </div>
+                        <button type="button" class="btn btn-primary" data-action="exportData">
+                            <i class="fas fa-download me-1"></i>Export
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Help & Tour -->
+                <div class="account-card">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="account-icon account-icon--green">
+                            <i class="fas fa-question-circle"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="account-title">Help & Support</div>
+                            <div class="account-subtitle">Documentation & welcome tour</div>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <a href="/help" class="btn btn-outline-secondary btn-sm">Help</a>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-action="restartOnboarding">Tour</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Account Section -->
+            <div id="accountSection" class="settings-section">
+                <h4 class="section-title">Account</h4>
+
+                <!-- Change Password (hidden for Google-only users) -->
+                <div class="account-card mb-3 is-hidden" id="passwordSection">
+                    <div class="d-flex align-items-center gap-3 password-header collapsed" role="button" tabindex="0" data-action="togglePasswordSection" aria-expanded="false" aria-label="Toggle change password section">
+                        <div class="account-icon account-icon--cyan">
+                            <i class="fas fa-lock"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="account-title">Password</div>
+                            <div class="account-subtitle">Click to change your password</div>
+                        </div>
+                        <i class="fas fa-chevron-down collapse-icon text-muted"></i>
+                    </div>
+                    <div class="password-form-content" id="passwordFormContent">
+                        <form id="passwordForm">
+                            <!-- Current Password -->
+                            <div class="form-floating password-field mb-3">
+                                <input type="password" class="form-control" id="currentPassword" placeholder="Current password" required>
+                                <label for="currentPassword">Current Password</label>
+                                <button type="button" class="password-toggle" data-field="currentPassword" aria-label="Toggle current password visibility">
+                                    <i class="fas fa-eye" id="currentPassword-toggle-icon"></i>
+                                </button>
+                            </div>
+
+                            <!-- New Password -->
+                            <div class="form-floating password-field password-validation-container mb-2" id="newPassword-container">
+                                <input type="password" class="form-control" id="newPassword" placeholder="New password" required>
+                                <label for="newPassword">New Password</label>
+                                <button type="button" class="password-toggle" data-field="newPassword" aria-label="Toggle new password visibility">
+                                    <i class="fas fa-eye" id="newPassword-toggle-icon"></i>
+                                </button>
+                                <div class="validation-icon valid">
+                                    <i class="fas fa-check-circle"></i>
+                                </div>
+                            </div>
+
+                            <!-- Password Requirements -->
+                            <div class="password-requirements mb-3">
+                                <small class="text-muted">Password must contain:</small>
+                                <ul id="password-requirements">
+                                    <li id="req-length"><i class="fas fa-circle me-1"></i>At least 8 characters</li>
+                                    <li id="req-uppercase"><i class="fas fa-circle me-1"></i>One uppercase letter</li>
+                                    <li id="req-lowercase"><i class="fas fa-circle me-1"></i>One lowercase letter</li>
+                                    <li id="req-number"><i class="fas fa-circle me-1"></i>One number</li>
+                                    <li id="req-special"><i class="fas fa-circle me-1"></i>One special character</li>
+                                </ul>
+                            </div>
+
+                            <!-- Confirm Password -->
+                            <div class="form-floating password-field password-validation-container mb-3" id="confirmPassword-container">
+                                <input type="password" class="form-control" id="confirmPassword" placeholder="Confirm password" required>
+                                <label for="confirmPassword">Confirm New Password</label>
+                                <button type="button" class="password-toggle" data-field="confirmPassword" aria-label="Toggle confirm password visibility">
+                                    <i class="fas fa-eye" id="confirmPassword-toggle-icon"></i>
+                                </button>
+                                <div class="validation-icon valid">
+                                    <i class="fas fa-check-circle"></i>
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-check me-1"></i>Update Password
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Danger Zone -->
+                <div class="account-card account-card--danger">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="account-icon account-icon--red">
+                            <i class="fas fa-exclamation-triangle"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="account-title account-title--red">Danger Zone</div>
+                            <div class="account-subtitle">These actions cannot be undone</div>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-danger" data-action="clearAllData">
+                                Clear Applications
+                            </button>
+                            <button type="button" class="btn btn-danger" data-action="deleteAccount">
+                                Delete Account
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Application JavaScript -->
+{% endblock %}
+{% block page_scripts %}
+<script src="{{ asset_url('js/dashboard-settings.js') }}"></script>
+
+{% endblock %}

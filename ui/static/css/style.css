@@ -1,0 +1,10 @@
+/* ==========================================================================
+   ApplyPilot - Legacy Entry Point
+   
+   CSS is now split into three files loaded directly via <link> tags in base.html:
+     base/variables.css  — CSS custom properties and reset/base styles
+     landing.css         — Landing page and public-facing page styles
+     app.css             — Dashboard, auth, forms, modals, and component styles
+   
+   This file is kept as a fallback reference only. Edit the split files above.
+   ========================================================================== */

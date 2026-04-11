@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "ApplyPilot",
+  "short_name": "ApplyPilot",
+  "description": "Extract any job posting and get AI-powered analysis, resume tips, cover letters, and interview prep on ApplyPilot.",
+  "version": "1.1.0",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting",
+    "contextMenus",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://*.a.run.app/*",
+    "http://localhost:8000/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "ApplyPilot — AI-Powered Job Analysis"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.a.run.app/*",
+        "http://localhost:8000/*"
+      ],
+      "js": ["content/content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

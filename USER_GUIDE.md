@@ -1,0 +1,403 @@
+# ApplyPilot — User Guide
+
+Welcome to ApplyPilot! This guide walks you through every feature so you can get the most out of your AI-powered job search co-pilot.
+
+## Table of Contents
+
+- [Getting Started](#getting-started)
+- [Profile Setup](#profile-setup)
+- [Dashboard Overview](#dashboard-overview)
+- [Creating Applications](#creating-applications)
+- [Chrome Extension](#chrome-extension)
+- [Interview Preparation](#interview-preparation)
+- [Career Tools](#career-tools)
+- [Settings](#settings)
+- [FAQ](#faq)
+
+---
+
+## Getting Started
+
+### Creating an Account
+
+1. Navigate to the app homepage (`http://localhost:8000` for a local install)
+2. Click **Try Free** in the top navigation
+3. Choose your signup method:
+   - **Email/Password** — enter your full name, email, and a password, then click **Create Account**
+   - **Continue with Google** — one-click signup (only visible if Google OAuth is configured by the instance operator)
+
+**Password Requirements:**
+- Minimum 8 characters
+- At least one uppercase letter, one lowercase letter, one number, one special character
+
+### Email Verification
+
+After creating an account, you may be asked to verify your email:
+
+- If SMTP is configured, check your inbox for a **6-digit verification code**, enter it on the verification page, then click **Verify**. If you don't receive the code, click **Resend Code**.
+- If email verification is disabled (the default for local installs), your account is verified automatically and you are redirected straight to profile setup.
+
+### Signing In
+
+1. Click **Sign In** in the top navigation
+2. Enter your email and password, then click **Sign In** — or click **Continue with Google**
+3. You'll be redirected to the dashboard (or profile setup if your profile isn't complete yet)
+
+**Account Lockout:** After 5 failed login attempts your account is locked for 15 minutes.
+
+---
+
+## Profile Setup
+
+Your profile is the foundation for all AI-generated content. The setup wizard has 4 steps.
+
+### Quick Start: Resume Upload (Recommended)
+
+1. Drag & drop your resume or click to browse
+2. Supported formats: **PDF**, **DOCX**, **TXT**
+3. The AI extracts your information and pre-fills all fields
+4. Review and edit as needed, then click **Continue**
+
+Click "Fill in manually" to skip the upload and enter everything by hand.
+
+### Step 1: Basic Information
+
+| Field | Required |
+|-------|----------|
+| City, State/Region, Country | Yes |
+| Professional Title | Yes |
+| Years of Experience | Yes |
+| Professional Summary | Yes |
+| Currently a Student | No |
+
+### Step 2: Work Experience
+
+1. Click **Add Work Experience**
+2. Enter company name, job title, and dates
+3. Describe your responsibilities and achievements
+4. Mark as current position if applicable
+5. Add multiple roles as needed
+
+If you have no relevant work experience yet, check **"I don't have any relevant work experience yet"** instead of leaving the step empty.
+
+### Step 3: Skills
+
+- Type a skill and press **Enter** to add it
+- Add both technical skills (Python, SQL) and personal skills (Leadership, Communication)
+- Aim for 5–10 relevant skills for better match accuracy
+- Click the **×** to remove a skill
+
+### Step 4: Career Preferences
+
+| Field | Options |
+|-------|---------|
+| Salary | Minimum Salary and Maximum Salary (both optional) |
+| Job Types | Full-time, Part-time, Contract, Freelance, Internship |
+| Company Sizes | Startup (1–10), Small (11–50), Medium (51–200), Large (201–1000), Enterprise (1000+) |
+| Work Arrangements | Onsite, Remote, Hybrid |
+| Maximum Travel | No travel (0%), Minimal (up to 25%), Moderate (up to 50%), Frequent (up to 75%), Extensive (up to 100%) |
+| Additional Options | Willing to relocate, Needs visa sponsorship, Has security clearance |
+
+Click **Complete Setup** to finish.
+
+---
+
+## Dashboard Overview
+
+The dashboard is your central hub for tracking applications and accessing all features.
+
+### Statistics Cards
+
+| Metric | Description |
+|--------|-------------|
+| Total Applications | All jobs added |
+| Applied | Jobs you've formally applied to |
+| Interviews | Jobs where you've had interviews |
+| Response Rate | Percentage of applications with company responses |
+
+### Applications List
+
+All your applications are listed here with company name, job title, match score, and status. Click any card to open the full application detail page.
+
+**Filter bar:**
+- **Search** — filter by job title or company name
+- **Date** — show applications from the last day, week, month, quarter, or year
+- **Status** — filter by Applied, Interview, Offer, or Rejected
+- **Sort** — order by newest, oldest, recently updated, company A–Z, or title A–Z
+
+**On each card (3-row layout):**
+- **Row 1** — job title (left) + AI analysis badge (right): `Analyzing…` while the AI works, `✓ Ready` when complete, `Failed` if something went wrong
+- **Row 2** — company name
+- **Row 3** — date and match score (left) + tracking stage buttons + trash icon (right)
+
+**Tracking stage buttons** (Applied / Interview / Offer / Rejected):
+- Click a button to mark where you are in the application process — it highlights immediately
+- Click the **same button again** to undo it (clears the stage back to untracked)
+- Only visible once the AI analysis is complete
+
+**Trash icon** — always visible on the right side of the bottom row; click to delete the application (a confirmation dialog appears first)
+
+**Analysis ready notification** — if an analysis completes while you're on another page (Career Tools, New Application, etc.), a small pulsing dot appears on the "← Back to Dashboard" button in the navbar. The dot disappears once you return to the dashboard.
+
+---
+
+## Creating Applications
+
+### Starting a New Application
+
+1. Click **New Application** from the dashboard
+2. Provide the full job description using one of two methods:
+
+| Method | How |
+|--------|-----|
+| **Paste Job Description** | Copy and paste the full job description text |
+| **Upload File** | PDF or TXT file up to 5 MB |
+
+The AI extracts the company name, job title, and all requirements from the text — you don't need to enter them manually.
+
+> **Tip:** The Chrome Extension lets you extract a job description from any website with one click, without opening this form. See the [Chrome Extension](#chrome-extension) section below.
+
+### The Analysis Process
+
+After submitting, five AI agents run across four steps with a gate check mid-way:
+
+| Step | Agent |
+|------|-------|
+| 1 | **Job Analyzer** — extracts requirements, skills, qualifications |
+| 2 | **Profile Matcher** — calculates match score, flags strengths and gaps |
+| — | **Gate check** — if score < 50%, asks if you want to continue |
+| 3 | **Company Research** — gathers company culture and hiring practices |
+| 4 | **Resume Advisor + Cover Letter Writer** (run in parallel) |
+
+**Total:** ~30 seconds
+
+**Optional:** The **Interview Prep** agent runs separately, on demand from the Interview tab. It is not part of the main workflow and does not run automatically.
+
+### Viewing Results
+
+The application details page opens with a **7-tab layout**:
+
+| Tab | Content |
+|-----|---------|
+| **Company** | Overview, culture, values, leadership, hiring practices |
+| **Your Fit** | Match score, strengths, skill gaps, deal-breaker analysis |
+| **Strategy** | Positioning strategy, key selling points to emphasize |
+| **Job Details** | Extracted requirements, salary, work arrangement |
+| **Cover Letter** | Personalized letter ready to copy |
+| **Resume** | 4 sub-tabs: Overview, Experience, Keywords & ATS, Summary |
+| **Interview** | 3 sub-tabs: Process, Questions, Preparation |
+
+The **Cover Letter** tab has a **Copy** button. The Cover Letter, Resume, and Interview tabs each have a **Regenerate** button (rate limited to 5/hour).
+
+> **Note:** If you turned off **Auto-generate documents** in Settings → Preferences before running this application, the Cover Letter and Resume tabs will show a **"Generate Cover Letter & Resume Tips"** button instead of content. Click it to run the generation on demand — it takes ~30 seconds and refreshes automatically when done.
+
+### Managing Applications
+
+**Stage tracking** — use the **Applied / Interview / Offer / Rejected** buttons in the bottom-right of each card to record where you are in the process. Click a highlighted button again to undo it. Changes take effect immediately.
+
+**Deletion** — click the trash icon on the right side of any card's bottom row. A confirmation dialog appears before anything is deleted.
+
+---
+
+## Chrome Extension
+
+The Chrome extension lets you extract job postings from **any website** with one click.
+
+### Installation
+
+The extension loads directly from this repository — no app store required.
+
+1. Open `chrome://extensions` in Chrome
+2. Enable **Developer Mode** (top-right toggle)
+3. Click **Load unpacked** and select the `extension/` folder from the project directory
+4. The ApplyPilot icon will appear in your toolbar
+
+After any code change, click the ↺ refresh icon on the extension card.
+
+### Using the Extension
+
+1. Browse to any job posting page
+2. Click the ApplyPilot icon in the toolbar
+3. The popup shows the current page's domain and an **Analyze This Job** button
+4. Click **Analyze This Job** — the page content is extracted and sent for analysis
+5. When complete, click **Open Dashboard** to see the results
+
+### Supported Sites
+
+The extension has optimized content selectors for most major ATS platforms and job boards. For any unrecognized site it falls back to the page's main content area — this works on virtually any company careers page.
+
+### Tips
+
+- If extraction fails, try navigating directly to the job description page before clicking the icon
+- You must be logged into the web app for the extension to work — it uses the same account
+- Analyzed jobs appear in your dashboard immediately
+
+---
+
+## Interview Preparation
+
+Interview prep is generated on demand and lives directly inside the application details page.
+
+### Accessing Interview Prep
+
+1. Open any completed application's detail page
+2. Click the **Interview** tab
+3. Click **Generate Interview Prep** (first time only)
+4. Wait ~30–60 seconds for generation
+5. Click **Regenerate** to refresh content (5/hour rate limit)
+
+### What's Included
+
+Content is organized across the three sub-tabs:
+
+**Process** — typical interview rounds for this company, estimated timeline, and format prediction
+
+**Questions** — behavioral questions with STAR answer frameworks built from your profile, technical and role-specific questions, company-specific questions, and smart questions to ask the interviewer
+
+**Preparation** — quick reference card (elevator pitch, key selling points, salary discussion), how to address employer concerns, logistics (dress code, what to bring, virtual interview tips), a day-before checklist, and confidence boosters
+
+
+---
+
+## Career Tools
+
+Access six AI-powered tools at **Dashboard → Career Tools**.
+
+### Thank You Note Generator
+
+Generate professional post-interview thank-you emails.
+
+**Input:** Interviewer name/role, interview type, company, job title, key discussion points (optional)  
+**Output:** Subject line, email body, key points referenced
+
+### Rejection Analysis
+
+Turn rejection emails into learning opportunities.
+
+**Input:** Rejection email text, job title/company (optional), interview stage reached  
+**Output:** Likely rejection reasons, improvement suggestions, follow-up template, encouragement message
+
+### Reference Request Generator
+
+Create professional emails asking for references.
+
+**Input:** Reference name/relationship, company you worked at together, target job (optional)  
+**Output:** Subject line, email body, talking points reminder, follow-up timeline, tips
+
+### Job Comparison Tool
+
+Compare 2–3 job opportunities side by side.
+
+**Input:** 2–3 job descriptions with details, your career priorities (optional)  
+**Output:** Overall scores, category breakdown (compensation, growth, balance, culture, fit), pros/cons, recommendation
+
+### Follow-up Email Generator
+
+Generate follow-up emails for any application stage.
+
+| Stage | When to use |
+|-------|-------------|
+| After Phone Screen | Thank you and reaffirm interest |
+| After Interview | Strengthen your candidacy |
+| After Final Round | Strong close |
+| No Response | Gentle check-in |
+| After Rejection | Maintain the relationship |
+
+**Output:** Subject line, email body, timing advice, next steps
+
+### Salary Negotiation Coach
+
+Comprehensive preparation for salary negotiations.
+
+**Input:** Job title/company, offered salary, your experience, current salary and competing offers (optional), target range  
+**Output:** Market assessment, strategy overview, negotiation script, pushback responses, alternative asks (signing bonus, equity, PTO), email template, do's and don'ts
+
+**Rate limit:** 5/hour (all other career tools are 10/hour)
+
+---
+
+## Settings
+
+Access settings from the dashboard navigation. The settings page has five tabs.
+
+### Profile
+
+Edit your basic information, work experience, skills, and career preferences.
+
+### AI Setup
+
+If the instance is running in BYOK mode (no server-side AI key configured):
+
+1. Go to **Settings → AI Setup**
+2. Get your own key from [Google AI Studio](https://aistudio.google.com/app/apikey)
+3. Paste the key and click **Save**
+
+Your key is encrypted at rest and never logged or exposed.
+
+**Model selection** — the AI Setup tab also lets you choose which Gemini model to use (e.g. `gemini-2.0-flash`). The default is set by the instance operator. Only change this if you have a specific reason — different models have different speed and quality trade-offs.
+
+### Preferences
+
+All preferences auto-save — there is no Save button:
+
+- **Minimum match threshold** — the score below which the gate check pauses the workflow (default: 50%)
+- **Auto-generate documents** — toggle whether cover letter and resume tips generate automatically. When off, the workflow stops after job analysis and company research (faster). You can generate the documents later from the Cover Letter or Resume tab using the **"Generate Cover Letter & Resume Tips"** button.
+- **Cover letter tone** — Professional, Conversational, or Enthusiastic
+- **Resume advice style** — Concise or Detailed
+
+### Privacy
+
+- **Export Your Data** — download your profile, applications, and settings as JSON
+- **Help & Support** — opens the help page or re-runs the onboarding tour
+
+### Account
+
+- **Password** — change your password (shown for email-registered users only)
+- **Clear Applications** — delete all applications and AI results, keeping your account and profile
+- **Delete Account** — permanently delete everything
+
+---
+
+## FAQ
+
+### General
+
+**Q: How accurate is the profile match score?**  
+A: The match score is a useful signal, not a definitive verdict. It's calculated by the Profile Matcher agent, which compares your profile against the job's stated requirements across four dimensions:
+
+- **Skills and technologies** — your listed skills are checked against what the job explicitly requires vs. what it lists as "nice to have." Required skills carry more weight. Gaps in required skills pull the score down more than gaps in preferred ones.
+- **Years of experience** — your total career length and the tenure at your most recent role are compared against the job's stated minimums and preferred experience range.
+- **Location and work arrangement** — your preferred arrangements (remote, hybrid, on-site) and location are compared to the job's stated requirements. A mismatch here can lower the score even if everything else aligns well.
+- **Seniority alignment** — signals like "Senior," "Lead," "Staff," or "Entry-level" in the job title and description are compared against your years of experience and current professional title.
+
+A high score (>75%) means you meet most stated requirements — worth applying confidently. A moderate score (50–75%) means gaps exist but the role may still be reachable — read the **Strategy** tab for how to address them. A low score (<50%) is a signal to reconsider whether the role is right for your current profile.
+
+The score improves with a more complete profile — sparse profiles, especially those with no work experience or skills listed, produce less reliable matching. You can also configure the minimum threshold at which the workflow pauses and asks you to confirm in **Settings → Preferences** (default: 50%).
+
+**Q: Can I apply to low-match jobs?**  
+A: Yes. If the score is below 50% the gate decision appears, but you can always click "Continue Anyway." A low score just means you may need to address some gaps in your materials.
+
+**Q: Why does the analysis take ~30 seconds?**  
+A: Five AI agents run across four steps — the last two (Resume Advisor and Cover Letter Writer) run in parallel. Each makes an API call to Gemini. This is by design.
+
+### API Keys
+
+**Q: Do I need my own Gemini API key?**  
+A: It depends on how the instance is configured. If the operator has set a `GEMINI_API_KEY` in the server's `.env`, you don't need one. If not, go to **Settings → AI Setup** to add yours.
+
+**Q: Is my API key secure?**  
+A: Yes. Keys are encrypted at rest using Fernet symmetric encryption and are never logged or returned by the API.
+
+**Q: Where do I get a Gemini API key?**  
+A: Visit [Google AI Studio](https://aistudio.google.com/app/apikey) and click "Create API Key". Usage is billed directly to your Google account at very low rates.
+
+### Technical
+
+**Q: What file formats are supported for resumes?**  
+A: PDF, DOCX, and TXT files up to 10 MB.
+
+**Q: How do I reset my password if email isn't configured?**  
+A: On self-hosted instances without SMTP, the password reset page shows the reset link directly on screen after you submit your email — no email is sent. Copy the link, open it, and set your new password. If you are the operator and want to enable email delivery, configure the `SMTP_*` variables in your `.env` file.
+
+**Q: Something looks broken — how do I report it?**  
+A: Open an issue at `https://github.com/yourusername/applypilot/issues` with the steps to reproduce, what you expected, and what actually happened.

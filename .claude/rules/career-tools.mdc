@@ -1,0 +1,341 @@
+---
+description: Career tools — 6 tools, API endpoints, rate limits, agent implementation pattern, UI output structure, copy button pattern
+globs: agents/*.py,api/tools.py,ui/dashboard/tools.html,ui/static/js/dashboard-tools.js
+alwaysApply: false
+---
+
+# Career Tools
+
+## Overview
+6 standalone AI-powered tools at `/dashboard/tools`. All require auth and support BYOK.
+
+| Tool | Agent | Rate Limit |
+|------|-------|------------|
+| Thank You Note | `ThankYouWriterAgent` | 10/hour |
+| Rejection Analysis | `RejectionAnalyzerAgent` | 10/hour |
+| Reference Request | `ReferenceRequestWriterAgent` | 10/hour |
+| Job Comparison | `JobComparisonAgent` | 10/hour |
+| Follow-up Email | `FollowUpGeneratorAgent` | 10/hour |
+| Salary Coach | `SalaryCoachAgent` | 5/hour |
+
+## API Endpoints
+```
+POST /api/v1/tools/thank-you           # Thank you note
+POST /api/v1/tools/rejection-analysis  # Rejection analysis
+POST /api/v1/tools/reference-request   # Reference request
+POST /api/v1/tools/job-comparison      # Compare 2-3 jobs
+GET  /api/v1/tools/followup-stages     # Available stages list
+POST /api/v1/tools/followup            # Follow-up email
+POST /api/v1/tools/salary-coach        # Salary negotiation coaching
+```
+
+---
+
+## Agent Prompt Rules — No Placeholders
+
+**Every career tool agent prompt MUST include CRITICAL WRITING RULES that explicitly prohibit bracket placeholders.**
+
+Rules to include in every agent's `SYSTEM_CONTEXT` and/or prompt:
+- Never output `[Your Name]`, `[Recruiter Name]`, `[Company]`, or any bracket placeholders
+- Use first name only for greetings (e.g., `Hi Sarah,`) — fall back to `Hi there,` or `Dear Hiring Team,` if name unknown
+- Close with `Best regards,` — no sender name on the closing line
+- Subject lines must NOT include the sender's name
+
+```python
+# ✅ CORRECT — in SYSTEM_CONTEXT
+"""
+CRITICAL: Never output placeholder text like [Your Name], [Recruiter Name], [Company Name].
+The output must be ready-to-send with no brackets requiring manual replacement.
+"""
+```
+
+---
+
+## Output JSON Schemas (per tool)
+
+### Thank You Note (`thank_you_writer.py`)
+```json
+{
+  "subject": "Thank you for the interview — [Role] at [Company]",
+  "body": "Hi [FirstName],\n\n...\n\nBest regards,",
+  "tone": "professional",
+  "word_count": 120
+}
+```
+HTML IDs: `thankYouOutput`, `thankYouSubject` (`.followup-subject`), `thankYouBody` (`.followup-body`)
+Copy action: `data-action="copyThankYouNote"` → `copyThankYouNote()` combines subject + body
+
+### Follow-up Email (`followup_generator.py`)
+```json
+{
+  "subject": "...",
+  "body": "...",
+  "stage": "after_interview",
+  "tone": "professional"
+}
+```
+HTML IDs: `followupOutput`, `followupSubject` (`.followup-subject`), `followupBody` (`.followup-body`)
+Copy action: `data-action="copyFollowupEmail"` → `copyFollowupEmail()` combines subject + body
+
+### Rejection Analysis (`rejection_analyzer.py`)
+```json
+{
+  "summary": "...",
+  "likely_reasons": ["..."],
+  "improvement_suggestions": ["..."],
+  "positive_signals": ["..."],
+  "follow_up_recommended": true,
+  "follow_up_subject": "...",
+  "follow_up_body": "Hi [FirstName],\n\n...\n\nBest regards,"
+}
+```
+`follow_up_subject` and `follow_up_body` are **separate fields** — never a single `follow_up_template` string.
+The follow-up section only renders when `follow_up_recommended === true`.
+Copy action: `data-action="copyFollowUpTemplate"` → `copyFollowUpTemplate()`
+
+### Reference Request (`reference_request_writer.py`)
+```json
+{
+  "subject": "...",
+  "email_body": "Hi [FirstName],\n\n...\n\nBest regards,",
+  "talking_points": ["..."],
+  "tips": ["..."],
+  "follow_up_timeline": "..."
+}
+```
+`user_name_str` fallback must be `"the applicant"` — never `"[Your Name]"`.
+Copy action: `data-action="copyReferenceEmail"` → `copyReferenceEmail()`
+
+### Job Comparison (`job_comparison.py`)
+
+**Landing page / UI card description must list all 6 scoring dimensions** — the agent scores each job across:
+1. Compensation & Benefits
+2. Career Growth
+3. Work-Life Balance
+4. Company Stability & Culture
+5. Role Fit
+6. Long-term Career Impact
+
+Never reduce these to 4 generic labels like "compensation, growth potential, culture fit, and role quality" — that omits Work-Life Balance and Long-term Career Impact entirely.
+
+Canonical UI card copy (`index.html` tools grid):
+> "Compare 2–3 opportunities side-by-side with AI scoring across compensation, career growth, work-life balance, culture fit, and more."
+```json
+{
+  "recommended_job": "Founding Engineer",
+  "recommendation_summary": "...",
+  "jobs": [
+    {
+      "job_identifier": "Founding Engineer",
+      "title": "Founding Engineer",
+      "company": "Weekday (YC W21)",
+      "overall_score": 84,
+      "pros": ["..."],
+      "cons": ["..."],
+      "ideal_for": "..."
+    }
+  ],
+  "decision_factors": [
+    {
+      "factor": "Compensation",
+      "winner": "Founding Engineer",
+      "importance": "High",
+      "explanation": "..."
+    }
+  ],
+  "questions_to_ask": ["..."],
+  "final_advice": "..."
+}
+```
+**`job_identifier` must be the job title** (or "Title at Company" if titles clash) — NEVER "Job 1", "Job 2", "Job 3". This rule is enforced in `COMPARISON_PROMPT` with a `CRITICAL` block.
+Description input truncated to 5000 chars. Textarea `maxlength="5000"` with live character counter.
+
+### Salary Coach (`salary_coach.py`)
+Standard sectioned output. No email, no copy-all button needed.
+
+---
+
+## Copy Button Pattern (`dashboard-tools.js`)
+
+A `_clipboardWrite(text, successMsg)` helper handles all clipboard operations with a `navigator.clipboard` → `execCommand('copy')` fallback:
+
+```javascript
+/**
+ * @param {string} text
+ * @param {string} [successMsg]
+ */
+async function _clipboardWrite(text, successMsg = 'Copied!') {
+    if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        notify(successMsg, 'success');
+    } else {
+        // execCommand fallback for non-HTTPS / older browsers
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        notify(successMsg, 'success');
+    }
+}
+```
+
+**Every tool's copy button must:**
+1. Use `data-action="copyXxx"` (no inline `onclick`)
+2. Call `_clipboardWrite` — never `navigator.clipboard` directly
+3. For email tools: combine `subject` + `\n\n` + `body` in the copied text
+
+---
+
+## Tab Notification Clearing
+
+`showTool(toolName, evt)` clears `alertContainer` when switching tabs:
+```javascript
+function showTool(toolName, evt) {
+    const alertContainer = document.getElementById('alertContainer');
+    if (alertContainer) alertContainer.innerHTML = '';
+    // ... rest of tab switching logic
+}
+```
+This prevents stale "Analysis complete!" banners from showing on unrelated tabs.
+
+---
+
+## Character Counter Pattern (Job Comparison)
+
+For long-text inputs with a server-side char limit, add a live counter:
+
+```html
+<textarea id="job1Description" maxlength="5000" ...></textarea>
+<div class="char-counter" id="job1CharCount">0 / 5000</div>
+```
+
+```javascript
+// In DOMContentLoaded
+['job1Description','job2Description','job3Description'].forEach(id => {
+    const el = document.getElementById(id);
+    const counter = document.getElementById(id.replace('Description','CharCount'));
+    if (!el || !counter) return;
+    el.addEventListener('input', () => {
+        const len = /** @type {HTMLTextAreaElement} */ (el).value.length;
+        counter.textContent = `${len} / 5000`;
+        counter.classList.toggle('char-near-limit', len >= 4000 && len < 4900);
+        counter.classList.toggle('char-at-limit', len >= 4900);
+    });
+});
+```
+
+CSS:
+```css
+.char-counter        { font-size: 0.75rem; color: var(--text-muted); text-align: right; }
+.char-near-limit     { color: var(--warning-color); }
+.char-at-limit       { color: var(--danger-color); font-weight: 600; }
+```
+
+---
+
+## UI Output Structure (tools.html CSS classes)
+
+All tool output sections follow the same sectioned card pattern as the application detail page.
+
+### Email-style outputs (Thank You, Follow-up, Reference)
+```
+.followup-output-card      outer card container
+.followup-subject          subject line box (muted bg, monospace-ish)
+.followup-body             email body (pre-wrap)
+.salary-content-section    reusable section block (border-top padding)
+.salary-section-title      section heading with icon
+```
+
+### Rejection Analysis
+```
+.rejection-summary         summary paragraph box
+.rejection-item            icon + text row for reasons/suggestions/signals
+.rejection-item-icon       colored icon circle
+.rejection-positive-card   green-tinted positive signals card
+.encouragement-header      motivational header above positive signals
+```
+
+### Job Comparison
+```
+.comp-recommendation-card  top recommendation summary card
+.comparison-grid           CSS grid for job cards (auto-fill, min 280px)
+.comp-job-card             individual job card (dark bg, border-radius)
+.comp-job-card--recommended  highlighted border for recommended job
+.comp-job-body             card content area (no separate header band)
+.comp-job-title-text       job title (prominent, inline with score badge)
+.comp-job-score-badge      score pill (accent color)
+.comp-pros-header          "Pros" subheader with + icon
+.comp-cons-header          "Cons" subheader with − icon
+.comp-job-list             ul for pros/cons items
+.comp-ideal-for            "Ideal for: ..." footer line
+.decision-factor-row       row in the decision factors table
+.decision-factor-name      factor name (left col)
+.decision-factor-winner    winning job identifier (center)
+.decision-factor-importance importance badge (High/Med/Low)
+.decision-factor-explanation  explanation text (muted, small)
+```
+
+**Job cards have NO separate header band.** Title, company in parentheses, and score badge are all rendered inline inside `.comp-job-body`:
+```html
+<div class="comp-job-body">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.5rem;margin-bottom:0.75rem;">
+    <div class="comp-job-title-text">Founding Engineer <span>(Weekday YC W21)</span></div>
+    <span class="comp-job-score-badge">84/100</span>
+  </div>
+  ...
+</div>
+```
+Company is always shown in parentheses after the title — even when titles are unique — for clarity.
+
+---
+
+## Agent Implementation Pattern
+```python
+class ExampleToolAgent:
+    def __init__(self):
+        self.gemini_client = None
+        self._current_user_api_key: Optional[str] = None
+
+    async def generate(
+        self,
+        required_param: str,
+        optional_param: Optional[str] = None,
+        user_api_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        self._current_user_api_key = user_api_key
+        self.gemini_client = await get_gemini_client()
+
+        prompt = PROMPT_TEMPLATE.format(required_param=required_param, ...)
+        response = await self.gemini_client.generate(
+            prompt=prompt, system=SYSTEM_CONTEXT, temperature=0.7, max_tokens=4000,
+            user_api_key=self._current_user_api_key,
+        )
+
+        if response.get("filtered"):
+            return self._create_filtered_result(response.get("response", ""))
+
+        parsed = parse_json_from_llm_response(response.get("response", ""))
+        if not parsed:
+            return self._create_parse_error_result(response.get("response", ""))
+
+        return {
+            **parsed,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "version": "1.0",
+        }
+```
+
+## Follow-up Stages
+`after_application` | `after_phone_screen` | `after_interview` | `after_final_round` | `no_response` | `after_rejection` | `after_offer`
+
+## Caching
+Results cached in Redis for **1 hour** (keyed by hash of input payload, not by user). No database persistence — results are session-only. This is intentional; career tools are one-off action-oriented outputs.
+
+## Testing
+```bash
+pytest tests/test_api/test_career_tools.py -v
+pytest tests/test_api/test_career_tools.py::TestSalaryCoach -v
+```

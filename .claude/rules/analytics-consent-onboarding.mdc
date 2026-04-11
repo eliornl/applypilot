@@ -1,0 +1,89 @@
+---
+description: PostHog analytics, GDPR cookie consent, and onboarding tour usage
+globs: ui/static/js/analytics.js,ui/static/js/cookie-consent.js,ui/static/js/onboarding.js
+alwaysApply: false
+---
+
+# Analytics, Consent & Onboarding
+
+## PostHog Analytics
+```javascript
+// Track custom events
+Analytics.track('custom_event', { property: 'value' });
+Analytics.trackFeature('api_key_setup', 'clicked');
+
+// User identification (automatic on login)
+Analytics.identify(userId, { email });
+
+// Workflow events (automatic)
+Analytics.trackWorkflowStarted({ inputMethod: 'url' });
+Analytics.trackWorkflowCompleted({ matchScore: 0.85 });
+```
+Analytics only fires if the user has accepted analytics cookies. Events queue until consent is given.
+
+## Cookie Consent
+```javascript
+// Check before storing non-essential data
+CookieConsent.hasConsent();  // true/false — accepts analytics cookies
+
+// Get full preferences
+CookieConsent.getPreferences();
+// { essential: true, functional: false, analytics: false }
+
+// Programmatic consent
+CookieConsent.acceptAll();
+CookieConsent.rejectAll();
+CookieConsent.savePreferences({ functional: true, analytics: true });
+```
+
+Cookie types:
+| Type | Required | Purpose |
+|------|----------|---------|
+| Essential | Always | Auth, session, security tokens |
+| Functional | Optional | User preferences, UI state |
+| Analytics | Optional | PostHog event tracking |
+
+## Onboarding Tour
+```javascript
+Onboarding.start();    // start tour
+Onboarding.reset();    // reset + show again
+Onboarding.skip();     // skip tour
+```
+
+Tour auto-shows on first dashboard visit (stored in `localStorage`).
+
+**Tour steps (conditional):**
+- Welcome *(always)*
+- Install Chrome Extension *(always)* — explains load-unpacked dev flow
+- Set Up Your API Key *(only when `needsApiKey` — server has no key AND no Vertex AI)*
+- Analyze Job Postings *(always)*
+- Career Tools *(always — last step, "Next" becomes "Get Started ✓")*
+
+**`needsApiKey` condition** is evaluated by `checkServerApiKey()` which calls `GET /api/v1/profile/api-key/status` directly via `fetch()` with the user's auth token from `localStorage`. It returns `true` (key available, skip step) when `has_user_key || server_has_key || use_vertex_ai`. The old implementation used `window.app.apiCall()` which is `undefined` on dashboard pages — always use direct `fetch()`.
+
+**CSS lives in `ui/dashboard/index.html`** inside the nonce-gated `<style nonce="...">` block — **never inject `<style>` from `onboarding.js`**. Dynamically created `<style>` elements cannot carry a server-issued nonce and are silently blocked by the CSP `style-src` policy.
+
+## Cookie Consent — CSS Location
+
+All cookie banner and preferences modal CSS lives in **`ui/static/css/app.css`** under the `/* ── Cookie Consent Banner ── */` section.
+
+`cookie-consent.js`'s `_addStyles()` method is intentionally emptied — it returns immediately without injecting anything. The old `document.createElement('style')` approach was blocked by CSP.
+
+**Never re-add dynamic style injection to `cookie-consent.js`.**
+
+CSS class reference for cookie banner:
+- `#cookie-consent-banner` — fixed bottom bar, slides up via `.visible` class
+- `.cookie-consent-content` — flex layout, max-width 1200px
+- `.cookie-btn`, `.cookie-btn-accept`, `.cookie-btn-reject`, `.cookie-btn-secondary` — button variants
+- `#cookie-preferences-modal` — full-screen backdrop modal for cookie categories
+- `.cookie-modal-content`, `.cookie-modal-header`, `.cookie-modal-body`, `.cookie-modal-footer` — modal structure
+- `.cookie-category`, `.cookie-category-name`, `.cookie-required`, `.cookie-category-desc` — preference rows
+
+**"Tour" button in Settings → Privacy** calls `restartOnboarding()` which clears `localStorage` and immediately redirects to `/dashboard` — no intermediate banner. The tour fires automatically on arrival.
+
+## Environment Variables
+```bash
+POSTHOG_API_KEY=phc_xxxxx
+POSTHOG_HOST=https://us.i.posthog.com
+POSTHOG_ENABLED=false   # default; set to true to activate
+```

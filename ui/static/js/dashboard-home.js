@@ -1,0 +1,1214 @@
+(function () {
+    'use strict';
+
+    // =============================================================================
+    // CONSTANTS
+    // =============================================================================
+
+    const API_BASE        = (window.APP_CONFIG && window.APP_CONFIG.apiBase) || '/api/v1';
+    const PER_PAGE        = 10;
+    const SESSION_KEY     = 'dash_filter_state';
+    const FOLLOW_UP_DAYS  = 14;
+
+    const STORAGE_KEYS = {
+        AUTH_TOKEN:        'access_token',
+        AUTH_TOKEN_LEGACY: 'authToken',
+    };
+
+    // =============================================================================
+    // STATE
+    // =============================================================================
+
+    /** @type {Record<string,unknown>[]} */
+    let _loadedApps = [];
+    let _totalCount = 0;
+    let _nextPage   = 1;
+    let _isLoading  = false;
+
+    /** @type {Set<string>} */
+    let _selected = new Set();
+
+    let _search = '';
+    let _status = '';
+    let _days   = '';
+    let _sort   = 'created_desc';
+
+    /** @type {number|null} */
+    let _searchTimer = null;
+
+    let _firstLoad = true;
+
+    /** Apps currently being processed — id → {detailId, jobTitle, companyName} */
+    /** @type {Map<string, {detailId: string, jobTitle: string, companyName: string}>} */
+    let _processingApps = new Map();
+    /** @type {number|null} */
+    let _pollTimer = null;
+    const POLL_INTERVAL_MS = 5000;
+
+    /** User-level WebSocket for real-time workflow events */
+    /** @type {WebSocket|null} */
+    let _ws = null;
+    let _wsReconnectAttempts = 0;
+    const WS_MAX_RECONNECT = 8;
+
+    // =============================================================================
+    // HELPERS — auth / notify / escape
+    // =============================================================================
+
+    /** @param {string|null|undefined} str */
+    function escapeHtml(str) {
+        if (str == null) return '';
+        // Decode server-side HTML entities first (Python's html.escape / bleach double-encode)
+        const decoded = String(str)
+            .replace(/&amp;/g, '&')
+            .replace(/&#x27;/g, "'")
+            .replace(/&#039;/g, "'")
+            .replace(/&quot;/g, '"')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>');
+        return decoded
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    }
+
+    function getAuthToken() {
+        // @ts-ignore
+        if (window.app && typeof window.app.getAuthToken === 'function') return window.app.getAuthToken();
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlToken  = urlParams.get('token') || urlParams.get('access_token');
+        if (urlToken) { setAuthToken(urlToken); return urlToken; }
+        return localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN) || localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN_LEGACY);
+    }
+
+    /** @param {string|null} token */
+    function setAuthToken(token) {
+        if (!token) {
+            localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+            localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN_LEGACY);
+            return;
+        }
+        localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, token);
+        localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN_LEGACY, token);
+        try {
+            window.postMessage({
+                type: 'JAA_AUTH_SUCCESS', token,
+                user: JSON.parse(localStorage.getItem('user') || '{}'),
+                apiUrl: window.location.origin + API_BASE,
+            }, window.location.origin);
+        } catch (e) { /* extension not installed */ }
+    }
+
+    function logout() {
+        // @ts-ignore
+        if (window.app && typeof window.app.logout === 'function') { window.app.logout(); return; }
+        localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+        localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN_LEGACY);
+        window.location.href = (window.APP_CONFIG && window.APP_CONFIG.loginUrl) || '/auth/login';
+    }
+
+    /**
+     * @param {string} message
+     * @param {string} [type]
+     */
+    /**
+     * @param {string} message
+     * @param {string} [type]
+     * @param {boolean} [scrollTop] - scroll to top so the alert is visible
+     */
+    function notify(message, type = 'info', scrollTop = false) {
+        const notifType = type === 'danger' ? 'error' : type;
+        // @ts-ignore
+        const bus = window.eventBus; const busEvents = window.BusEvents;
+        if (bus && busEvents) {
+            /** @type {Record<string,string>} */
+            const evtMap = { success: busEvents.NOTIFY_SUCCESS, error: busEvents.NOTIFY_ERROR, warning: busEvents.NOTIFY_WARNING, info: busEvents.NOTIFY_INFO };
+            bus.emit(evtMap[notifType] ?? busEvents.NOTIFY_INFO, { message });
+        }
+        // @ts-ignore
+        const app = window.app;
+        if (app && typeof app.showNotification === 'function') { app.showNotification(message, notifType); return; }
+        const container = document.getElementById('alertContainer');
+        if (!container) return;
+        const div = document.createElement('div');
+        div.className = `alert alert-${escapeHtml(type)} alert-dismissible fade show`;
+        div.setAttribute('role', 'alert');
+        div.innerHTML = `${escapeHtml(message)}<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>`;
+        container.appendChild(div);
+        if (scrollTop) window.scrollTo({ top: 0, behavior: 'smooth' });
+        // Auto-dismiss success/info/warning after 6 seconds; errors stay until dismissed
+        if (type !== 'danger' && type !== 'error') {
+            setTimeout(() => {
+                div.classList.remove('show');
+                setTimeout(() => div.remove(), 300);
+            }, 6000);
+        }
+    }
+
+    // =============================================================================
+    // HELPERS — dates
+    // =============================================================================
+
+    /** @param {string} dateStr */
+    function relativeTime(dateStr) {
+        const diff = new Date().getTime() - new Date(dateStr).getTime();
+        const days = Math.floor(diff / 86400000);
+        if (days === 0) return 'Today';
+        if (days === 1) return 'Yesterday';
+        if (days < 7)  return `${days} days ago`;
+        if (days < 30) return `${Math.floor(days / 7)} week${Math.floor(days / 7) > 1 ? 's' : ''} ago`;
+        if (days < 365) return `${Math.floor(days / 30)} month${Math.floor(days / 30) > 1 ? 's' : ''} ago`;
+        return `${Math.floor(days / 365)} year${Math.floor(days / 365) > 1 ? 's' : ''} ago`;
+    }
+
+    /** @param {string} dateStr */
+    function fullDate(dateStr) {
+        return new Date(dateStr).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+    }
+
+    /**
+     * Returns true when an application in "applied" status hasn't updated in FOLLOW_UP_DAYS+ days.
+     * @param {Record<string,unknown>} app
+     */
+    function needsFollowUp(app) {
+        if (String(app['status'] ?? '').toLowerCase() !== 'applied') return false;
+        const updated = new Date(/** @type {string} */ (app['updated_at']));
+        return (new Date().getTime() - updated.getTime()) / 86400000 >= FOLLOW_UP_DAYS;
+    }
+
+    // =============================================================================
+    // HELPERS — status
+    // =============================================================================
+
+    /** @param {string} status */
+    function formatStatus(status) {
+        /** @type {Record<string,string>} */
+        const map = {
+            draft: 'Draft', processing: 'Processing', ready: 'Ready',
+            completed: 'Completed', applied: 'Applied', interview: 'Interview',
+            rejected: 'Rejected', accepted: 'Accepted', failed: 'Failed',
+            DRAFT: 'Draft', PROCESSING: 'Processing', READY: 'Ready',
+            COMPLETED: 'Completed', APPLIED: 'Applied', INTERVIEW: 'Interview',
+            REJECTED: 'Rejected', ACCEPTED: 'Accepted', FAILED: 'Failed',
+        };
+        return map[status] ?? status;
+    }
+
+    /**
+     * Read-only AI analysis status badge (always shown top-right).
+     * Shows: Analyzing (blue) → Ready (cyan) → Failed (red).
+     * @param {string} status
+     */
+    function aiStatusBadge(status) {
+        if (status === 'processing') {
+            return `<span class="card-ai-badge ai-processing"><i class="fas fa-spinner fa-spin me-1" aria-hidden="true"></i>Analyzing</span>`;
+        }
+        if (status === 'failed') {
+            return `<span class="card-ai-badge ai-failed"><i class="fas fa-exclamation-circle me-1" aria-hidden="true"></i>Failed</span>`;
+        }
+        if (status === 'draft') {
+            return `<span class="card-ai-badge ai-draft">Draft</span>`;
+        }
+        // analysis complete (completed, applied, interview, accepted, rejected, etc.)
+        return `<span class="card-ai-badge ai-ready"><i class="fas fa-check me-1" aria-hidden="true"></i>Ready</span>`;
+    }
+
+    /**
+     * Tracking stage buttons — shown below the status badge in the right column.
+     * Only rendered once analysis is complete.
+     * @param {string} status
+     * @param {string} appId
+     */
+    function trackingButtonsHtml(status, appId) {
+        const systemStatuses = ['draft', 'processing', 'failed'];
+        if (systemStatuses.includes(status)) return '';
+
+        const safeId = escapeHtml(appId);
+        const buttons = [
+            { v: 'applied',   l: 'Applied',   cls: 'track-applied'   },
+            { v: 'interview', l: 'Interview',  cls: 'track-interview'  },
+            { v: 'accepted',  l: 'Offer',      cls: 'track-accepted'   },
+            { v: 'rejected',  l: 'Rejected',   cls: 'track-rejected'   },
+        ].map(btn => {
+            const active = status === btn.v ? ' track-btn-active' : '';
+            return `<button class="track-btn ${btn.cls}${active}" data-action="set-tracking" data-id="${safeId}" data-value="${btn.v}" aria-pressed="${status === btn.v}">${btn.l}</button>`;
+        }).join('');
+
+        return `<div class="card-tracking-row">${buttons}</div>`;
+    }
+
+    // =============================================================================
+    // SESSION STORAGE — save / restore filter state + scroll
+    // =============================================================================
+
+    function saveFilterState() {
+        try {
+            sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+                search: _search, status: _status, days: _days, sort: _sort,
+                scrollY: window.scrollY,
+            }));
+        } catch (e) { /* storage unavailable */ }
+    }
+
+    /**
+     * Restores filter state from sessionStorage and updates DOM inputs.
+     * @returns {number} saved scrollY (0 if none)
+     */
+    function restoreFilterState() {
+        try {
+            const raw = sessionStorage.getItem(SESSION_KEY);
+            if (!raw) return 0;
+            const state = JSON.parse(raw);
+
+            _search = state.search || '';
+            _status = state.status || '';
+            _days   = state.days   || '';
+            _sort   = state.sort   || 'created_desc';
+
+            const searchEl  = /** @type {HTMLInputElement|null}  */ (document.getElementById('searchInput'));
+            const statusEl  = /** @type {HTMLSelectElement|null} */ (document.getElementById('statusFilter'));
+            const dateEl    = /** @type {HTMLSelectElement|null} */ (document.getElementById('dateFilter'));
+            const sortEl    = /** @type {HTMLSelectElement|null} */ (document.getElementById('sortFilter'));
+
+            if (searchEl) searchEl.value = _search;
+            if (statusEl) statusEl.value = _status;
+            if (dateEl)   dateEl.value   = _days;
+            if (sortEl)   sortEl.value   = _sort;
+
+            return state.scrollY || 0;
+        } catch (e) {
+            return 0;
+        }
+    }
+
+    // =============================================================================
+    // SKELETON / LOADING
+    // =============================================================================
+
+    function skeletonHtml() {
+        return Array.from({ length: 3 }, () => `
+            <div class="skeleton-card" aria-hidden="true">
+                <div class="skeleton-line skeleton-title"></div>
+                <div class="skeleton-line skeleton-subtitle"></div>
+                <div class="skeleton-line skeleton-meta"></div>
+                <div class="skeleton-line skeleton-actions"></div>
+            </div>`).join('');
+    }
+
+    // =============================================================================
+    // RENDER — single application card
+    // =============================================================================
+
+    /** @param {Record<string,unknown>} app */
+    function renderCard(app) {
+        const appId      = String(app['id'] ?? '');
+        const detailId   = String(app['workflow_session_id'] || app['id'] || '');
+        const status     = String(app['status'] ?? '').toLowerCase();
+        const safeAppId  = escapeHtml(appId);
+        const safeDetail = escapeHtml(detailId);
+
+        const createdAt = String(app['created_at'] ?? '');
+        const relTime   = createdAt ? relativeTime(createdAt) : '';
+        const absTime   = createdAt ? fullDate(createdAt) : '';
+
+        const matchScore = app['match_score'] != null
+            ? `<span><i class="fas fa-chart-line me-1" aria-hidden="true"></i>${Math.round(/** @type {number} */ (app['match_score']) * 100)}% match</span>`
+            : '';
+
+        const followUpIcon = needsFollowUp(app)
+            ? `<span class="follow-up-badge" title="No status change in ${FOLLOW_UP_DAYS}+ days — consider following up"><i class="fas fa-clock" aria-hidden="true"></i></span>`
+            : '';
+
+        const isProcessing = status === 'processing';
+        const titleHtml = app['job_title']
+            ? `<h6 class="application-title">${escapeHtml(String(app['job_title']))}</h6>`
+            : isProcessing
+                ? `<div class="skeleton-line skeleton-title" aria-hidden="true"></div>`
+                : `<h6 class="application-title">Job Application</h6>`;
+        const companyHtml = app['company_name']
+            ? `<div class="company-name">${escapeHtml(String(app['company_name']))}</div>`
+            : isProcessing
+                ? `<div class="skeleton-line skeleton-subtitle" aria-hidden="true"></div>`
+                : `<div class="company-name">—</div>`;
+
+        return `
+<div class="application-card border-status-${escapeHtml(status)} cursor-pointer" data-card-id="${safeDetail}" role="listitem">
+    <div class="card-layout">
+        <div class="card-left">
+            ${titleHtml}
+            ${companyHtml}
+            <div class="application-meta">
+                <span title="${escapeHtml(absTime)}"><i class="fas fa-calendar me-1" aria-hidden="true"></i>${escapeHtml(relTime)}</span>
+                ${matchScore}
+            </div>
+        </div>
+        <div class="card-right">
+            <div class="card-right-top">
+                ${followUpIcon}
+                ${aiStatusBadge(status)}
+            </div>
+            <div class="card-right-bottom">
+                ${trackingButtonsHtml(status, appId)}
+                <button class="card-delete-btn" data-action="delete" data-id="${safeAppId}" aria-label="Delete application">
+                    <i class="fas fa-trash-alt" aria-hidden="true"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>`;
+    }
+
+    // =============================================================================
+    // RENDER — list
+    // =============================================================================
+
+    /** @param {boolean} reset — true = replace list, false = append */
+    function renderApplications(reset) {
+        const list = document.getElementById('applicationsList');
+        if (!list) return;
+
+        if (_loadedApps.length === 0) {
+            list.innerHTML = `
+                <div class="empty-state" role="status">
+                    <i class="fas fa-file-alt" aria-hidden="true"></i>
+                    <h5>No applications yet</h5>
+                    <p>Start tracking your job applications by clicking <strong>New Application</strong> above.</p>
+                </div>`;
+            return;
+        }
+
+        const html = _loadedApps.map(renderCard).join('');
+        if (reset) {
+            list.innerHTML = html;
+        } else {
+            list.insertAdjacentHTML('beforeend', html);
+        }
+    }
+
+    // =============================================================================
+    // UI STATE UPDATES
+    // =============================================================================
+
+    function updateResultsCount() {
+        const el = document.getElementById('resultsCount');
+        if (el) el.classList.add('is-hidden');
+    }
+
+    function updateFilterIndicator() { /* no indicator needed */ }
+
+    function updateLoadMoreButton() {
+        const wrapper = document.getElementById('loadMoreWrapper');
+        if (!wrapper) return;
+        const hasMore = _loadedApps.length < _totalCount;
+        wrapper.classList.toggle('is-hidden', !hasMore);
+        const btn = document.getElementById('loadMoreBtn');
+        if (btn) btn.textContent = `Load more (${_totalCount - _loadedApps.length} remaining)`;
+    }
+
+    function updateBulkBar() {
+        const bar    = document.getElementById('bulkActionsBar');
+        const count  = document.getElementById('selectedCount');
+        const selAll = /** @type {HTMLInputElement|null} */ (document.getElementById('selectAllCheckbox'));
+        if (!bar) return;
+
+        const n = _selected.size;
+        bar.classList.toggle('is-hidden', n === 0);
+        if (count) count.textContent = `${n} selected`;
+
+        if (selAll) {
+            const visibleIds = _loadedApps.map(a => String(a['id'] ?? ''));
+            const allVisible = visibleIds.length > 0 && visibleIds.every(id => _selected.has(id));
+            selAll.checked = allVisible;
+            selAll.indeterminate = n > 0 && !allVisible;
+        }
+    }
+
+    // =============================================================================
+    // DATA LOADING
+    // =============================================================================
+
+    /**
+     * @param {boolean} [reset] — true starts from page 1 and replaces the list
+     */
+    async function loadApplications(reset = true) {
+        if (_isLoading) return;
+        _isLoading = true;
+
+        const list = document.getElementById('applicationsList');
+        if (!list) { _isLoading = false; return; }
+
+        if (reset) {
+            _nextPage   = 1;
+            _loadedApps = [];
+            _selected.clear();
+            updateBulkBar();
+            if (_firstLoad) {
+                // skeleton is already in the template HTML; leave it as-is
+            } else {
+                list.classList.add('list-refreshing');
+            }
+        }
+
+        const loadMoreBtn = document.getElementById('loadMoreBtn');
+        if (loadMoreBtn && !reset) {
+            loadMoreBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2" aria-hidden="true"></i>Loading…';
+            loadMoreBtn.setAttribute('disabled', 'disabled');
+        }
+
+        try {
+            const token = getAuthToken();
+            if (!token) {
+                list.innerHTML = `<div class="alert alert-warning"><i class="fas fa-exclamation-triangle me-2" aria-hidden="true"></i>Authentication error. Please <a href="#" id="dashLogoutLink">log out</a> and log in again.</div>`;
+                document.getElementById('dashLogoutLink')?.addEventListener('click', (e) => { e.preventDefault(); logout(); });
+                return;
+            }
+
+            const params = new URLSearchParams({
+                page:     String(_nextPage),
+                per_page: String(PER_PAGE),
+                sort:     _sort,
+            });
+            if (_search) params.set('search', _search);
+            if (_status) params.set('status_filter', _status.toUpperCase());
+            if (_days)   params.set('days', _days);
+
+            const response = await fetch(`${API_BASE}/applications/?${params}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                _totalCount = data.total || 0;
+                _loadedApps = reset
+                    ? (data.applications || [])
+                    : [..._loadedApps, ...(data.applications || [])];
+                _nextPage++;
+
+                renderApplications(reset);
+                syncProcessingApps();
+                if (_firstLoad) _firstLoad = false;
+                updateResultsCount();
+                updateFilterIndicator();
+                updateLoadMoreButton();
+                saveFilterState();
+
+            } else if (response.status === 401) {
+                logout();
+            } else if (response.status === 403) {
+                list.innerHTML = `
+                    <div class="text-center py-5">
+                        <i class="fas fa-user-circle fa-3x text-muted mb-3" aria-hidden="true"></i>
+                        <h5>Profile setup required</h5>
+                        <p class="text-muted">Complete your profile to start tracking job applications.</p>
+                        <a href="/profile/setup" class="btn btn-primary mt-2">Finish Setup</a>
+                    </div>`;
+            } else {
+                const errData = await response.json().catch(() => ({}));
+                notify(errData.message || errData.detail || 'Failed to load applications.', 'error');
+            }
+        } catch (error) {
+            const err = /** @type {Error} */ (error);
+            console.error('Error loading applications:', err);
+            if (list && reset) {
+                list.innerHTML = `<div class="alert alert-danger"><i class="fas fa-exclamation-triangle me-2" aria-hidden="true"></i>Error loading applications. Please try again.</div>`;
+            } else {
+                notify('Error loading more applications. Please try again.', 'error');
+            }
+        } finally {
+            _isLoading = false;
+            if (reset) list.classList.remove('list-refreshing');
+            if (loadMoreBtn && !reset) {
+                loadMoreBtn.removeAttribute('disabled');
+                updateLoadMoreButton();
+            }
+        }
+    }
+
+    // =============================================================================
+    // BACKGROUND PROCESSING POLL
+    // =============================================================================
+
+    /** Scans _loadedApps for any in 'processing' state and registers them for polling. */
+    function syncProcessingApps() {
+        const doneStatuses = ['completed', 'analysis_complete', 'awaiting_confirmation'];
+        for (const app of _loadedApps) {
+            const status = String(app['status'] ?? '').toLowerCase();
+            const sessionId = String(app['workflow_session_id'] || app['id'] || '');
+
+            if (status === 'processing') {
+                const id = String(app['id'] ?? '');
+                if (!_processingApps.has(id)) {
+                    _processingApps.set(id, {
+                        detailId:    sessionId,
+                        jobTitle:    String(app['job_title']    || 'Job Application'),
+                        companyName: String(app['company_name'] || 'Company'),
+                    });
+                }
+            } else if (doneStatuses.includes(status) && sessionId && !_isAnalysisNotified(sessionId)) {
+                // User came back after navigating away — analysis finished without them seeing a notification
+                notifyReady(
+                    String(app['job_title']    || 'Job Application'),
+                    String(app['company_name'] || 'Company'),
+                    sessionId,
+                    false
+                );
+            }
+        }
+        if (_processingApps.size > 0 && _pollTimer === null) {
+            _pollTimer = window.setInterval(pollProcessingApps, POLL_INTERVAL_MS);
+        }
+    }
+
+    /** Polls workflow status for each tracked processing app and fires notifications on completion. */
+    async function pollProcessingApps() {
+        if (_processingApps.size === 0) {
+            if (_pollTimer !== null) { clearInterval(_pollTimer); _pollTimer = null; }
+            return;
+        }
+        const token = getAuthToken();
+        if (!token) return;
+
+        /** @type {{id: string, detailId: string, jobTitle: string, companyName: string, failed: boolean}[]} */
+        const finished = [];
+
+        for (const [id, info] of _processingApps) {
+            try {
+                const res = await fetch(`${API_BASE}/workflow/status/${encodeURIComponent(info.detailId)}`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!res.ok) continue;
+                const data = await res.json();
+                const wfStatus = String(data.status || '').toLowerCase();
+                const done  = ['completed', 'analysis_complete', 'awaiting_confirmation'].includes(wfStatus);
+                const failed = wfStatus === 'failed';
+                if (done || failed) {
+                    finished.push({ id, ...info, failed });
+                    _processingApps.delete(id);
+                }
+            } catch (_e) { /* network hiccup — retry next tick */ }
+        }
+
+        for (const app of finished) {
+            // Skip if the WebSocket handler already fired this notification.
+            if (!_isAnalysisNotified(app.detailId)) {
+                notifyReady(app.jobTitle, app.companyName, app.detailId, app.failed);
+            }
+        }
+
+        if (finished.length > 0) {
+            loadApplications(true);
+            loadStats();
+        }
+
+        if (_processingApps.size === 0 && _pollTimer !== null) {
+            clearInterval(_pollTimer);
+            _pollTimer = null;
+        }
+    }
+
+    /**
+     * Shows a persistent completion toast with a View link.
+     * @param {string} jobTitle
+     * @param {string} companyName
+     * @param {string} detailId
+     * @param {boolean} failed
+     */
+    function notifyReady(jobTitle, companyName, detailId, failed) {
+        // Guard: if already notified (e.g. WS + poll race), bail out immediately.
+        if (detailId && _isAnalysisNotified(detailId)) return;
+
+        const container = document.getElementById('alertContainer');
+        if (!container) return;
+
+        // Mark BEFORE creating the DOM element so any concurrent call that
+        // checks _isAnalysisNotified sees it as already handled.
+        _markAnalysisNotified(detailId);
+
+        // Dismiss any lingering "Application submitted" toast
+        container.querySelectorAll('.alert').forEach(el => {
+            if (el.textContent && el.textContent.includes('analyzing it in the background')) {
+                el.classList.remove('show');
+                setTimeout(() => el.remove(), 200);
+            }
+        });
+
+        const div = document.createElement('div');
+        div.className = `alert alert-${failed ? 'warning' : 'success'} fade show`;
+        div.setAttribute('role', 'alert');
+        div.innerHTML = `
+            <div class="d-flex align-items-center gap-2 w-100">
+                <i class="fas ${failed ? 'fa-exclamation-circle' : 'fa-check-circle'} flex-shrink-0" aria-hidden="true"></i>
+                <div class="flex-grow-1">
+                    <strong>${failed ? 'Analysis failed' : 'Analysis ready!'}</strong>
+                    <div class="notify-ready-sub">${escapeHtml(jobTitle)} at ${escapeHtml(companyName)}</div>
+                </div>
+                ${!failed ? `<a href="/dashboard/application/${encodeURIComponent(detailId)}" class="btn btn-sm btn-primary flex-shrink-0">View Results</a>` : ''}
+                <button type="button" class="btn-close ms-2 flex-shrink-0" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>`;
+        container.appendChild(div);
+    }
+
+    /** @param {string} sessionId */
+    function _markAnalysisNotified(sessionId) {
+        if (!sessionId) return;
+        try {
+            const raw = localStorage.getItem('applypilot_notified_analyses') || '[]';
+            const set = /** @type {string[]} */ (JSON.parse(raw));
+            if (!set.includes(sessionId)) {
+                set.push(sessionId);
+                // Keep only last 50 to avoid unbounded growth
+                if (set.length > 50) set.splice(0, set.length - 50);
+                localStorage.setItem('applypilot_notified_analyses', JSON.stringify(set));
+            }
+        } catch (_e) {}
+    }
+
+    /** @param {string} sessionId */
+    function _isAnalysisNotified(sessionId) {
+        try {
+            const raw = localStorage.getItem('applypilot_notified_analyses') || '[]';
+            return (/** @type {string[]} */ (JSON.parse(raw))).includes(sessionId);
+        } catch (_e) { return false; }
+    }
+
+    // =============================================================================
+    // USER-LEVEL WEBSOCKET
+    // =============================================================================
+
+    function connectUserWs() {
+        const token = getAuthToken();
+        if (!token || typeof WebSocket === 'undefined') return;
+
+        const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        _ws = new WebSocket(
+            `${proto}://${window.location.host}/api/v1/ws/user?token=${encodeURIComponent(token)}`
+        );
+
+        _ws.onopen = () => { _wsReconnectAttempts = 0; };
+
+        _ws.onmessage = (event) => {
+            try { handleUserWsMessage(/** @type {Record<string,any>} */ (JSON.parse(event.data))); }
+            catch (_e) {}
+        };
+
+        _ws.onclose = (event) => {
+            _ws = null;
+            const noRetry = [1000, 1008, 4001];
+            if (noRetry.includes(event.code) || _wsReconnectAttempts >= WS_MAX_RECONNECT) return;
+            const delay = Math.min(1000 * Math.pow(2, _wsReconnectAttempts), 30000);
+            _wsReconnectAttempts++;
+            setTimeout(connectUserWs, delay);
+        };
+
+        _ws.onerror = () => {}; // onclose fires after onerror — handled there
+    }
+
+    /** @param {Record<string,any>} msg */
+    async function handleUserWsMessage(msg) {
+        const type      = String(msg['type'] || '');
+        const sessionId = String(msg['session_id'] || '');
+        if (type !== 'workflow_complete' && type !== 'workflow_error' && type !== 'agent_update') return;
+
+        const appBefore = _loadedApps.find(a => String(a['workflow_session_id'] || a['id']) === sessionId);
+
+        // A new session started (e.g. submitted from the extension in another tab) —
+        // show a submitted toast and refresh the list so the card appears immediately.
+        if (type === 'agent_update' && !appBefore) {
+            notify('Application submitted! AI agents are analyzing it in the background.', 'success', true);
+            loadApplications(true);
+            loadStats();
+            return;
+        }
+
+        if (type !== 'workflow_complete' && type !== 'workflow_error') return;
+
+        // Remove from polling fallback map — WS beat the poll
+        if (appBefore) _processingApps.delete(String(appBefore['id'] ?? ''));
+
+        // Reload to get the AI-extracted title/company for the completion toast.
+        // notifyReady() does its own _markAnalysisNotified internally, so we do NOT
+        // pre-mark here — pre-marking before this await was blocking notifyReady from
+        // ever showing the completion toast.
+        await loadApplications(true);
+        loadStats();
+
+        const appAfter    = _loadedApps.find(a => String(a['workflow_session_id'] || a['id']) === sessionId);
+        const jobTitle    = appAfter ? String(appAfter['job_title']    || 'Job Application') : 'Job Application';
+        const companyName = appAfter ? String(appAfter['company_name'] || 'Company')         : 'Company';
+
+        notifyReady(jobTitle, companyName, sessionId, type === 'workflow_error');
+    }
+
+    // =============================================================================
+    // FILTER HELPERS
+    // =============================================================================
+
+    function applyFilters() {
+        const searchEl  = /** @type {HTMLInputElement|null}  */ (document.getElementById('searchInput'));
+        const statusEl  = /** @type {HTMLSelectElement|null} */ (document.getElementById('statusFilter'));
+        const dateEl    = /** @type {HTMLSelectElement|null} */ (document.getElementById('dateFilter'));
+        const sortEl    = /** @type {HTMLSelectElement|null} */ (document.getElementById('sortFilter'));
+
+        _search = searchEl?.value.trim() ?? '';
+        _status = statusEl?.value ?? '';
+        _days   = dateEl?.value   ?? '';
+        _sort   = sortEl?.value   ?? 'created_desc';
+
+        loadApplications(true);
+    }
+
+    function clearFilters() {
+        _search = ''; _status = ''; _days = ''; _sort = 'created_desc';
+
+        const searchEl = /** @type {HTMLInputElement|null}  */ (document.getElementById('searchInput'));
+        const statusEl = /** @type {HTMLSelectElement|null} */ (document.getElementById('statusFilter'));
+        const dateEl   = /** @type {HTMLSelectElement|null} */ (document.getElementById('dateFilter'));
+        const sortEl   = /** @type {HTMLSelectElement|null} */ (document.getElementById('sortFilter'));
+
+        if (searchEl) searchEl.value = '';
+        if (statusEl) statusEl.value = '';
+        if (dateEl)   dateEl.value   = '';
+        if (sortEl)   sortEl.value   = 'created_desc';
+
+        loadApplications(true);
+    }
+
+    // =============================================================================
+    // SELECTION
+    // =============================================================================
+
+    /** @param {string} id */
+    function toggleSelectApp(id) {
+        if (_selected.has(id)) _selected.delete(id);
+        else                   _selected.add(id);
+        updateBulkBar();
+    }
+
+    function toggleSelectAll() {
+        const selAll = /** @type {HTMLInputElement|null} */ (document.getElementById('selectAllCheckbox'));
+        const visibleIds = _loadedApps.map(a => String(a['id'] ?? ''));
+
+        if (selAll?.checked) {
+            visibleIds.forEach(id => _selected.add(id));
+        } else {
+            visibleIds.forEach(id => _selected.delete(id));
+        }
+
+        // Sync checkboxes in the DOM
+        document.querySelectorAll('.app-checkbox').forEach(cb => {
+            const checkbox = /** @type {HTMLInputElement} */ (cb);
+            checkbox.checked = _selected.has(checkbox.dataset['id'] ?? '');
+        });
+
+        updateBulkBar();
+    }
+
+    // =============================================================================
+    // APPLICATION ACTIONS
+    // =============================================================================
+
+    /** @param {string} id */
+    function viewApplication(id) {
+        const app = _loadedApps.find(a => String(a['workflow_session_id'] || a['id']) === id);
+        if (app && String(app['status'] ?? '').toLowerCase() === 'processing') {
+            notify('Still analyzing — we\'ll notify you here when it\'s ready.', 'info');
+            return;
+        }
+        saveFilterState();
+        window.location.href = `/dashboard/application/${encodeURIComponent(id)}`;
+    }
+
+    /**
+     * @param {string} applicationId
+     * @param {string} newStatus
+     */
+    async function updateApplicationStatus(applicationId, newStatus) {
+        const token = getAuthToken();
+        try {
+            const response = await fetch(`${API_BASE}/applications/${applicationId}/status`, {
+                method: 'PATCH',
+                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_status: newStatus }),
+            });
+            if (response.ok) {
+                // Update in-memory so badge + relative time refresh without a full reload
+                const app = _loadedApps.find(a => String(a['id']) === applicationId);
+                if (app) {
+                    app['status']     = newStatus;
+                    app['updated_at'] = new Date().toISOString();
+                }
+                renderApplications(true);
+                updateResultsCount();
+                updateFilterIndicator();
+                updateLoadMoreButton();
+                loadStats();
+                const trackingStatuses = ['applied', 'interview', 'accepted', 'rejected'];
+                const msg = trackingStatuses.includes(newStatus.toLowerCase())
+                    ? `Marked as ${formatStatus(newStatus)}.`
+                    : 'Stage cleared.';
+                notify(msg, 'success');
+            } else {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.message || errData.detail || 'Failed to update status');
+            }
+        } catch (error) {
+            const err = /** @type {Error} */ (error);
+            console.error('Error updating status:', err);
+            notify(err.message || 'Failed to update status. Please try again.', 'error');
+            // Re-render to reset the dropdown to its previous value
+            renderApplications(true);
+        }
+    }
+
+    /** @param {string} applicationId */
+    async function deleteApplication(applicationId) {
+        const confirmed = await window.showConfirm({
+            title: 'Delete Application',
+            message: 'Are you sure you want to delete this application? This action cannot be undone.',
+            confirmText: 'Delete',
+            type: 'danger',
+        });
+        if (!confirmed) return;
+
+        const token = getAuthToken();
+        try {
+            const response = await fetch(`${API_BASE}/applications/${applicationId}`, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (response.ok) {
+                _loadedApps = _loadedApps.filter(a => String(a['id']) !== applicationId);
+                _totalCount = Math.max(0, _totalCount - 1);
+                _selected.delete(applicationId);
+                renderApplications(true);
+                updateResultsCount();
+                updateFilterIndicator();
+                updateLoadMoreButton();
+                updateBulkBar();
+                loadStats();
+                notify('Application deleted.', 'success');
+            } else {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.message || errData.detail || 'Failed to delete application');
+            }
+        } catch (error) {
+            const err = /** @type {Error} */ (error);
+            console.error('Error deleting application:', err);
+            notify(err.message || 'Failed to delete application. Please try again.', 'error');
+        }
+    }
+
+    async function bulkDelete() {
+        const ids = Array.from(_selected);
+        if (ids.length === 0) return;
+
+        const confirmed = await window.showConfirm({
+            title: 'Delete Applications',
+            message: `Are you sure you want to delete ${ids.length} application${ids.length > 1 ? 's' : ''}? This action cannot be undone.`,
+            confirmText: `Delete ${ids.length}`,
+            type: 'danger',
+        });
+        if (!confirmed) return;
+
+        const token = getAuthToken();
+        const errors = [];
+        await Promise.all(ids.map(async id => {
+            try {
+                const r = await fetch(`${API_BASE}/applications/${id}`, {
+                    method: 'DELETE',
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!r.ok) errors.push(id);
+            } catch (e) { errors.push(id); }
+        }));
+
+        if (errors.length > 0) {
+            notify(`${errors.length} deletion${errors.length > 1 ? 's' : ''} failed. Please try again.`, 'error');
+        } else {
+            notify(`${ids.length} application${ids.length > 1 ? 's' : ''} deleted.`, 'success');
+        }
+
+        _selected.clear();
+        loadApplications(true);
+        loadStats();
+    }
+
+    /** @param {string} applicationId */
+    async function downloadApplication(applicationId) {
+        const token = getAuthToken();
+        try {
+            const urls = [
+                `${API_BASE}/applications/${encodeURIComponent(applicationId)}/download`,
+                `${API_BASE}/${encodeURIComponent(applicationId)}/download`,
+                `/api/applications/${encodeURIComponent(applicationId)}/download`,
+            ];
+            let response = null;
+            for (const url of urls) {
+                try {
+                    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+                    if (r.ok) { response = r; break; }
+                } catch (e) { /* try next */ }
+            }
+            if (!response || !response.ok) throw new Error('Could not connect to download endpoint');
+
+            const blob     = await response.blob();
+            let filename   = 'application-data.txt';
+            const cd       = response.headers.get('Content-Disposition');
+            if (cd) {
+                const m = /filename[^;=\n]*=((['"']).*?\2|[^;\n]*)/i.exec(cd);
+                if (m?.[1]) filename = m[1].replace(/['"]/g, '');
+            }
+            const url  = window.URL.createObjectURL(blob);
+            const a    = document.createElement('a');
+            a.href     = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            notify('Downloaded successfully.', 'success');
+        } catch (error) {
+            const err = /** @type {Error} */ (error);
+            notify(`Download failed: ${err.message || 'Unknown error'}`, 'error');
+        }
+    }
+
+    // =============================================================================
+    // STATS
+    // =============================================================================
+
+    async function loadStats() {
+        const token = getAuthToken();
+        if (!token) return;
+        try {
+            const response = await fetch(`${API_BASE}/applications/stats/overview`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (response.ok) {
+                const stats = await response.json();
+                const set = /** @param {string} id @param {unknown} val */ (id, val) => {
+                    const el = document.getElementById(id);
+                    if (el) el.textContent = String(val ?? 0);
+                };
+                set('totalApplications', stats.total);
+                set('appliedCount',      stats.applied);
+                set('interviewCount',    stats.interviews);
+                const rateEl = document.getElementById('responseRate');
+                if (rateEl) rateEl.textContent = `${stats.response_rate || 0}%`;
+            }
+        } catch (error) {
+            console.error('Error loading stats:', error);
+        }
+    }
+
+    // =============================================================================
+    // AUTH CHECK + USER DATA
+    // =============================================================================
+
+    function checkAuthentication() {
+        // @ts-ignore
+        if (window.app && typeof window.app.isAuthenticated === 'function') {
+            // @ts-ignore
+            if (!window.app.isAuthenticated()) { window.location.href = (window.APP_CONFIG && window.APP_CONFIG.loginUrl) || '/auth/login'; return false; }
+        } else {
+            if (!getAuthToken()) { window.location.href = (window.APP_CONFIG && window.APP_CONFIG.loginUrl) || '/auth/login'; return false; }
+        }
+        // Fast localStorage guard — consistent with other dashboard pages; loadUserData() provides
+        // the authoritative server-side confirmation and handles edge cases like stale localStorage.
+        if (localStorage.getItem('profile_completed') !== 'true') { window.location.href = '/profile/setup'; return false; }
+        return true;
+    }
+
+    async function loadUserData() {
+        const token = getAuthToken();
+        if (!token) { window.location.href = (window.APP_CONFIG && window.APP_CONFIG.loginUrl) || '/auth/login'; return; }
+        try {
+            const response = await fetch(`${API_BASE}/profile/`, { headers: { Authorization: `Bearer ${token}` } });
+            if (response.ok) {
+                const data = await response.json();
+                const fullName   = data.user_info?.full_name || 'User';
+                const userNameEl = document.getElementById('userName');
+                if (userNameEl) userNameEl.textContent = fullName;
+                else {
+                    const welcomeEl = document.getElementById('welcomeMessage');
+                    if (welcomeEl) welcomeEl.textContent = `Welcome back, ${fullName}!`;
+                }
+                const avatarEl = document.getElementById('userAvatar');
+                if (avatarEl) avatarEl.textContent = fullName[0].toUpperCase();
+                if (!data.completion_status?.profile_completed) {
+                    window.location.href = '/profile/setup';
+                }
+            } else if (response.status === 401) {
+                logout();
+            } else if (response.status === 404) {
+                window.location.href = '/profile/setup';
+            }
+        } catch (error) {
+            console.error('Error loading user data:', error);
+        }
+    }
+
+    // =============================================================================
+    // OAUTH EXCHANGE
+    // =============================================================================
+
+    async function exchangeOAuthCodeIfPresent() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const code = urlParams.get('code');
+        if (!code) return;
+
+        urlParams.delete('code');
+        const newSearch = urlParams.toString();
+        history.replaceState(null, '', window.location.pathname + (newSearch ? '?' + newSearch : ''));
+
+        try {
+            const response = await fetch(`${API_BASE}/auth/oauth/exchange-code`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code }),
+            });
+            if (!response.ok) return;
+            const data  = await response.json();
+            const token = /** @type {string|undefined} */ (data.access_token);
+            if (token) setAuthToken(token);
+        } catch (err) {
+            const error = /** @type {Error} */ (err);
+            console.error('OAuth code exchange failed:', error.message);
+        }
+    }
+
+    // =============================================================================
+    // EVENT WIRING
+    // =============================================================================
+
+    document.addEventListener('DOMContentLoaded', async function () {
+        await exchangeOAuthCodeIfPresent();
+        if (!checkAuthentication()) return;
+
+        connectUserWs();
+
+        // Clear the navbar badge dot — user is on the dashboard, toasts appear natively
+        if (typeof window.clearNavBadge === 'function') window.clearNavBadge();
+
+        // Show toast if redirected here after submitting a new application
+        const newAppToast = sessionStorage.getItem('new_application_toast');
+        if (newAppToast) {
+            sessionStorage.removeItem('new_application_toast');
+            notify(newAppToast, 'success', true);
+        }
+
+        // Restore filter state from sessionStorage (browser back navigation)
+        const savedScrollY = restoreFilterState();
+
+        loadUserData();
+        loadStats();
+
+        // Initial load — use restored filters
+        await loadApplications(true);
+
+        // After first render, scroll to saved position
+        if (savedScrollY > 0) {
+            requestAnimationFrame(() => { window.scrollTo(0, savedScrollY); });
+        }
+
+        // ── Filter controls ──────────────────────────────────────────────────────
+        document.getElementById('statusFilter')?.addEventListener('change', applyFilters);
+        document.getElementById('dateFilter')?.addEventListener('change', applyFilters);
+        document.getElementById('sortFilter')?.addEventListener('change', applyFilters);
+
+        // Search — debounced 300 ms
+        document.getElementById('searchInput')?.addEventListener('input', function () {
+            if (_searchTimer !== null) clearTimeout(_searchTimer);
+            _searchTimer = window.setTimeout(applyFilters, 300);
+        });
+
+        // Escape key clears search
+        document.getElementById('searchInput')?.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') {
+                const el = /** @type {HTMLInputElement} */ (e.target);
+                if (el.value !== '') {
+                    el.value = '';
+                    applyFilters();
+                }
+            }
+        });
+
+        // ── Delegated clicks on static elements ──────────────────────────────────
+        document.addEventListener('click', function (e) {
+            const el       = /** @type {HTMLElement} */ (e.target);
+            const actionEl = /** @type {HTMLElement|null} */ (el.closest('[data-action]'));
+            if (!actionEl) return;
+            switch (actionEl.dataset['action']) {
+                case 'clear-filters':  clearFilters();   break;
+                case 'load-more':      loadApplications(false); break;
+                case 'bulk-delete':    bulkDelete();     break;
+                case 'logout':         e.preventDefault(); logout(); break;
+            }
+        });
+
+        // ── Delegated clicks on dynamically rendered cards ────────────────────────
+        const list = document.getElementById('applicationsList');
+        if (list) {
+            list.addEventListener('click', function (e) {
+                const el = /** @type {HTMLElement} */ (e.target);
+
+                // Never navigate when clicking on form controls
+                if (el.closest('input')) {
+                    e.stopPropagation();
+                    return;
+                }
+
+                const actionEl = /** @type {HTMLElement|null} */ (el.closest('[data-action]'));
+                if (actionEl) {
+                    e.stopPropagation();
+                    const id     = actionEl.dataset['id'] ?? '';
+                    const action = actionEl.dataset['action'] ?? '';
+                    if (action === 'delete') deleteApplication(id);
+                    if (action === 'set-tracking') {
+                        const chosen = actionEl.dataset['value'] ?? '';
+                        const existingApp = _loadedApps.find(a => String(a['id']) === id);
+                        const currentStatus = existingApp ? String(existingApp['status'] || '').toLowerCase() : '';
+                        // Clicking the already-active button toggles it off (back to untracked)
+                        updateApplicationStatus(id, currentStatus === chosen ? 'completed' : chosen);
+                    }
+                    return;
+                }
+
+                // Click on card body → navigate
+                const card = /** @type {HTMLElement|null} */ (el.closest('[data-card-id]'));
+                if (card) viewApplication(card.dataset['cardId'] ?? '');
+            });
+
+            // Change events for checkboxes
+            list.addEventListener('change', function (e) {
+                const el     = /** @type {HTMLElement} */ (e.target);
+                const action = el.dataset['action'];
+
+                if (action === 'toggle-select') {
+                    const checkbox = /** @type {HTMLInputElement} */ (el);
+                    if (checkbox.checked) _selected.add(checkbox.dataset['id'] ?? '');
+                    else                  _selected.delete(checkbox.dataset['id'] ?? '');
+                    updateBulkBar();
+                }
+            });
+        }
+
+        // ── Select all checkbox ───────────────────────────────────────────────────
+        document.getElementById('selectAllCheckbox')?.addEventListener('change', toggleSelectAll);
+
+        // ── Navbar logout (app.js not loaded on dashboard pages) ─────────────────
+        // (handled by the document-level click delegation above)
+
+        // ── Clean up WS and poll timer on navigation ─────────────────────────────
+        window.addEventListener('beforeunload', () => {
+            if (_ws) { _ws.onclose = null; _ws.close(1000); _ws = null; }
+            if (_pollTimer !== null) { clearInterval(_pollTimer); _pollTimer = null; }
+        });
+    });
+
+    // =============================================================================
+    // PUBLIC API
+    // =============================================================================
+    // @ts-ignore
+    window.logout = logout;
+
+}());

@@ -1,0 +1,193 @@
+---
+description: Chrome extension (Manifest V3) — structure, dev/prod URL toggle, popup design, extraction strategy, InputMethod.EXTENSION backend integration
+globs: extension/**/*
+alwaysApply: false
+---
+
+# Chrome Extension
+
+## Structure
+```
+extension/
+├── manifest.json          # Manifest V3, version 1.1.0
+├── popup/                 # popup.html, popup.css, popup.js
+├── content/               # content.js (extraction), content.css
+├── background/            # service-worker.js (token refresh every 55 min)
+└── icons/                 # icon16/48/128.png (generated from app logo PNG)
+```
+
+## Dev / Prod URL Toggle
+Both `popup.js` and `service-worker.js` use a single flag to switch between local dev and production. **Never hardcode `PRODUCTION_URL` as the active URL.**
+
+```javascript
+// ⚠️  BEFORE PUBLISHING: Set IS_DEV = false and fill in PRODUCTION_URL.
+const IS_DEV = true;
+const DEV_URL = 'http://localhost:8000';
+const PRODUCTION_URL = 'https://your-applypilot-instance.com';
+const BASE_URL = IS_DEV ? DEV_URL : PRODUCTION_URL;
+
+const CONFIG = {
+  API_BASE_URL: `${BASE_URL}/api/v1`,
+  DASHBOARD_URL: `${BASE_URL}/dashboard`,
+  APP_URL: BASE_URL,
+  // ...
+};
+```
+
+The URL can also be overridden at runtime via `chrome.storage.local` key `jaa_api_url` (useful during development):
+```javascript
+chrome.storage.local.set({ jaa_api_url: 'http://localhost:8000/api/v1' })
+```
+
+## Manifest (current)
+- **version**: `1.1.0`
+- **description**: "Extract any job posting and get AI-powered analysis, resume tips, cover letters, and interview prep on ApplyPilot."
+- **short_name**: `ApplyPilot`
+- **default_title**: `ApplyPilot — AI Job Application Assistant`
+- `http://localhost:8000/*` is in `host_permissions` (required, not optional) so Chrome grants access automatically in dev
+
+## Icons
+Icons (`icon16.png`, `icon48.png`, `icon128.png`) are generated from the app's logo PNG using Pillow:
+```bash
+cd /path/to/project && source venv/bin/activate
+python3 -c "
+from PIL import Image
+src = 'path/to/logo.png'
+img = Image.open(src).convert('RGBA')
+for size in [16, 48, 128]:
+    img.resize((size, size), Image.LANCZOS).save(f'extension/icons/icon{size}.png')
+"
+```
+
+## Popup Design
+The popup (`popup.html` / `popup.css`) mirrors the main app's design system exactly:
+- **Same CSS variables**: `--accent-gradient`, `--bg-primary/secondary/tertiary`, `--text-*`, `--border-color`, etc.
+- **Same font**: `Outfit` from Google Fonts
+- **Font Awesome 6** loaded from CDN (`cdnjs.cloudflare.com`) for all icons — no emoji
+- **Header logo**: gradient rounded square (`logo-icon` div with `fas fa-rocket`) + "Apply**Pilot**" (Pilot in `var(--accent-primary)`)
+- **No rounded outer corners** — Chrome's native popup window clips them; do not add `border-radius` to `html`/`body`/`.popup-container`
+
+### Popup sections (authenticated view)
+1. Header: gradient top bar + logo + status dot
+2. **Inline notification bar** (`#popupNotification`) — hidden by default, slides in below the header on sign-in/sign-out/copy events
+3. User card: gradient avatar with initials, name, email
+4. Job detection row: briefcase icon + "Job detected on **{domain}**"
+5. "Analyze This Job" gradient button (full width, bolt icon)
+6. Hint text: "Extracts page content and sends it to AI for analysis"
+7. Quick links grid (4 cols): Dashboard / Settings / Help / Logout
+8. Footer: `v1.1.0`
+
+### Inline notification bar — `#popupNotification`
+
+Replaces the old `position: fixed` floating toast. The bar is always inside the popup frame and is never clipped by popup height changes during view transitions.
+
+```html
+<!-- popup.html — inserted immediately after </header> -->
+<div id="popupNotification" class="popup-notification hidden" role="alert" aria-live="polite"></div>
+```
+
+```css
+/* popup.css */
+.popup-notification {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px;
+  max-height: 48px; overflow: hidden;
+  transition: max-height 0.25s ease, opacity 0.25s ease, padding 0.25s ease;
+}
+.popup-notification.hidden { max-height: 0; padding-top: 0; padding-bottom: 0; opacity: 0; }
+.popup-notification.success { background: rgba(16,185,129,.18); border-bottom: 1px solid rgba(16,185,129,.35); color: #34d399; }
+.popup-notification.error   { background: rgba(239,68,68,.18);  border-bottom: 1px solid rgba(239,68,68,.35);  color: #f87171; }
+.popup-notification.info    { background: rgba(59,130,246,.18);  border-bottom: 1px solid rgba(59,130,246,.35);  color: #60a5fa; }
+```
+
+```javascript
+// popup.js — showToast() targets the bar, not document.body
+let _notifTimer = null;
+function showToast(message, type = 'info') {
+  const bar = document.getElementById('popupNotification');
+  if (!bar) return;
+  const icons = { success: 'fa-circle-check', error: 'fa-circle-xmark', info: 'fa-circle-info' };
+  if (_notifTimer) { clearTimeout(_notifTimer); _notifTimer = null; }
+  bar.className = `popup-notification ${type}`;
+  bar.innerHTML = `<i class="fas ${icons[type] ?? icons.info} notif-icon"></i><span>${message}</span>`;
+  _notifTimer = setTimeout(() => { bar.classList.add('hidden'); _notifTimer = null; }, 3000);
+}
+```
+
+**Never revert to `position: fixed` toast appended to `document.body`** — it disappears when the popup changes height during view transitions.
+
+## Content Extraction Priority
+```javascript
+const contentSelectors = [
+    'article.jobs-description__container',  // LinkedIn
+    '.jobs-description__content',
+    '#jobDescriptionText',                  // Indeed
+    '[class*="job-description"]',           // generic
+    '[data-test*="description"]',
+    'main article',
+    'main',                                 // fallback
+];
+```
+
+## Submitting to Backend
+
+The extension POSTs `FormData` with only `job_text` — never `detected_title` or `detected_company`:
+
+```javascript
+const formData = new FormData();
+formData.append('job_text', extractedText);
+// Do NOT send detected_title / detected_company — page titles are unreliable
+// (e.g. "(5) LinkedIn"). The dashboard shows skeleton shimmers while the
+// Job Analyzer extracts the correct title and company from the job text.
+
+const response = await fetch(`${CONFIG.API_BASE_URL}/workflow/start`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${state.token}` },
+    body: formData
+});
+```
+
+### Backend: `detected_title` / `detected_company` Form params
+
+`POST /api/v1/workflow/start` accepts two optional `Form` fields (retained for non-extension paths):
+
+```python
+detected_title_form:   Optional[str] = Form(None, alias="detected_title")
+detected_company_form: Optional[str] = Form(None, alias="detected_company")
+```
+
+When omitted (the extension path), `job_title` and `company_name` are `null` at creation. The dashboard card shows skeleton shimmers (`status === 'processing'`, no title/company). The Job Analyzer agent populates both fields with AI-extracted values ~4 s into the workflow.
+
+## Backend: InputMethod.EXTENSION
+```python
+# workflows/state_schema.py
+class InputMethod(str, Enum):
+    EXTENSION = "extension"  # from Chrome extension
+
+# api/workflow.py
+if source == "extension":
+    input_method = InputMethod.EXTENSION.value
+```
+
+## Auth Endpoint for Extension
+`GET /api/v1/auth/extension-status` — returns `{ "authenticated": bool, "user": {...} }`
+
+## Landing Page Mockup
+`ui/index.html` section `#extension` contains a `.popup-mockup` div that visually replicates the real popup UI for the landing page. CSS lives in `landing.css` under `/* ── Popup mockup ── */`. Keep it in sync with popup design changes.
+
+## Non-Negotiables
+
+1. **Never reference a popup DOM element without a null check** — elements may be absent if the HTML evolves. Example: `if (elements.copyBtn) elements.copyBtn.disabled = true;`. A missing element that is accessed unconditionally in `showExtracting()` or a similar setup function will throw a `TypeError` that silently aborts the entire extraction flow before the `try/catch` block is reached.
+2. **Never send `detected_title` or `detected_company` from the extension** — browser page titles are unreliable (e.g. `"(5) LinkedIn"`, `"Careers | Company"`). Send only `job_text`; the dashboard shows skeleton shimmers while the Job Analyzer extracts the correct title and company.
+3. **Never revert to `position: fixed` toast in the popup** — use the `#popupNotification` inline bar; see above.
+
+## Development Setup
+```bash
+# Chrome: chrome://extensions → Developer mode → Load unpacked → select extension/
+# After any code change: click the ↺ refresh icon on the extension card
+```
+
+## Debugging
+- Popup: right-click icon → "Inspect popup"
+- Service worker: click "service worker" on extension card
+- Content script: page DevTools console (filter by extension ID)

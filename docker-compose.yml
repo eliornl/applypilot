@@ -1,0 +1,86 @@
+# =============================================================================
+# LOCAL SELF-HOSTED DEPLOYMENT
+# =============================================================================
+# Runs ApplyPilot on your own computer — no GCP account needed.
+#
+# Quick start:
+#   1. make start                       (auto-generates .env with secrets, then runs compose)
+#   2. Open http://localhost:8000
+#   3. Add your Gemini API key in Settings → AI Setup
+#
+# The DATABASE_URL and REDIS_URL in your .env are automatically overridden
+# to point at the postgres and redis containers below.
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — application database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: applypilot
+      POSTGRES_PASSWORD: applypilot
+      POSTGRES_DB: applypilot
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U applypilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # Redis — caching, rate limiting, JWT revocation, auth tokens
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # ApplyPilot app
+  # ---------------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    # Load everything from your .env file, then override the service URLs so
+    # they resolve inside the Docker network (not localhost).
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://applypilot:applypilot@postgres:5432/applypilot
+      REDIS_URL: redis://redis:6379/0
+      BASE_URL: http://localhost:8000
+      ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0"
+      CORS_ORIGINS: "http://localhost:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # Persist logs, uploads, and generated files outside the container
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+      - ./generated:/app/generated
+
+volumes:
+  postgres_data:
+  redis_data:

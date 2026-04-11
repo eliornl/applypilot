@@ -1,0 +1,160 @@
+---
+description: Google OAuth configuration, secure auth flow, CSRF state, exchange-code pattern
+globs: api/auth.py,config/settings.py
+alwaysApply: false
+---
+
+# Google OAuth Integration
+
+## Configuration
+OAuth is **opt-in** — it activates only when both env vars are set:
+
+```bash
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-client-secret
+```
+
+Check at runtime:
+```python
+settings.is_google_oauth_configured  # bool property
+```
+
+## OAuth Flow (3-step — never puts the JWT in a URL)
+
+| Step | Endpoint | Who calls it |
+|------|----------|-------------|
+| 1. Initiate | `GET /api/v1/auth/google` | Browser |
+| 2. Callback | `GET /api/v1/auth/google/callback` | Google redirect |
+| 3. Exchange | `POST /api/v1/auth/oauth/exchange-code` | Frontend JS |
+
+### Step 1 — Initiate
+- Validates `redirect_url` is a **relative path only** (starts with `/`, not `//`).
+- Generates a `secrets.token_urlsafe(32)` CSRF state token.
+- Stores `{"redirect": safe_redirect}` in Redis under `oauth_state:{state}` with **10-minute TTL**.
+- Rejects the request (503) if Redis is unavailable — never sends OAuth traffic without a verifiable state.
+
+### Step 2 — Callback
+- Atomically reads **and** deletes `oauth_state:{state}` with a single Redis `GETDEL` call (requires Redis ≥ 6.2). If the key is absent or expired, redirects to `/auth/login?error=invalid_state` — **never proceeds**.
+  - **Do not split this into `GET` + `DELETE`** — a race condition would let two concurrent callbacks both pass validation with the same state code.
+- Re-validates the `redirect` path from Redis (relative-only check).
+- Exchanges the Google code via `httpx.AsyncClient(timeout=httpx.Timeout(10.0))`. Both the token exchange and user-info fetch must specify a timeout — without one the worker hangs indefinitely if Google is slow.
+- Creates or updates the `User` record (new user → create; returning user → update).
+- Issues a `_make_jwt(...)` for the user.
+- Stores the JWT in Redis under `oauth_code:{exchange_code}` with **30-second TTL**.
+- Redirects to `{redirect_path}?code={exchange_code}` — **the JWT never appears in a URL**.
+
+### Step 3 — Exchange
+```python
+# Frontend calls this immediately after the OAuth redirect lands
+POST /api/v1/auth/oauth/exchange-code
+{"code": "<exchange_code_from_url>"}
+
+# Response
+{"access_token": "<jwt>", "token_type": "bearer"}
+```
+The exchange code is deleted from Redis on first use (one-time only).
+If the code is missing or expired the endpoint returns HTTP 400.
+
+### Frontend — `exchangeOAuthCodeIfPresent()` (required on every OAuth landing page)
+
+Every page that can receive an OAuth redirect (`/profile/setup`, `/dashboard`) **must** call `exchangeOAuthCodeIfPresent()` as the very first thing in `DOMContentLoaded` — before any auth check. Without this, `checkAuthentication()` fires first, finds no JWT in localStorage (it hasn't been exchanged yet), and immediately redirects to `/auth/login`.
+
+```javascript
+async function exchangeOAuthCodeIfPresent() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+    if (!code) return false;
+    // Remove ?code= from the URL immediately so a refresh doesn't replay it.
+    urlParams.delete('code');
+    history.replaceState(null, '', window.location.pathname + (urlParams.toString() ? '?' + urlParams.toString() : ''));
+    try {
+        const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.apiBase) || '/api/v1';
+        const response = await fetch(`${API_BASE}/auth/oauth/exchange-code`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code }),
+        });
+        if (!response.ok) return false;
+        const data = await response.json();
+        const token = data.access_token;
+        if (!token) return false;
+        setAuthToken(token); // stores in localStorage under both 'access_token' and 'authToken'
+        return true;
+    } catch (err) {
+        console.error('OAuth code exchange failed:', err.message);
+        return false;
+    }
+}
+
+// DOMContentLoaded must be async — await the exchange BEFORE the auth check
+document.addEventListener('DOMContentLoaded', async function () {
+    await exchangeOAuthCodeIfPresent();
+    checkAuthentication(); // now safe — token is in localStorage if OAuth flow
+});
+```
+
+### New Google OAuth Users — Welcome Email
+
+When a new user is created via the Google OAuth callback (first-time "Continue with Google"), `send_welcome_email` is called immediately after the user record is committed — no verification step is needed since Google has already verified the email. Returning Google users (already have `google_id`) do **not** get another welcome email.
+
+```python
+# In api/auth.py — Google OAuth callback, new user branch only
+try:
+    _email_service = get_email_service()
+    if _email_service.is_configured():
+        await _email_service.send_welcome_email(to_email=email, user_name=full_name)
+except Exception as _welcome_err:
+    logger.warning(f"Failed to send welcome email for Google user: {_welcome_err}")
+```
+
+### Google OAuth Button Text
+
+Both login and register pages use **"Continue with Google"** — not "Sign in with Google" or "Sign up with Google". The backend handles both new and returning users through the same callback, so there is no need for separate buttons. A first-time "Continue with Google" automatically creates an account.
+
+## CSRF State — What Never To Do
+- **Never** embed the redirect URL in the state string itself.  
+  ❌ `state = f"{token}|{redirect_url}"`  
+  ✅ Store redirect in Redis, send only the opaque token as state.
+- **Never** skip the Redis lookup and just trust whatever state Google sends back.
+- **Never** use `GET` then `DELETE` separately — always `GETDEL` atomically.
+
+## Open Redirect — What Never To Do
+- **Never** use a user-supplied redirect URL without validation.
+- Allowed: any string that starts with `/` and does **not** start with `//`.
+- Blocked: absolute URLs (`https://evil.com`), protocol-relative URLs (`//evil.com`).
+
+## User Data Stored from Google OAuth
+
+Only three fields are stored on the `User` record from a Google sign-in:
+
+| Field | Source |
+|---|---|
+| `email` | `userinfo.email` |
+| `full_name` | `userinfo.name` |
+| `google_id` | `userinfo.id` |
+
+**Profile picture is NOT stored.** Google's userinfo endpoint also returns `picture` but the callback does not read or persist it. Never reference `user.profile_picture`, `user.avatar`, or any similar field — it does not exist on the `User` model. If a profile picture UI is ever added, it must be fetched from Google at display time or stored separately.
+
+## Database Field
+```python
+# User model — google_id is unique and indexed
+google_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, unique=True, index=True)
+auth_method: Mapped[str] = mapped_column(String(50), default=AuthMethod.LOCAL.value)
+```
+
+## Mixed Auth
+`password_hash` is `nullable` to support OAuth-only accounts (no password set).
+
+## Frontend Availability Check
+Before showing the "Sign in with Google" button, call:
+```
+GET /api/v1/auth/oauth/status
+```
+Response includes `google_oauth_enabled: bool`.
+
+## Security Summary
+- CSRF state is stored in Redis and verified + consumed in the callback (not just compared in-process).
+- JWT is never placed in a redirect URL — only a short-lived one-time code is.
+- Redirect destination is validated as a relative path in both initiation and callback.
+- Error details from Google or internal exceptions are never forwarded to the browser via redirect params.
+- `client_secret` is never exposed to the frontend.

@@ -1,0 +1,1364 @@
+{% extends "base.html" %}
+{% block title %}Profile Setup - {{ app_name or "ApplyPilot" }}{% endblock %}
+{% block description %}Your AI-Powered Job Search Companion{% endblock %}
+{% block extra_head %}
+<meta charset="UTF-8" />
+
+        <meta
+            name="description"
+            content="Complete your profile setup to get started"
+        />
+
+        <!-- Profile Setup Specific Styles -->
+        <style nonce="{{ request.state.csp_nonce | default('') }}">
+            /* Override body to ensure dark theme */
+            body {
+                background: var(--bg-primary);
+                min-height: 100vh;
+                font-family: var(--font-primary);
+            }
+
+            /* Navbar styling */
+            .navbar {
+                background: var(--bg-card) !important;
+                border-bottom: 1px solid var(--border-color);
+                padding: 1rem 0;
+            }
+
+            .navbar .nav-link {
+                color: var(--text-secondary) !important;
+                transition: var(--transition-base);
+            }
+
+            .navbar .nav-link:hover {
+                color: var(--accent-primary) !important;
+            }
+
+            /* Setup container */
+            .setup-container {
+                max-width: 1200px;
+                margin: 2rem auto;
+                padding: 0 1rem;
+            }
+
+            .setup-card {
+                background: var(--bg-card);
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-xl);
+                overflow: hidden;
+            }
+
+            .setup-header {
+                background: var(--accent-gradient);
+                color: white;
+                padding: 2rem;
+                text-align: center;
+            }
+
+            .setup-header h1 {
+                margin: 0;
+                font-weight: 700;
+                font-size: 1.75rem;
+            }
+
+            .setup-header p {
+                margin: 0.5rem 0 0 0;
+                opacity: 0.9;
+            }
+
+            /* Progress bar */
+            .progress-container {
+                padding: 2rem 2rem 1rem 2rem;
+                background: var(--bg-tertiary);
+            }
+
+            .progress {
+                height: 8px;
+                border-radius: var(--radius-full);
+                background-color: var(--bg-secondary);
+            }
+
+            .progress-bar {
+                background: var(--accent-gradient);
+                border-radius: var(--radius-full);
+                transition: width 0.5s ease;
+            }
+
+            /* Step indicators */
+            .step-indicators {
+                display: flex;
+                justify-content: space-between;
+                margin-top: 1rem;
+                padding: 0 0.5rem;
+            }
+
+            .step-indicator {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                font-size: 0.8rem;
+                color: var(--text-muted);
+                transition: color var(--transition-base);
+            }
+
+            .step-indicator.active {
+                color: var(--accent-primary);
+                font-weight: 600;
+            }
+
+            .step-indicator.completed {
+                color: var(--success);
+            }
+
+            .step-number {
+                width: 28px;
+                height: 28px;
+                border-radius: 50%;
+                background: var(--bg-secondary);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 0.75rem;
+                font-weight: 600;
+                margin-bottom: 0.5rem;
+                transition: all var(--transition-base);
+                border: 2px solid var(--border-color);
+            }
+
+            .step-indicator.active .step-number {
+                background: var(--accent-gradient);
+                color: white;
+                border-color: transparent;
+            }
+
+            .step-indicator.completed .step-number {
+                background: var(--success);
+                color: white;
+                border-color: transparent;
+            }
+
+            /* Step content */
+            .step-content {
+                padding: 2rem;
+                min-height: 400px;
+            }
+
+            .step-content h3 {
+                color: var(--text-primary);
+                font-weight: 700;
+            }
+
+            .step-form {
+                display: none;
+            }
+
+            .step-form.active {
+                display: block;
+            }
+
+            /* Form sections */
+            .form-section {
+                margin-bottom: 2rem;
+            }
+
+            .form-section h4,
+            .form-section h5 {
+                color: var(--text-primary);
+                margin-bottom: 1rem;
+                font-weight: 600;
+            }
+
+            .form-section p.text-muted {
+                color: var(--text-muted) !important;
+            }
+
+            /* Form controls */
+            .form-floating {
+                margin-bottom: 1rem;
+                position: relative;
+            }
+
+            .form-control {
+                background: var(--bg-secondary);
+                border: 2px solid var(--border-color);
+                border-radius: var(--radius-md);
+                color: var(--text-primary);
+                transition: all var(--transition-base);
+            }
+
+            .form-control:focus {
+                border-color: var(--accent-primary);
+                box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.15);
+                background: var(--bg-secondary);
+                color: var(--text-primary);
+            }
+
+            .form-floating > .form-control,
+            .form-floating > .form-select,
+            .form-floating > textarea {
+                background-color: var(--bg-secondary) !important;
+                border: 2px solid var(--border-color) !important;
+                border-radius: var(--radius-md);
+                color: var(--text-primary);
+                height: calc(3.5rem + 4px);
+                padding: 1.5rem 0.75rem 0.5rem 0.75rem;
+            }
+
+            .form-floating > textarea {
+                height: auto;
+                min-height: 120px;
+            }
+
+            .form-floating > .form-control:focus,
+            .form-floating > .form-select:focus,
+            .form-floating > textarea:focus {
+                background-color: var(--bg-secondary) !important;
+                border-color: var(--accent-primary) !important;
+                box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.15);
+            }
+
+            /* Floating label — default (inside input) state */
+            .form-floating > label {
+                color: var(--text-muted);
+                padding: 1rem 0.75rem;
+                background: transparent !important;
+                background-color: transparent !important;
+                border: none !important;
+                transition: all 0.2s ease;
+                transform-origin: left top;
+            }
+
+            /* Kill Bootstrap pseudo-elements */
+            .form-floating > label::before,
+            .form-floating > label::after,
+            .form-floating::before,
+            .form-floating::after {
+                display: none !important;
+                content: none !important;
+                background: transparent !important;
+            }
+
+            /* Floating label — floated state (filled or focused) */
+            .form-floating > .form-control:focus ~ label,
+            .form-floating > .form-control:not(:placeholder-shown) ~ label,
+            .form-floating > .form-select ~ label,
+            .form-floating > textarea:focus ~ label,
+            .form-floating > textarea:not(:placeholder-shown) ~ label {
+                color: var(--accent-primary) !important;
+                background: transparent !important;
+                background-color: transparent !important;
+                padding: 0.25rem 0.5rem;
+                margin-left: 0.25rem;
+                transform: scale(0.85) translateY(-0.1rem);
+                opacity: 1;
+                font-size: 0.9rem;
+            }
+
+            /* Override browser autofill background */
+            .form-control:-webkit-autofill,
+            .form-control:-webkit-autofill:hover,
+            .form-control:-webkit-autofill:focus,
+            .form-control:-webkit-autofill:active {
+                -webkit-box-shadow: 0 0 0 30px #0a0a0f inset !important;
+                -webkit-text-fill-color: #e8e6e3 !important;
+                caret-color: #e8e6e3 !important;
+            }
+
+            .form-control::placeholder {
+                color: transparent;
+            }
+
+            .form-label {
+                color: var(--text-primary);
+                font-weight: 500;
+            }
+
+            .form-text {
+                color: var(--text-muted) !important;
+            }
+
+            /* Checkboxes and radios */
+            .form-check-input {
+                background-color: var(--bg-tertiary);
+                border: 1px solid var(--border-color);
+            }
+
+            .form-check-input:checked {
+                background-color: var(--accent-primary);
+                border-color: var(--accent-primary);
+            }
+
+            .form-check-input:focus {
+                box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.15);
+                border-color: var(--accent-primary);
+            }
+
+            .form-check-label {
+                color: var(--text-secondary);
+            }
+
+            /* Buttons */
+            .btn-primary {
+                background: var(--accent-gradient);
+                border: none;
+                border-radius: var(--radius-md);
+                padding: 0.75rem 2rem;
+                font-weight: 600;
+                transition: all var(--transition-base);
+                color: white;
+            }
+
+            .btn-primary:hover {
+                transform: translateY(-2px);
+                box-shadow: var(--glow-accent);
+                color: white;
+            }
+
+            .btn-outline-secondary {
+                border: 2px solid var(--border-color);
+                border-radius: var(--radius-md);
+                padding: 0.75rem 2rem;
+                font-weight: 600;
+                transition: all var(--transition-base);
+                color: var(--text-secondary);
+                background: transparent;
+            }
+
+            .btn-outline-secondary:hover {
+                border-color: var(--border-accent);
+                color: var(--text-primary);
+                background: var(--bg-tertiary);
+            }
+
+            .btn-navigation {
+                display: flex;
+                justify-content: space-between;
+                margin-top: 2rem;
+                padding-top: 2rem;
+                border-top: 1px solid var(--border-color);
+            }
+
+            /* Experience items */
+            .experience-item {
+                border: 2px solid var(--border-color);
+                border-radius: var(--radius-lg);
+                padding: 1.5rem;
+                margin-bottom: 1rem;
+                background: var(--bg-secondary);
+                transition: border-color var(--transition-base);
+            }
+
+            .experience-item:hover {
+                border-color: var(--border-accent);
+            }
+
+            .experience-header {
+                display: none;
+            }
+
+            .remove-experience {
+                color: var(--danger);
+                background: none;
+                border: none;
+                font-size: 1.2rem;
+                cursor: pointer;
+                transition: var(--transition-base);
+            }
+
+            .remove-experience:hover {
+                color: #ff6b6b;
+            }
+
+            /* Add experience button */
+            .add-experience {
+                background: var(--bg-secondary);
+                border: 2px dashed var(--border-color);
+                border-radius: var(--radius-lg);
+                padding: 2rem;
+                text-align: center;
+                cursor: pointer;
+                transition: all var(--transition-base);
+            }
+
+            .add-experience:hover {
+                border-color: var(--accent-primary);
+                background: rgba(0, 212, 255, 0.05);
+            }
+
+            .add-experience .text-muted {
+                color: var(--text-muted) !important;
+            }
+
+            /* Skills container */
+            .skills-container {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.5rem;
+                margin-top: 1rem;
+            }
+
+            .skill-tag {
+                background: rgba(0, 212, 255, 0.1);
+                border: 1px solid rgba(0, 212, 255, 0.2);
+                border-radius: var(--radius-full);
+                padding: 0.4rem 1rem;
+                font-size: 0.875rem;
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                color: var(--accent-primary);
+            }
+
+            .skill-remove {
+                background: none;
+                border: none;
+                color: var(--text-muted);
+                cursor: pointer;
+                font-size: 0.8rem;
+                transition: var(--transition-base);
+            }
+
+            .skill-remove:hover {
+                color: var(--danger);
+            }
+
+            /* Alerts */
+            .alert {
+                border-radius: var(--radius-md);
+                border: none;
+            }
+
+            .alert-danger {
+                background: rgba(239, 68, 68, 0.1);
+                color: var(--danger);
+            }
+
+            .alert-success {
+                background: rgba(16, 185, 129, 0.1);
+                color: var(--success);
+            }
+
+            /* API key prompt — slides in below the drop zone when user tries to upload */
+            @keyframes api-key-slide-in {
+                from { opacity: 0; transform: translateY(8px); }
+                to   { opacity: 1; transform: translateY(0); }
+            }
+
+            .api-key-prompt {
+                display: flex;
+                flex-direction: column;
+                gap: 0.75rem;
+                margin-top: 1rem;
+                padding: 1rem 1.25rem;
+                background: var(--bg-card);
+                border: 1px solid var(--border-color);
+                border-top: 3px solid var(--accent-primary);
+                border-radius: var(--radius-lg);
+                animation: api-key-slide-in 0.2s ease;
+            }
+            .api-key-prompt.is-hidden { display: none; }
+
+            .api-key-prompt-header {
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+            }
+            .api-key-prompt-icon {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 32px;
+                height: 32px;
+                border-radius: var(--radius-md);
+                background: rgba(0, 212, 255, 0.1);
+                color: var(--accent-primary);
+                flex-shrink: 0;
+                font-size: 0.85rem;
+            }
+            .api-key-prompt-title {
+                font-size: 0.9rem;
+                font-weight: 600;
+                color: var(--text-primary);
+                margin: 0;
+                line-height: 1.3;
+            }
+            .api-key-prompt-subtitle {
+                font-size: 0.8rem;
+                color: var(--text-muted);
+                margin: 0;
+                line-height: 1.5;
+            }
+            .api-key-prompt-subtitle a {
+                color: var(--accent-primary);
+                text-decoration: none;
+            }
+            .api-key-prompt-subtitle a:hover {
+                text-decoration: underline;
+            }
+
+            .api-key-input-row {
+                display: flex;
+                gap: 0.5rem;
+            }
+            .api-key-input-row.is-hidden { display: none; }
+            .api-key-input-row .form-control {
+                flex: 1;
+                font-family: var(--font-mono);
+                font-size: 0.85rem;
+                letter-spacing: 0.02em;
+                /* Visible border so the field is clearly interactive on the dark bg */
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-md);
+            }
+            .api-key-input-row .form-control:focus {
+                border-color: var(--accent-primary);
+                box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.15);
+                outline: none;
+            }
+
+            .api-key-prompt-success {
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                font-size: 0.85rem;
+                font-weight: 500;
+                color: var(--success);
+            }
+            .api-key-prompt-success.is-hidden { display: none; }
+
+            .api-key-prompt-error {
+                font-size: 0.8rem;
+                color: var(--danger);
+                margin: 0;
+            }
+            .api-key-prompt-error.is-hidden { display: none; }
+
+            /* Resume upload area — drop zone sits directly in the flow, no wrapper card */
+
+            .file-upload-area {
+                border: 2px dashed var(--border-color);
+                border-radius: var(--radius-lg);
+                padding: 2rem;
+                text-align: center;
+                cursor: pointer;
+                transition: all var(--transition-base);
+                background: var(--bg-tertiary);
+            }
+
+            .file-upload-area:hover {
+                border-color: var(--accent-primary);
+                background: rgba(0, 212, 255, 0.05);
+            }
+
+            .file-upload-area.dragover {
+                border-color: var(--accent-primary);
+                background: rgba(0, 212, 255, 0.1);
+            }
+
+            .file-upload-area.uploading {
+                pointer-events: none;
+                opacity: 0.7;
+            }
+
+            .file-upload-area i {
+                font-size: 2.5rem;
+                color: var(--text-muted);
+                margin-bottom: 1rem;
+            }
+
+            .file-upload-area p {
+                margin: 0;
+                color: var(--text-secondary);
+            }
+
+            .file-upload-area .upload-hint {
+                font-size: 0.85rem;
+                color: var(--text-muted);
+                margin-top: 0.5rem;
+            }
+
+            .file-upload-area input[type="file"] {
+                display: none;
+            }
+
+            .upload-progress {
+                margin-top: 1rem;
+            }
+
+            .upload-progress .progress {
+                height: 6px;
+                background: var(--bg-secondary);
+            }
+
+            .upload-progress .progress-bar {
+                background: var(--accent-gradient);
+            }
+
+            /* Indeterminate progress bar animation */
+            .upload-progress .progress-bar.indeterminate {
+                width: 100% !important;
+                background: linear-gradient(
+                    90deg,
+                    transparent 0%,
+                    transparent 30%,
+                    var(--accent-primary) 50%,
+                    transparent 70%,
+                    transparent 100%
+                );
+                background-size: 200% 100%;
+                animation: indeterminate-progress 1.5s ease-in-out infinite;
+            }
+
+            @keyframes indeterminate-progress {
+                0% {
+                    background-position: 200% 0;
+                }
+                100% {
+                    background-position: -200% 0;
+                }
+            }
+
+            /* Success state for progress bar */
+            .upload-progress .progress-bar.success {
+                width: 100% !important;
+                background: var(--success);
+                animation: none;
+            }
+
+            .upload-status {
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                margin-top: 0.5rem;
+                font-size: 0.9rem;
+            }
+
+            .upload-status.success {
+                color: var(--success);
+            }
+
+            .upload-status.error {
+                color: var(--danger);
+            }
+
+            .upload-status .spinner-border {
+                width: 1rem;
+                height: 1rem;
+            }
+
+            .or-divider {
+                display: flex;
+                align-items: center;
+                margin: 1.5rem 0;
+                color: var(--text-muted);
+            }
+
+            .or-divider::before,
+            .or-divider::after {
+                content: '';
+                flex: 1;
+                border-bottom: 1px solid var(--border-color);
+            }
+
+            .or-divider span {
+                padding: 0 1rem;
+                font-size: 0.9rem;
+            }
+
+            /* Hide progress indicators on step 0 */
+            .progress-container.hidden {
+                display: none;
+            }
+
+            /* Completion summary */
+            .completion-summary {
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-lg);
+                padding: 1.5rem;
+                margin-bottom: 2rem;
+            }
+
+            .completion-item {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 0.5rem 0;
+                border-bottom: 1px solid var(--border-color);
+                color: var(--text-secondary);
+            }
+
+            .completion-item:last-child {
+                border-bottom: none;
+            }
+
+            .completion-status {
+                color: var(--success);
+                font-weight: 600;
+            }
+
+            /* Background glows */
+            .bg-glow {
+                position: fixed;
+                width: 600px;
+                height: 600px;
+                border-radius: 50%;
+                filter: blur(150px);
+                opacity: 0.1;
+                pointer-events: none;
+                z-index: 0;
+            }
+
+            .bg-glow-1 {
+                top: -200px;
+                right: -100px;
+                background: var(--accent-primary);
+            }
+
+            .bg-glow-2 {
+                bottom: -200px;
+                left: -100px;
+                background: var(--accent-secondary);
+            }
+
+            /* Responsive */
+            @media (max-width: 768px) {
+                .setup-container {
+                    margin: 1rem auto;
+                    padding: 0 0.5rem;
+                }
+
+                .step-content {
+                    padding: 1.25rem;
+                }
+
+                .step-indicators {
+                    overflow-x: auto;
+                    flex-wrap: nowrap;
+                    scrollbar-width: none;
+                    -webkit-overflow-scrolling: touch;
+                    gap: 0.25rem;
+                    padding-bottom: 0.25rem;
+                }
+
+                .step-indicators::-webkit-scrollbar {
+                    display: none;
+                }
+
+                .step-indicator {
+                    flex-shrink: 0;
+                    min-width: 70px;
+                }
+            }
+
+            @media (max-width: 480px) {
+                .step-content {
+                    padding: 1rem;
+                }
+
+                .setup-header {
+                    padding: 1rem 1.25rem;
+                }
+            }
+
+        /* ── CSP-safe utility classes (replaces inline style= attributes) ── */
+        #progress-bar { width: 25%; }
+        #summary { height: 120px; }
+        </style>
+
+        <link rel="icon" type="image/svg+xml" href="{{ asset_url('img/favicon.svg') }}">
+        <link rel="icon" type="image/x-icon" href="{{ asset_url('favicon.ico') }}" />
+{% endblock %}
+{% block navbar %}
+<nav class="navbar navbar-expand-lg">
+            <div class="container">
+                <a class="navbar-brand" href="/">
+                    <div class="brand-icon">
+                        <i class="fas fa-rocket"></i>
+                    </div>
+                    <span class="brand-text">Apply<span class="brand-accent">Pilot</span></span>
+                </a>
+                <div class="navbar-nav ms-auto">
+                    <a class="nav-link" href="#" id="logout-btn">
+                        <i class="fas fa-sign-out-alt me-1"></i>
+                        Logout
+                    </a>
+                </div>
+            </div>
+        </nav>
+{% endblock %}
+{% block content %}
+<!-- Background glows -->
+
+        <div class="container">
+            <div class="setup-container">
+                <div class="setup-card">
+                    <!-- Header -->
+                    <div class="setup-header">
+                        <h1>Complete Your Profile</h1>
+                        <p>
+                            Help us personalize your job application experience
+                        </p>
+                    </div>
+
+                    <!-- Progress Indicator -->
+                    <div class="progress-container">
+                        <div class="progress">
+                            <div
+                                class="progress-bar"
+                                id="progress-bar"
+                            ></div>
+                        </div>
+                        <div class="step-indicators">
+                            <div class="step-indicator" data-step="1">
+                                <div class="step-number">1</div>
+                                <div class="step-label">Basic Info</div>
+                            </div>
+                            <div class="step-indicator" data-step="2">
+                                <div class="step-number">2</div>
+                                <div class="step-label">Experience</div>
+                            </div>
+                            <div class="step-indicator" data-step="3">
+                                <div class="step-number">3</div>
+                                <div class="step-label">Skills</div>
+                            </div>
+                            <div class="step-indicator" data-step="4">
+                                <div class="step-number">4</div>
+                                <div class="step-label">Preferences</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step Content -->
+                    <div class="step-content">
+                        <!-- Error/Success Alerts -->
+                        <div
+                            id="error-alert"
+                            class="alert alert-danger d-none"
+                            role="alert"
+                        >
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            <span id="error-message"></span>
+                        </div>
+
+                        <div
+                            id="success-alert"
+                            class="alert alert-success d-none"
+                            role="alert"
+                        >
+                            <i class="fas fa-check-circle me-2"></i>
+                            <span id="success-message"></span>
+                        </div>
+
+                        <!-- Step 0: Resume Upload (Quick Start) -->
+                        <div class="step-form active" id="step-0">
+                            <div class="text-center mb-4">
+                                <h3><i class="fas fa-magic me-2 text-accent"></i>Quick Start</h3>
+                                <p class="text-muted">Upload your resume to automatically fill in your profile</p>
+                            </div>
+
+                            <div id="resume-upload-section">
+                                <div class="file-upload-area" id="resume-drop-zone">
+                                    <i class="fas fa-cloud-upload-alt"></i>
+                                    <p><strong>Drag & drop your resume here</strong></p>
+                                    <p class="upload-hint">or click to browse (PDF, DOCX, TXT - Max 10MB)</p>
+                                    <input type="file" id="resume-file-input" accept=".pdf,.docx,.txt" />
+                                </div>
+
+                                <div class="upload-progress d-none" id="upload-progress">
+                                    <div class="progress">
+                                        <div class="progress-bar" id="upload-progress-bar"></div>
+                                    </div>
+                                    <div class="upload-status" id="upload-status">
+                                        <span class="spinner-border spinner-border-sm"></span>
+                                        <span id="upload-status-text">Analyzing your resume...</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- API key prompt — slides in below the drop zone when user tries to upload -->
+                            <div class="api-key-prompt is-hidden" id="api-key-prompt">
+                                <div class="api-key-prompt-header">
+                                    <div class="api-key-prompt-icon">
+                                        <i class="fas fa-key"></i>
+                                    </div>
+                                    <div>
+                                        <p class="api-key-prompt-title">Gemini API key required</p>
+                                        <p class="api-key-prompt-subtitle">
+                                            Resume parsing is powered by AI —
+                                            get a key at <a href="https://aistudio.google.com/api-keys" target="_blank" rel="noopener noreferrer">aistudio.google.com</a>
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div class="api-key-input-row" id="api-key-input-row">
+                                    <input
+                                        type="password"
+                                        class="form-control"
+                                        id="setup-api-key-input"
+                                        placeholder="Paste your API key…"
+                                        maxlength="128"
+                                        autocomplete="off"
+                                        spellcheck="false"
+                                        aria-label="Gemini API key"
+                                    />
+                                    <button type="button" class="btn btn-primary" id="setup-save-key-btn">
+                                        <span id="setup-save-key-text">Save &amp; Continue</span>
+                                        <span class="spinner-border spinner-border-sm is-hidden" id="setup-save-key-spinner"></span>
+                                    </button>
+                                </div>
+
+                                <div class="api-key-prompt-success is-hidden" id="setup-key-success">
+                                    <i class="fas fa-check-circle"></i>
+                                    Key saved — upload your resume above
+                                </div>
+                                <p class="api-key-prompt-error is-hidden" id="setup-key-error"></p>
+                            </div>
+
+                            <div class="text-center mt-4">
+                                <button type="button" class="btn btn-outline-secondary" id="skip-resume-btn">
+                                    <i class="fas fa-pencil-alt me-2"></i>Fill in manually
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Step 1: Basic Information -->
+                        <div class="step-form" id="step-1">
+                            <h3 class="mb-4">Basic Information *</h3>
+
+                            <form id="basic-info-form">
+                                <div class="row mb-3">
+                                    <div class="col-md-4">
+                                        <div class="form-floating">
+                                            <input
+                                                type="text"
+                                                class="form-control"
+                                                id="city"
+                                                name="city"
+                                                placeholder="City"
+                                                autocomplete="address-level2"
+                                                required
+                                            />
+                                            <label for="city">City *</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="form-floating">
+                                            <input
+                                                type="text"
+                                                class="form-control"
+                                                id="state"
+                                                name="state"
+                                                placeholder="State"
+                                                autocomplete="address-level1"
+                                                required
+                                            />
+                                            <label for="state">State *</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="form-floating">
+                                            <input
+                                                type="text"
+                                                class="form-control"
+                                                id="country"
+                                                name="country"
+                                                placeholder="Country"
+                                                autocomplete="country-name"
+                                                required
+                                            />
+                                            <label for="country">Country *</label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="row">
+                                    <div class="col-md-8">
+                                        <div class="form-floating">
+                                            <input
+                                                type="text"
+                                                class="form-control"
+                                                id="professional-title"
+                                                name="professional_title"
+                                                placeholder="Professional Title"
+                                                required
+                                            />
+                                            <label for="professional-title"
+                                                >Professional Title *</label
+                                            >
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="form-floating">
+                                            <input
+                                                type="number"
+                                                class="form-control"
+                                                id="years-experience"
+                                                name="years_experience"
+                                                min="0"
+                                                max="50"
+                                                placeholder="Years"
+                                                required
+                                            />
+                                            <label for="years-experience"
+                                                >Years of Experience *</label
+                                            >
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Professional Summary -->
+                                <div class="form-floating">
+                                    <textarea
+                                        class="form-control"
+                                        id="summary"
+                                        name="summary"
+                                        placeholder="Professional Summary"
+                                        maxlength="2000"
+                                        required
+                                    ></textarea>
+                                    <label for="summary"
+                                        >Professional Summary (3-4 sentences about your experience) *</label
+                                    >
+                                    <small class="form-text text-muted">
+                                        Provide a concise overview of your professional background, key skills, and career goals in 3-4 sentences. This significantly improves our ability to match you with relevant positions and provide tailored application assistance.
+                                    </small>
+                                </div>
+
+                                <!-- Student Status (moved to end) -->
+                                <div class="form-check mt-4">
+                                    <input
+                                        type="checkbox"
+                                        class="form-check-input"
+                                        id="is-student"
+                                        name="is_student"
+                                    />
+                                    <label class="form-check-label" for="is-student">
+                                        I am currently a student
+                                    </label>
+                                </div>
+                            </form>
+                        </div>
+
+                        <!-- Step 2: Work Experience -->
+                        <div class="step-form" id="step-2">
+                            <h3 class="mb-3">Work Experience *</h3>
+                            <p class="text-muted mb-4">Adding detailed job descriptions significantly improves how the AI matches your profile with roles and tailors your application materials.</p>
+
+                            <div id="experience-container">
+                                <!-- Experience items will be added here dynamically -->
+                            </div>
+
+                            <div class="add-experience" id="add-experience-btn">
+                                <i
+                                    class="fas fa-plus fa-2x mb-2 text-muted"
+                                ></i>
+                                <p class="mb-0 text-muted">
+                                    Add Work Experience
+                                </p>
+                            </div>
+
+                            <div class="form-check mt-3">
+                                <input
+                                    type="checkbox"
+                                    class="form-check-input"
+                                    id="no-experience"
+                                    name="no_experience"
+                                />
+                                <label class="form-check-label" for="no-experience">
+                                    I don't have any relevant work experience yet
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Step 3: Skills -->
+                        <div class="step-form" id="step-3">
+                            <h3 class="mb-4">Skills *</h3>
+
+                            <!-- Skills -->
+                            <div class="form-section">
+                                <p class="text-muted">Add both technical and personal skills. This significantly improves our ability to match you with relevant positions and provide tailored application assistance.</p>
+                                <p class="text-muted">You can select multiple skills.</p>
+                                <div class="form-floating">
+                                    <input
+                                        type="text"
+                                        class="form-control"
+                                        id="skills-input"
+                                        placeholder="Add skills"
+                                    />
+                                    <label for="skills-input"
+                                        >Add Skills (press Enter to
+                                        add)</label
+                                    >
+                                </div>
+                                <div
+                                    class="skills-container"
+                                    id="skills-container"
+                                ></div>
+                            </div>
+                        </div>
+
+                        <!-- Step 4: Career Preferences -->
+                        <div class="step-form" id="step-4">
+                            <h3 class="mb-4">Career Preferences</h3>
+
+                            <form id="career-preferences-form">
+
+                                <div class="row mb-4">
+                                    <div class="col-md-6">
+                                        <div class="form-floating">
+                                            <input
+                                                type="number"
+                                                class="form-control"
+                                                id="min-salary"
+                                                placeholder="Optional"
+                                            />
+                                            <label for="min-salary">Minimum Salary ($)</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-floating">
+                                            <input
+                                                type="number"
+                                                class="form-control"
+                                                id="max-salary"
+                                                placeholder="Optional"
+                                            />
+                                            <label for="max-salary">Maximum Salary ($)</label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Job Types -->
+                                <div class="form-section">
+                                    <h4>Job Types *</h4>
+                                    <p class="text-muted">You can select multiple options</p>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" value="full-time" id="job-type-fulltime">
+                                                <label class="form-check-label" for="job-type-fulltime">Full-time</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" value="part-time" id="job-type-parttime">
+                                                <label class="form-check-label" for="job-type-parttime">Part-time</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" value="contract" id="job-type-contract">
+                                                <label class="form-check-label" for="job-type-contract">Contract</label>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" value="freelance" id="job-type-freelance">
+                                                <label class="form-check-label" for="job-type-freelance">Freelance</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" value="internship" id="job-type-internship">
+                                                <label class="form-check-label" for="job-type-internship">Internship</label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Company Sizes -->
+                                <div class="form-section">
+                                    <h4>Preferred Company Sizes *</h4>
+                                    <p class="text-muted">You can select multiple options</p>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" value="startup" id="company-size-startup">
+                                                <label class="form-check-label" for="company-size-startup">Startup (1-10 employees)</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" value="small" id="company-size-small">
+                                                <label class="form-check-label" for="company-size-small">Small (11-50 employees)</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" value="medium" id="company-size-medium">
+                                                <label class="form-check-label" for="company-size-medium">Medium (51-200 employees)</label>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" value="large" id="company-size-large">
+                                                <label class="form-check-label" for="company-size-large">Large (201-1000 employees)</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" value="enterprise" id="company-size-enterprise">
+                                                <label class="form-check-label" for="company-size-enterprise">Enterprise (1000+ employees)</label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Work Arrangements -->
+                                <div class="form-section">
+                                    <h4>Work Arrangements *</h4>
+                                    <p class="text-muted">You can select multiple options</p>
+                                    <div class="row">
+                                        <div class="col-md-4">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" value="onsite" id="work-arrangement-onsite">
+                                                <label class="form-check-label" for="work-arrangement-onsite">Onsite</label>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" value="remote" id="work-arrangement-remote">
+                                                <label class="form-check-label" for="work-arrangement-remote">Remote</label>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" value="hybrid" id="work-arrangement-hybrid">
+                                                <label class="form-check-label" for="work-arrangement-hybrid">Hybrid</label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Additional Career Options -->
+                                <div class="form-section mb-4">
+                                    <h4>Maximum Travel Preference *</h4>
+                                    <p class="text-muted">Select the maximum amount of travel you're willing to accept</p>
+                                    <div class="form-check mb-2">
+                                        <input
+                                            class="form-check-input"
+                                            type="radio"
+                                            name="travel-preference"
+                                            id="travel-none"
+                                            value="NONE"
+                                            required
+                                        />
+                                        <label class="form-check-label" for="travel-none">
+                                            No travel (0%)
+                                        </label>
+                                    </div>
+                                    <div class="form-check mb-2">
+                                        <input
+                                            class="form-check-input"
+                                            type="radio"
+                                            name="travel-preference"
+                                            id="travel-minimal"
+                                            value="MINIMAL"
+                                        />
+                                        <label class="form-check-label" for="travel-minimal">
+                                            Minimal travel (up to 25%)
+                                        </label>
+                                    </div>
+                                    <div class="form-check mb-2">
+                                        <input
+                                            class="form-check-input"
+                                            type="radio"
+                                            name="travel-preference"
+                                            id="travel-moderate"
+                                            value="MODERATE"
+                                        />
+                                        <label class="form-check-label" for="travel-moderate">
+                                            Moderate travel (up to 50%)
+                                        </label>
+                                    </div>
+                                    <div class="form-check mb-2">
+                                        <input
+                                            class="form-check-input"
+                                            type="radio"
+                                            name="travel-preference"
+                                            id="travel-frequent"
+                                            value="FREQUENT"
+                                        />
+                                        <label class="form-check-label" for="travel-frequent">
+                                            Frequent travel (up to 75%)
+                                        </label>
+                                    </div>
+                                    <div class="form-check mb-2">
+                                        <input
+                                            class="form-check-input"
+                                            type="radio"
+                                            name="travel-preference"
+                                            id="travel-extensive"
+                                            value="EXTENSIVE"
+                                        />
+                                        <label class="form-check-label" for="travel-extensive">
+                                            Extensive travel (up to 100%)
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="form-section mb-4">
+                                    <h4>Additional Options</h4>
+                                    <p class="text-muted">Please select all that apply to you</p>
+                                    <div class="form-check mb-2">
+                                        <input
+                                            class="form-check-input"
+                                            type="checkbox"
+                                            id="willing-to-relocate"
+                                        />
+                                        <label class="form-check-label" for="willing-to-relocate">
+                                            I am willing to relocate for a job
+                                        </label>
+                                    </div>
+                                    <div class="form-check mb-2">
+                                        <input
+                                            class="form-check-input"
+                                            type="checkbox"
+                                            id="requires-visa-sponsorship"
+                                        />
+                                        <label class="form-check-label" for="requires-visa-sponsorship">
+                                            I need visa sponsorship
+                                        </label>
+                                    </div>
+                                    <div class="form-check mb-2">
+                                        <input
+                                            class="form-check-input"
+                                            type="checkbox"
+                                            id="has-security-clearance"
+                                        />
+                                        <label class="form-check-label" for="has-security-clearance">
+                                            I have security clearance
+                                        </label>
+                                    </div>
+                                </div>
+                            </form>
+
+                            <!-- Profile Completion Summary moved to next page -->
+                        </div>
+
+                        <!-- Navigation Buttons -->
+                        <div class="btn-navigation">
+                            <button
+                                type="button"
+                                class="btn btn-outline-secondary is-hidden"
+                                id="prev-btn"
+                            >
+                                <i class="fas fa-arrow-left me-2"></i>Previous
+                            </button>
+                            <div class="ms-auto">
+                                <button
+                                    type="button"
+                                    class="btn btn-primary"
+                                    id="next-btn"
+                                >
+                                    Next<i class="fas fa-arrow-right ms-2"></i>
+                                </button>
+                                <button
+                                    type="button"
+                                    class="btn btn-primary is-hidden"
+                                    id="complete-btn"
+                                >
+                                    Complete Profile<i
+                                        class="fas fa-check ms-2"
+                                    ></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Custom JavaScript -->
+{% endblock %}
+{% block page_scripts %}
+<script src="{{ asset_url('js/profile-setup.js') }}"></script>
+{% endblock %}

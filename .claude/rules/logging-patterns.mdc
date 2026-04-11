@@ -1,0 +1,189 @@
+---
+description: Structured logging — StructuredLogger helpers, request context, workflow context, sensitive data redaction
+globs: **/*.py
+alwaysApply: false
+---
+
+# Logging Patterns
+
+## Logger Setup
+```python
+import logging
+from utils.logging_config import get_structured_logger
+
+logger = logging.getLogger(__name__)           # standard logger
+slog   = get_structured_logger(__name__)       # structured logger with helpers
+```
+
+## Structured Logger Helpers
+```python
+# Agent lifecycle
+slog.log_agent_start("job_analyzer", workflow_id)
+slog.log_agent_complete("job_analyzer", workflow_id, duration_ms=1234.5)
+slog.log_agent_error("job_analyzer", workflow_id, error, duration_ms=500.0)
+
+# External API
+slog.log_external_api_call(service="gemini", operation="generate", duration_ms=500.0, success=True)
+
+# Database
+slog.log_db_operation("SELECT", "users", duration_ms=5.0, rows_affected=1)
+
+# Cache
+slog.log_cache_hit("job_analysis", cache_key)
+slog.log_cache_miss("user_profile", user_id)
+
+# Auth / security events
+slog.log_login_success(email, auth_method="local")
+slog.log_login_failure(email, reason="invalid_password", attempts_remaining=3)
+slog.log_account_lockout(email, duration_seconds=900)
+slog.log_registration(email, auth_method="local")
+slog.log_password_reset_request(email)
+slog.log_password_reset_complete(email)
+slog.log_password_change(email)
+slog.log_token_refresh(email)
+slog.log_oauth_login(email, provider="google", is_new_user=True)
+```
+
+## Performance Decorator
+```python
+from utils.logging_config import log_execution_time
+
+@log_execution_time(message="Job analysis took {duration_ms}ms")
+async def analyze_job(self, state): ...
+```
+
+## Request Context Correlation
+```python
+from utils.logging_config import set_request_context, clear_request_context
+
+tokens = set_request_context(request_id="abc123", user_id="uuid", session_id="uuid")
+try:
+    # all logger.info/error calls here include request_id, user_id automatically
+    logger.info("Processing request")
+finally:
+    clear_request_context(tokens)
+```
+
+## Workflow Context Pattern (always use try/finally)
+```python
+context_tokens = set_request_context(session_id=session_id, user_id=str(user_id))
+try:
+    final_state = await self.workflow.ainvoke(initial_state)
+    return self._state_to_dict(final_state)
+finally:
+    clear_request_context(context_tokens)  # must run even on exception
+```
+
+## Sensitive Data
+Passwords, tokens, API keys, `authorization`, `jwt`, `bearer` are automatically redacted by the logging config.
+
+**Email addresses are NOT auto-redacted** — you must wrap them manually with `mask_email()` before logging, even at DEBUG level:
+
+```python
+from utils.logging_config import get_structured_logger, mask_email
+
+# ✅ Correct — GDPR-safe
+logger.debug(f"Login attempt for: {mask_email(user_data.email)}")
+logger.warning(f"Account locked: {mask_email(email)}")
+
+# ❌ Wrong — raw email ends up in production logs
+logger.debug(f"Login attempt for: {user_data.email}")
+```
+
+`mask_email("user@example.com")` → `"use***@***"`
+
+This applies everywhere: login, registration, lockout, OAuth callback, password reset, email verification, and any other flow that handles an email address.
+
+## setup_logging() — Service Metadata (call once at startup)
+`setup_logging()` accepts service identity params that are embedded in **every JSON log line**
+(required by log aggregation platforms):
+```python
+setup_logging(
+    log_level=settings.log_level,
+    log_format="json",          # "text" for dev, "json" for prod
+    service_name="applypilot",
+    service_version=settings.app_version,
+    environment="production",   # or "development"
+)
+```
+This populates `service`, `version`, `environment`, `host` in every JSON record automatically.
+
+## Dev Log Format
+Development (`LOG_FORMAT=text`) outputs clean, fixed-width columns:
+```
+HH:MM:SS.mmm  LEVEL     module_name               [trace_id]  message
+13:24:05.100  INFO      llm_client                [a3f9b2c1]  [LLM] Vertex AI  model=gemini-3-flash-preview  prompt=8,432 chars
+13:24:08.890  INFO      llm_client                [a3f9b2c1]  [LLM] Done  3790ms  response=4,211 chars
+13:24:05.012  INFO      request_middleware        [a3f9b2c1]  POST /api/v1/workflow/start -> 202  (5ms)
+```
+
+## Production JSON Format (one line per event)
+Every record includes standard aggregator fields:
+```json
+{
+  "timestamp": "2026-02-23T13:24:05.123Z",
+  "level": "INFO",
+  "message": "POST /api/v1/workflow/start -> 202  (5ms)",
+  "service": "applypilot",
+  "version": "1.0.0",
+  "environment": "production",
+  "host": "server-hostname",
+  "trace_id": "a3f9b2c1d4e5f6a7",
+  "status_code": 202,
+  "duration_ms": 5.1
+}
+```
+
+## `exc_info=True` — Required on All `logger.error()` Inside `except` Blocks
+
+**Every `logger.error(...)` call inside an `except` block that references an exception variable must include `exc_info=True`.**
+Without it, the full stack trace is lost in production logs and debugging becomes guesswork.
+
+```python
+# ✅ Correct — full traceback captured
+try:
+    await db.execute(stmt)
+except Exception as e:
+    logger.error(f"Failed to update user {user_id}: {e}", exc_info=True)
+    raise internal_error("Failed to update user")
+
+# ❌ Wrong — message only, no stack trace
+except Exception as e:
+    logger.error(f"Failed to update user {user_id}: {e}")
+```
+
+`logger.warning()` does not require `exc_info=True` (graceful degradation paths are intentionally less verbose), but you may add it for high-importance warnings.
+
+## Bulk Script Safety — Always Validate Python Syntax After
+
+When running any script that does bulk search-and-replace on Python files (e.g., adding `exc_info=True` to many `logger.error` calls), **always validate syntax afterwards**:
+
+```python
+import ast, os
+
+for root, dirs, files in os.walk('.'):
+    dirs[:] = [d for d in dirs if d not in ('venv', '__pycache__', '.git')]
+    for fn in files:
+        if fn.endswith('.py'):
+            fp = os.path.join(root, fn)
+            try:
+                with open(fp) as f:
+                    ast.parse(f.read())
+            except SyntaxError as e:
+                print(f"SYNTAX ERROR {fp}: {e.lineno}: {e.msg}")
+```
+
+Also grep for the double-quote artifact that a naive regex can introduce:
+```bash
+# Flags f"...{e}"", exc_info — the artifact from a bad bulk replacement
+grep -rn '}"", exc_info' --include='*.py' .
+```
+
+## Duplicate Log Prevention — Non-Negotiables
+- **`echo=False`** on SQLAlchemy `create_async_engine` — never set `echo=True`; it adds SA's own handler causing every SQL line to appear twice.
+- **`access_log=False`** in `uvicorn.run()` — `RequestLoggingMiddleware` already logs every request.
+- **`log_config=None`** in `uvicorn.run()` — prevents uvicorn from resetting the root logger config on startup.
+- Third-party loggers (`uvicorn`, `google.*`, `grpc`, `langchain`, `httpx`) are silenced at WARNING with `propagate=False` inside `LoggingConfig.configure()`.
+
+## Trace ID
+`generate_request_id()` produces a 16-char hex string (64-bit entropy). Safe past 4 billion requests before birthday collision. Do not shorten it.

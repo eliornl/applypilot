@@ -1,0 +1,229 @@
+---
+description: WebSocket endpoints, connection limits, and broadcast helpers
+globs: api/websocket.py,workflows/*.py,api/interview_prep.py,api/workflow.py
+alwaysApply: false
+---
+
+# WebSocket Patterns
+
+## Endpoints
+```
+WS /api/v1/ws/workflow/{session_id}?token=JWT   # session-scoped updates
+WS /api/v1/ws/user?token=JWT                    # all updates for a user
+```
+Token goes in the query string. This is the **only** place in the codebase where a JWT is allowed in a URL parameter — the WebSocket protocol has no concept of custom request headers, so there is no alternative. `extract_token_from_request` in `utils/auth.py` enforces this: query-param tokens are accepted only for paths starting with `/api/ws/`. All regular HTTP endpoints require `Authorization: Bearer <token>`.
+
+## Connection Limits
+- Max **5** connections per user
+- Max **3** connections per session
+
+## Complete Broadcast Function Reference
+
+All broadcast functions live in `api/websocket.py` and follow the same signature:
+- Always send to **both** session-scoped subscribers and general user subscribers.
+- Always safe to `await` from any background task — they swallow send errors gracefully.
+
+### Main Workflow Broadcasts (called by `workflows/job_application_workflow.py`)
+```python
+from api.websocket import (
+    broadcast_agent_update,
+    broadcast_phase_change,
+    broadcast_workflow_complete,
+    broadcast_workflow_error,
+    broadcast_gate_decision,
+)
+
+await broadcast_agent_update(
+    user_id=user_id,
+    session_id=session_id,
+    agent_name="job_analyzer",
+    status="running",           # running | completed | failed
+    message="Analyzing job posting...",
+)
+
+await broadcast_phase_change(
+    user_id=user_id,
+    session_id=session_id,
+    phase="profile_matching",
+    progress_percentage=60,
+)
+
+await broadcast_workflow_complete(user_id=user_id, session_id=session_id, result_summary=result)
+await broadcast_workflow_error(user_id=user_id, session_id=session_id, error_message=error_msg, failed_agent="job_analyzer")
+await broadcast_gate_decision(user_id=user_id, session_id=session_id, match_score=0.82, recommendation="Strong match")
+```
+
+### Workflow Control Broadcasts (called by `api/workflow.py` background tasks)
+```python
+from api.websocket import (
+    broadcast_workflow_resumed,
+    broadcast_document_generation_started,
+)
+
+# Sent at the start of _continue_workflow_background (after gate confirmation)
+await broadcast_workflow_resumed(user_id=user_id, session_id=session_id)
+
+# Sent at the start of _generate_documents_background
+await broadcast_document_generation_started(user_id=user_id, session_id=session_id)
+```
+
+### Interview Prep Broadcasts (called by `api/interview_prep.py` background task)
+```python
+from api.websocket import (
+    broadcast_interview_prep_started,
+    broadcast_interview_prep_complete,
+    broadcast_interview_prep_error,
+)
+
+# Sent before the LLM call starts
+await broadcast_interview_prep_started(user_id=user_id, session_id=session_id)
+
+# Sent after the result is saved to DB and cached
+await broadcast_interview_prep_complete(user_id=user_id, session_id=session_id)
+
+# Sent when generation throws an unhandled exception
+await broadcast_interview_prep_error(user_id=user_id, session_id=session_id, error_message="...")
+```
+
+## All Message Types (client receives)
+
+| `type` | Sent by | `data` fields |
+|---|---|---|
+| `agent_update` | `job_application_workflow.py` | `agent`, `status`, `message` |
+| `phase_change` | `job_application_workflow.py` | `phase`, `progress` |
+| `workflow_complete` | `job_application_workflow.py` | result summary dict |
+| `workflow_error` | `job_application_workflow.py` | `error`, `failed_agent` |
+| `gate_decision` | `job_application_workflow.py` | `match_score`, `recommendation`, `requires_confirmation` |
+| `workflow_resumed` | `api/workflow.py` | _(empty)_ |
+| `document_generation_started` | `api/workflow.py` | _(empty)_ |
+| `interview_prep_started` | `api/interview_prep.py` | _(empty)_ |
+| `interview_prep_complete` | `api/interview_prep.py` | _(empty)_ |
+| `interview_prep_error` | `api/interview_prep.py` | `error` |
+
+All messages share the same envelope:
+```json
+{
+  "type": "...",
+  "session_id": "uuid",
+  "data": { "...": "..." },
+  "timestamp": "ISO8601"
+}
+```
+
+## Background Task Pattern — Always Resolve user_id
+
+Background tasks don't have access to the request context. Resolve `user_id` from the loaded session as a fallback:
+
+```python
+async def _my_background_task(session_id: str, user_id: Optional[str] = None) -> None:
+    async with get_session() as db:
+        workflow_session = await _load_session(db, session_id)
+        ws_user_id = user_id or str(workflow_session.user_id)
+
+        await broadcast_something_started(ws_user_id, session_id)
+        try:
+            # ... do work ...
+            await broadcast_something_complete(ws_user_id, session_id)
+        except Exception as e:
+            await broadcast_something_error(ws_user_id, session_id, str(e))
+            raise
+```
+
+Always pass `user_id=str(user_id)` from the endpoint when scheduling a background task so the broadcast works even if the session DB read fails.
+
+## Frontend Connection Pattern
+
+```javascript
+function connectWs(sessionId) {
+    const token = (window.app && typeof window.app.getAuthToken === 'function')
+        ? window.app.getAuthToken()
+        : (localStorage.getItem('access_token') || localStorage.getItem('authToken'));
+    if (!token || typeof WebSocket === 'undefined') return null;
+
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(
+        `${proto}://${window.location.host}/api/v1/ws/workflow/${sessionId}?token=${token}`
+    );
+    ws.onmessage = (event) => {
+        const msg = /** @type {Record<string,any>} */ (JSON.parse(event.data));
+        handleWsMessage(msg);
+    };
+    return ws;
+}
+```
+
+## WebSocket + Polling Fallback Pattern
+
+Always open the WebSocket **before** triggering the background task to avoid missing the
+completion event. Keep a slower polling loop as a fallback for environments where WebSockets
+are unavailable (proxies, some corporate networks).
+
+**Dashboard implementation (`dashboard.js`):**
+- WebSocket reconnects automatically with exponential backoff (max 30 s delay) — the `onclose` handler reschedules `connectWebSocket()` unless `wsReconnecting` guard is already set
+- `startStatusPolling()` runs every **5 seconds** and checks `GET /api/v1/workflow/{session_id}/status` for any session in `processingQueue`
+- On reconnect (`onopen`), the client does NOT re-fetch current state — the polling fallback catches any `workflow_complete` event missed during a disconnect
+- **A page refresh is NOT required for connection drops.** The app self-heals. Only recommend a refresh in help content if the UI appears visually frozen (JS state corruption), not for connection issues.
+
+```javascript
+async function startGeneration() {
+    connectWs();           // open WS first
+    await triggerApi();    // then fire the task
+    startPollingFallback(); // slow poll (5 s) as safety net
+}
+
+function handleWsMessage(msg) {
+    switch (msg.type) {
+        case 'interview_prep_complete':
+            stopPolling(); disconnectWs(); loadResult(); break;
+        case 'interview_prep_error':
+            stopPolling(); disconnectWs(); showError(msg.data.error); break;
+    }
+}
+```
+
+## WebSocket Token Authentication — Revocation Checks Required
+`verify_websocket_token()` in `api/websocket.py` is `async`. After validating the JWT signature it must check **both**:
+1. `_is_token_revoked(jti)` — Redis blocklist check (same as HTTP auth)
+2. Per-user invalidation timestamp — rejects tokens whose `iat` is earlier than the timestamp stored at `user_invalidated_at:{user_id}`
+
+Without these checks, a user who logged out, changed their password, or was deleted could keep an active WebSocket connection indefinitely using the old token.
+
+## Message Size Limit
+`_WS_MAX_MESSAGE_BYTES = 64 * 1024` (64 KB). Both WebSocket handlers check the raw bytes length after `receive_text()`:
+```python
+raw = await websocket.receive_text()
+if len(raw.encode("utf-8")) > _WS_MAX_MESSAGE_BYTES:
+    await websocket.close(code=1009)  # WS_1009_MESSAGE_TOO_BIG
+    return
+```
+Never process a message before checking its size.
+
+## Exception Handling — `report_exception()` Required
+Both WebSocket message loops must call `report_exception()` for unexpected exceptions (same rule as background tasks):
+
+```python
+try:
+    while True:
+        data = await websocket.receive_text()
+        # ... handle message ...
+except WebSocketDisconnect:
+    manager.disconnect(websocket, user_id, session_id)
+except Exception as e:
+    await report_exception(e, user_id=user_id)
+    logger.error("WebSocket unexpected error", exc_info=True)
+finally:
+    manager.disconnect(websocket, user_id, session_id)
+```
+
+Without this, unexpected errors in the WebSocket handler are silently swallowed and never reported.
+
+## Frontend — URL Encoding
+Always `encodeURIComponent()` the token and session ID in WebSocket URLs:
+```javascript
+const ws = new WebSocket(
+    `${proto}://${window.location.host}/api/v1/ws/workflow/${encodeURIComponent(sessionId)}?token=${encodeURIComponent(token)}`
+);
+```
+
+## Stats Endpoint
+`GET /api/v1/ws/stats` — returns `{total_users, total_connections, total_sessions}`. Requires admin role (`Depends(require_admin)`).

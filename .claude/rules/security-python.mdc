@@ -1,0 +1,168 @@
+---
+description: Python-side security — XSS sanitization, file upload MIME validation, security headers, global rate limit
+globs: **/*.py
+alwaysApply: false
+---
+
+# Python Security Patterns
+
+## XSS Sanitization (always sanitize LLM and user content)
+```python
+from utils.security import sanitize_text, sanitize_html, sanitize_llm_output
+
+clean = sanitize_text(user_input)          # strips all HTML
+clean = sanitize_html(html_content)        # allows safe tags only
+clean = sanitize_llm_output(llm_response)  # recursive sanitize for LLM dicts
+```
+Always call `sanitize_llm_output()` before returning agent results to the client.
+
+## File Upload MIME Validation
+Never trust the file extension — always check magic bytes:
+```python
+MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+_FILE_MAGIC = { "pdf": b"%PDF", "docx": b"PK\x03\x04", "txt": None }
+
+content = await upload_file.read()
+if len(content) > MAX_UPLOAD_SIZE_BYTES:
+    raise HTTPException(status_code=413, detail="File too large.")
+magic = _FILE_MAGIC.get(ext)
+if magic is not None and not content.startswith(magic):
+    raise HTTPException(status_code=400, detail="File content does not match declared type.")
+if ext == "txt":
+    try: content.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="TXT files must be UTF-8 encoded.")
+```
+
+## Security Headers (auto-applied — never add manually)
+`main.py` security_headers_middleware adds these to every response:
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `X-XSS-Protection: 1; mode=block`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Permissions-Policy: camera=(), microphone=(), geolocation=()`
+- `Strict-Transport-Security` (production only)
+
+## Global API Rate Limit (auto-applied)
+`main.py` `api_rate_limit_middleware`: **100 req/min** per authenticated user (token hash) or IP for all `/api/` paths.
+Exempt: `/api/health`, `/api/ws/`, `/api/v1/auth/login`, `/api/v1/auth/register`.
+Per-endpoint limits (see `utils/cache.py`) are **additional** on top of the global limit.
+
+## Cryptographically Secure Random Values
+**Always use `secrets`, never `random`, for any security-sensitive value.**
+
+```python
+import secrets
+
+# URL-safe token (password reset, OAuth state, exchange codes, etc.)
+token = secrets.token_urlsafe(32)
+
+# Numeric code (email verification)
+code = str(secrets.randbelow(900000) + 100000)  # 100000–999999
+```
+
+`random.randint` / `random.choice` are **not cryptographically secure** — they are seeded from system time and are predictable under attack.
+
+## JWT Tokens — Never in URLs
+JWTs must never appear in HTTP redirect URLs or query parameters — they leak into server logs, browser history, and Referer headers.
+
+- **HTTP API auth**: `Authorization: Bearer <token>` header only.
+- **WebSocket auth**: `?token=` query param is the **only** exception (WS has no headers).
+- **OAuth post-login**: Use a 30-second one-time exchange code in the redirect URL; the frontend exchanges it for the JWT via `POST /api/v1/auth/oauth/exchange-code`.
+
+## User Enumeration — Always Return Identical Responses
+Endpoints that accept email addresses must never leak whether an account exists:
+
+```python
+# ✅ Correct — always the same message
+return {"message": "If an account exists, you will receive an email shortly."}
+
+# ❌ Wrong — leaks account existence
+if not user:
+    return {"message": "No account found.", "user_exists": "false"}
+```
+
+This applies to: `/forgot-password`, `/resend-verification`, and any future unauthenticated endpoint that checks email.
+
+## Timing Attack Prevention on Login
+When a user is not found, always perform a dummy bcrypt verify to equalise
+the response time with the real-user code path:
+
+```python
+# In api/auth.py — _DUMMY_HASH is a module-level pre-computed constant
+if not user:
+    pwd_context.verify(_bcrypt_safe(password), _DUMMY_HASH)
+    raise HTTPException(status_code=401, detail="Invalid email or password")
+```
+
+## SSRF Prevention — URL Validation Before Fetching
+Any endpoint or agent that fetches a user-supplied URL must validate scheme and block private IP ranges before making the HTTP request:
+
+```python
+from urllib.parse import urlparse
+import ipaddress
+
+_INTERNAL_RANGES = [ipaddress.ip_network(r) for r in [
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+    "127.0.0.0/8", "169.254.0.0/16", "::1/128",
+]]
+
+def _validate_job_url(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False
+    try:
+        ip = ipaddress.ip_address(parsed.hostname)
+        if any(ip in r for r in _INTERNAL_RANGES):
+            return False
+    except ValueError:
+        pass  # hostname, not IP — ok
+    return True
+```
+
+Raise a validation error if the URL fails — never fetch it. This is implemented in `agents/job_analyzer.py::_validate_job_url()`.
+
+## Log Injection Prevention
+Values logged from HTTP requests (headers, IP addresses, query params) must have newlines and control characters stripped before logging to prevent log injection attacks:
+
+```python
+def _sanitize_log_value(value: str) -> str:
+    """Strip CRLF and null bytes to prevent log injection."""
+    return re.sub(r"[\r\n\x00]", "", value)
+
+# In request logging middleware:
+safe_ip = _sanitize_log_value(request.client.host or "unknown")
+safe_path = _sanitize_log_value(str(request.url.path))
+```
+
+This is implemented in `utils/request_middleware.py::_sanitize_log_value()`.
+
+## External HTTP Calls — Always Set a Timeout
+Any `httpx` call to an external service must specify a timeout. Without one, a slow or unresponsive service will hang a worker thread indefinitely.
+
+```python
+# ✅ Correct
+async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+    response = await client.post(GOOGLE_TOKEN_URL, data={...})
+
+# ❌ Wrong — can hang forever
+async with httpx.AsyncClient() as client:
+    response = await client.post(GOOGLE_TOKEN_URL, data={...})
+```
+
+10 seconds is a good default for OAuth token exchanges and user-info fetches.
+
+## Security Best Practices Checklist
+- Never log passwords, tokens, or API keys (auto-redacted by `logging_config.py`)
+- **Always use `mask_email()` before logging email addresses** (not auto-redacted — GDPR requirement)
+- **Sanitize log values from HTTP requests** with `_sanitize_log_value()` to prevent log injection
+- Validate all input with Pydantic before touching it; all string fields must have `max_length`
+- Check resource ownership before modifying (`user_id == current_user["id"]`) — IDOR
+- `ENCRYPTION_KEY` is separate from `JWT_SECRET` — must be set in production; rotating JWT secret without it corrupts all stored BYOK keys
+- User API keys are **never** returned in API responses or persisted in workflow state
+- Never embed internal error messages in redirect URLs (use opaque error codes like `?error=oauth_failed`)
+- Never return raw `str(e)` to the client — use `_safe_error_msg(exc, debug=settings.debug)` which is generic in production
+- Use `datetime.now(timezone.utc)` — `datetime.utcnow()` is deprecated in Python 3.12+
+- `html.escape()` all user-controlled values inserted into HTML email templates
+- Call `invalidate_all_user_tokens(user_id)` on password change, password reset, and account deletion
+- Validate all user-supplied URLs before fetching (SSRF allowlist + IP block)

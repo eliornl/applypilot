@@ -1,0 +1,225 @@
+---
+description: Gemini LLM client usage — BYOK, retry, timeout, JSON parsing, safety filters, backend selection
+globs: agents/**/*.py,utils/llm_client.py
+alwaysApply: false
+---
+
+# LLM Integration Patterns
+
+## Gemini Client Usage
+```python
+from utils.llm_client import get_gemini_client
+
+gemini_client = await get_gemini_client()
+response = await gemini_client.generate(
+    prompt=prompt,
+    system=system_message,       # optional
+    temperature=0.7,
+    max_tokens=10000,
+    user_api_key=user_api_key,   # BYOK — pass from workflow state
+)
+text = response.get("response", "")
+```
+
+## BYOK in Agents (always pass user key + optional model override)
+```python
+# Agent __init__
+self._current_user_api_key: Optional[str] = None
+
+# In process() / generate():
+self._current_user_api_key = state.get("user_api_key")
+
+# Read user-preferred model — only respected in BYOK mode
+prefs = state.get("workflow_preferences") or {}
+user_model: Optional[str] = prefs.get("preferred_model") if self._current_user_api_key else None
+
+response = await self.gemini_client.generate(
+    prompt=prompt,
+    user_api_key=self._current_user_api_key,
+    model=user_model,  # None → system default; ignored in Vertex AI mode
+)
+```
+
+`model=None` always falls back to `settings.gemini_model`. In Vertex AI mode `user_api_key` is always `None`, so `user_model` is always `None` — the server model is never overridable by users.
+
+## LLM Response Caching — User ID Scoping
+`generate()` accepts `use_cache=True` for opt-in response caching. When the prompt contains personal content (resumes, cover letters, job-fit analysis), always pass `user_id` to scope the cache key per user — otherwise two users with identical inputs would share each other's cached output.
+
+```python
+# ✅ Public prompt (job description only) — safe to share across users
+response = await gemini_client.generate(
+    prompt=job_description_prompt,
+    use_cache=True,
+)
+
+# ✅ Personal prompt (contains resume) — must be user-scoped
+response = await gemini_client.generate(
+    prompt=resume_tailoring_prompt,
+    use_cache=True,
+    user_id=str(current_user["id"]),
+)
+
+# ❌ Personal prompt without user_id — potential cross-user cache hit
+response = await gemini_client.generate(
+    prompt=resume_tailoring_prompt,
+    use_cache=True,
+    # missing user_id!
+)
+```
+
+`use_cache` defaults to `False` — only enable it for prompts that produce deterministic, reusable results.
+
+## LLM Call Timeout — Required
+Wrap every `run_in_executor` SDK call in `asyncio.wait_for()`:
+```python
+import asyncio
+
+# ✅ Correct — bounded by wall-clock timeout (DEFAULT_TIMEOUT = 180s)
+response = await asyncio.wait_for(
+    asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: client.models.generate_content(model=model, contents=prompt, config=config)
+    ),
+    timeout=self.timeout,
+)
+# ❌ Wrong — can hang indefinitely, exhausts thread pool
+```
+`asyncio.TimeoutError` ⊆ `TimeoutError` (Python 3.11+) — tenacity retries cover it automatically.
+
+## JSON Parsing from LLM
+```python
+from utils.llm_parsing import parse_json_from_llm_response
+
+parsed = parse_json_from_llm_response(response.get("response", ""))
+# Handles: ```json blocks, raw JSON, nested objects
+if not parsed:
+    return self._create_parse_error_result(raw_response)
+```
+
+## Safety Filter Handling
+```python
+if response.get("filtered"):
+    return {"error": "Content filtered", "safety_filter_message": response["response"]}
+```
+
+## GeminiError — Custom Exception
+
+`GeminiError` is raised by `utils/llm_client.py` for all upstream API failures. It carries structured context:
+
+```python
+from utils.llm_client import GeminiError
+
+# Constructor
+GeminiError(message: str, status_code: int | None = None, original_error: Exception | None = None)
+
+# Attributes available on the caught exception
+exc.message        # human-readable description
+exc.status_code    # HTTP status from upstream API, if available (e.g. 429, 503)
+exc.original_error # the underlying exception, for re-raising or cause chaining
+```
+
+When raising inside `llm_client.py`, always pass `original_error=e` to preserve the full chain:
+
+```python
+# ✅ Correct — chain preserved, full traceback in logs
+raise GeminiError(f"Vertex AI generate failed: {e}", original_error=e)
+
+# ❌ Wrong — original traceback is lost
+raise GeminiError(f"Vertex AI generate failed: {e}")
+```
+
+Callers that catch `GeminiError` should check `status_code` for 429 (rate-limited) vs 5xx (service error) before deciding whether to retry manually.
+
+## Retry Logic
+- `tenacity`: 3 attempts, exponential backoff (2s → 4s → 8s)
+- Retries on: `GeminiError`, `ConnectionError`, `TimeoutError`
+
+## Backend Selection
+- `USE_VERTEX_AI=true` + `VERTEX_AI_PROJECT` → Vertex AI with ADC auth (production)
+- Otherwise → Google AI Studio with `GEMINI_API_KEY` (development)
+
+`GET /api/v1/profile/api-key/status` returns `use_vertex_ai: bool`. The frontend uses this to decide whether to show the model selector — it is hidden when Vertex AI is active (server controls the model) and only shown for BYOK users on Google AI Studio.
+
+## Model Reference
+
+| Model | Speed | Notes |
+|---|---|---|
+| `gemini-3-flash-preview` | Fastest | **Current default.** Requires `VERTEX_AI_LOCATION=global` on Vertex AI |
+| `gemini-3-pro-preview` | Slower | Most capable Gemini 3 |
+| `gemini-2.5-flash` | Fast | Stable fallback |
+| `gemini-2.0-flash-001` | Fast | Previous stable |
+
+## Thinking Mode — Always Disabled
+
+**Both backends must always set `thinking_budget=0`** in `GenerateContentConfig`. On Gemini 3 Flash (and 2.5 Flash), thinking mode is enabled by default and consumes output token budget for internal reasoning — this causes slow responses (40–75s) with truncated output while appearing to succeed.
+
+```python
+from google.genai import types
+
+config = types.GenerateContentConfig(
+    temperature=temperature,
+    max_output_tokens=max_tokens,
+    top_p=DEFAULT_TOP_P,
+    top_k=DEFAULT_TOP_K,
+    thinking_config=types.ThinkingConfig(thinking_budget=0),  # ← required on both paths
+)
+```
+
+Without this, flash models may silently spend most of the token budget on internal thinking and return only a partial response (e.g. 1 of 3 expected JSON objects).
+
+## Required Package — `google-genai` Only
+
+**`google-generativeai` has been removed from this project.** Both Vertex AI and BYOK (Google AI Studio) paths use `google-genai`:
+
+```python
+from google import genai as google_genai
+from google.genai import types
+
+# Vertex AI
+client = google_genai.Client(vertexai=True, project=project, location=location)
+
+# BYOK / Google AI Studio
+client = google_genai.Client(api_key=effective_api_key)
+
+# Both use the same generate_content / models.list / models.get API
+response = client.models.generate_content(model=model_to_use, contents=prompt, config=config)
+```
+
+**Never add `google-generativeai` back** — it does not support `ThinkingConfig` and is superseded by `google-genai`.
+Do **not** add `google==3.0.0` as a dependency — it breaks the `google.*` namespace packages.
+
+## Gemini Health Check Pattern
+
+Health checks run at server startup via `check_gemini_health()` in `utils/llm_client.py`.
+
+**Rules:**
+- **Vertex AI:** use `client.models.get(model=settings.gemini_model)` — a quota-free metadata fetch. **Never** use `generate_content()` for health checks; it burns a real token on every restart.
+- **Google AI Studio:** use `client.models.list()` (via `google-genai` Client) — also quota-free.
+- **429 / RESOURCE_EXHAUSTED** means the service is up and responding. Return `True` and log `INFO`; do **not** mark the service as unavailable.
+
+```python
+# Correct Vertex AI health check
+await asyncio.get_event_loop().run_in_executor(
+    None,
+    lambda: client.models.get(model=settings.gemini_model),
+)
+
+# Correct 429 handling
+except Exception as e:
+    if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+        logger.info("Gemini health check: quota limit hit but service is reachable")
+        return True
+    logger.warning(f"Gemini health check failed: {e}")
+    return False
+```
+
+## Robust JSON Parsing (`utils/llm_parsing.py`)
+
+`parse_json_from_llm_response()` handles three common LLM output issues automatically:
+
+1. **Literal control characters in strings** — `_fix_json_strings()` escapes `\n`/`\r`/`\t` inside JSON string values
+2. **Truncated responses** — `_repair_truncated_json()` closes unclosed strings/arrays/objects so partial output is still parseable
+3. **Markdown fences** — strips ` ```json ` wrappers before parsing
+
+Always use this utility instead of calling `json.loads()` directly on LLM output.
+

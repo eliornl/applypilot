@@ -1,0 +1,398 @@
+---
+description: Dashboard home page — application list, search/filter/sort, bulk actions, inline status, load-more, session state
+globs: ui/dashboard/index.html,ui/static/js/dashboard-home.js
+alwaysApply: false
+---
+
+# Dashboard Home (`/dashboard`)
+
+`ui/dashboard/index.html` + `ui/static/js/dashboard-home.js`
+
+The dashboard home is the **only** application list page. `/dashboard/history` was permanently removed — do not re-add it. All filtering, sorting, searching, and bulk operations live here.
+
+---
+
+## API — `GET /api/v1/applications/`
+
+| Param | Type | Notes |
+|---|---|---|
+| `search` | `str` (max 200) | Case-insensitive `LIKE` across `job_title` AND `company_name` (`OR`). Takes priority over `company`. |
+| `status_filter` | `str` | Case-insensitive status match. Values: `PROCESSING`, `COMPLETED`, `APPLIED`, `INTERVIEW`, `REJECTED`, `ACCEPTED`. |
+| `days` | `int` (1–365) | Filter by last N days (based on `created_at`). |
+| `sort` | `str` | `created_desc` (default) \| `created_asc` \| `updated_desc` \| `company_asc` \| `title_asc` |
+| `page` | `int` (≥1) | Page number (1-indexed). |
+| `per_page` | `int` (1–100) | Results per page (default 20). |
+| `company` | `str` (max 200) | Legacy company-name filter; ignored when `search` is also present. |
+
+The backend uses `func.lower().contains()` (parameterised — no SQL injection risk). Unknown `sort` values silently fall back to `created_desc`.
+
+---
+
+## JS State (`dashboard-home.js`)
+
+All state is module-scoped inside the IIFE:
+
+| Variable | Purpose |
+|---|---|
+| `_loadedApps` | All applications currently rendered (may span multiple pages) |
+| `_totalCount` | Total matching count from last API response |
+| `_nextPage` | Next page to fetch for "Load more" |
+| `_isLoading` | Prevents concurrent fetches |
+| `_selected` | `Set<string>` of selected application IDs |
+| `_search`, `_status`, `_days`, `_sort` | Current active filter values |
+| `_searchTimer` | Debounce timer ID for search input (300 ms) |
+
+Session storage key: `'dash_filter_state'` — persists `search`, `status`, `days`, `sort`, `scrollY` across navigation (back button).
+
+---
+
+## Key Functions
+
+| Function | What it does |
+|---|---|
+| `loadApplications(reset)` | Fetch from API. `reset=true` starts from page 1; `reset=false` appends (Load more). |
+| `renderCard(app)` | Returns an HTML string for one application card. All user data passes through `escapeHtml()`. |
+| `renderApplications(reset)` | Renders `_loadedApps` into `#applicationsList`. Always shows the same "No applications yet" empty state when the list is empty — regardless of whether filters are active. |
+| `applyFilters()` | Reads DOM inputs → updates state → calls `loadApplications(true)`. |
+| `clearFilters()` | Resets all state + DOM inputs → calls `loadApplications(true)`. |
+| `saveFilterState()` | Writes current filter + scroll to `sessionStorage`. |
+| `restoreFilterState()` | Reads sessionStorage, updates `_*` vars + DOM, returns saved `scrollY`. |
+| `updateBulkBar()` | Shows/hides bulk actions bar; syncs select-all checkbox state. |
+| `updateFilterIndicator()` | No-op stub — no badge or clear button is shown in the header. |
+| `updateLoadMoreButton()` | Shows remaining count on the Load More button. |
+| `deleteApplication(id)` | Prompts via `window.showConfirm()`, then `DELETE /api/v1/applications/{id}`. |
+| `bulkDelete()` | Prompts, then fires parallel `DELETE` calls via `Promise.all`. |
+| `updateApplicationStatus(id, newStatus)` | `PATCH /api/v1/applications/{id}/status`, updates in-memory state, re-renders. |
+
+---
+
+## HTML Structure
+
+Each card uses a **2-column layout**: left column (title, company, meta) and right column (AI badge top, tracking buttons + trash bottom).
+
+```
+#applicationsList  (role="list")
+  └─ .application-card.border-status-{status}  (data-card-id="{detailId}")
+       └─ .card-layout
+            ├─ .card-left
+            │    ├─ h6.application-title
+            │    ├─ .company-name
+            │    └─ .application-meta
+            │         ├─ <span title="{absDate}"> relative timestamp
+            │         └─ match score (optional)
+            └─ .card-right
+                 ├─ .card-right-top
+                 │    ├─ .follow-up-badge  (shown when applied + stale ≥ 14 days)
+                 │    └─ .card-ai-badge.ai-{processing|ready|failed|draft}  (read-only)
+                 └─ .card-right-bottom
+                      ├─ .card-tracking-row  (only when analysis complete)
+                      │    ├─ button.track-btn.track-applied   (data-action="set-tracking" data-value="applied")
+                      │    ├─ button.track-btn.track-interview (data-action="set-tracking" data-value="interview")
+                      │    ├─ button.track-btn.track-accepted  (data-action="set-tracking" data-value="accepted")
+                      │    └─ button.track-btn.track-rejected  (data-action="set-tracking" data-value="rejected")
+                      └─ button.card-delete-btn  (data-action="delete" data-id)
+```
+
+### AI Analysis Badge vs. Tracking Stage Buttons
+
+These are **two separate concepts** — never combine them:
+
+| Concept | Where | What it shows |
+|---|---|---|
+| **AI analysis badge** (read-only) | top-right `.card-right-top` | `Analyzing…` (blue spinner), `✓ Ready` (cyan), `Failed` (red), `Draft` (gray) |
+| **Tracking stage buttons** (user-editable) | bottom-right `.card-right-bottom` | `Applied` / `Interview` / `Offer` / `Rejected` — only shown when analysis is complete |
+
+The AI badge reflects the backend workflow state. Tracking buttons let the user record where they are in the job process. The two are independent.
+
+**Toggle behaviour:** Clicking an already-active tracking button resets the status back to `completed` (untracked). The success message is:
+- Activating a stage → `"Marked as Applied."` / `"Marked as Interview."` etc.
+- Deactivating (toggle off) → `"Stage cleared."` — **never** `"Status updated to Completed."`
+
+---
+
+## CSS Classes
+
+### Application Cards
+| Class | Purpose |
+|---|---|
+| `.application-card` | Card container; `cursor-pointer` for card-click nav |
+| `.border-status-{status}` | 3px left border colored by status. Statuses: `draft`, `processing`, `ready`, `completed`, `analysis_complete`, `awaiting_confirmation`, `applied`, `interview`, `rejected`, `accepted`, `failed` |
+| `.card-layout` | `display: flex; gap: 1rem; align-items: stretch` — two-column layout |
+| `.card-left` | Left column: `flex: 1; flex-direction: column; gap: 0.2rem` |
+| `.card-right` | Right column: `flex-direction: column; align-items: flex-end; justify-content: space-between` |
+| `.card-right-top` | Badge + follow-up icon row |
+| `.card-right-bottom` | Tracking buttons + delete button row |
+| `.application-title` | Job title heading |
+| `.company-name` | Company name in accent color |
+| `.application-meta` | Date and match score row |
+| `.follow-up-badge` | Amber clock icon; shown when `status === applied` and `updated_at` is ≥ 14 days ago |
+| `.card-ai-badge` | Read-only analysis state pill; `pointer-events: none` |
+| `.ai-processing` | Blue — analysis running |
+| `.ai-ready` | Cyan — analysis complete |
+| `.ai-failed` | Red — analysis failed |
+| `.ai-draft` | Gray — draft state |
+| `.card-tracking-row` | Flex row of tracking buttons; hidden when status is `draft`/`processing`/`failed` |
+| `.track-btn` | Base tracking button style |
+| `.track-applied` / `.track-interview` / `.track-accepted` / `.track-rejected` | Per-stage color (amber/green/lime/red) |
+| `.track-btn-active` | Filled highlight for the currently-selected stage |
+| `.card-delete-btn` | Trash icon; always visible at `opacity: 0.45`; red on hover |
+
+### Section Header & Filter Bar
+All header and filter styles live in **`app.css`** (not in an inline `<style>` block — inline styles are blocked by CSP `style-src`).
+
+| Class | Purpose |
+|---|---|
+| `.dash-section-header` | Flex row (`align-items: center; gap: 1.25rem`) — title on left, filter bar on right |
+| `.dash-section-title` | `flex-shrink: 0` container for the "Applications" heading + results count |
+| `.dash-filter-bar` | `margin-left: auto` pushes filters to far right; flex row of search + 3 selects |
+| `.search-wrapper` | Relative container holding search icon + input |
+| `.search-icon` | Absolutely-positioned `fa-search` inside `.search-wrapper` |
+| `.search-input` | Custom-styled input — `width: 220px`, `padding: 0.75rem 1rem 0.75rem 1.75rem`; matches global `.form-control` height |
+| `.filter-select-auto` | Custom-styled `<select>` — `min-width: max-content; flex-shrink: 0`; prevents option text (e.g. "Company A–Z", "Recently updated") from being clipped when the selected option is wider than the initial collapsed width. **Never set `min-width: 0; flex-shrink: 1`** — that allows the select to shrink below its text width and clips option labels |
+| `.results-count` | "Showing X of Y" label; hidden via `.is-hidden` when total is 0 |
+
+**Do not use Bootstrap `form-control-sm` / `form-select-sm`** on these inputs — custom sizing in `app.css` controls height and width precisely.
+
+### Bulk Actions Bar
+| Class | Purpose |
+|---|---|
+| `.bulk-actions-bar` | Flex toolbar; toggled via `.is-hidden`. `role="toolbar"` |
+| `.selected-count` | "N selected" text |
+
+### Loading / Empty States
+| Class | Purpose |
+|---|---|
+| `.skeleton-card` | Shimmer placeholder card (3 shown on initial load) |
+| `.skeleton-line` | Individual shimmer line inside skeleton card |
+| `.skeleton-title`, `.skeleton-subtitle`, `.skeleton-meta`, `.skeleton-actions` | Line size variants |
+| `.empty-state` | Centered empty state (no apps / no filter results) |
+
+### Load More
+| Class | Purpose |
+|---|---|
+| `.load-more-wrapper` | Centered container; hidden via `.is-hidden` when no more pages |
+
+---
+
+## Event Delegation Pattern
+
+All interactive elements use `data-action` — **no inline `onclick`/`onchange`**.
+
+```javascript
+// Static elements → document-level listener
+document.addEventListener('click', e => {
+    const el = e.target.closest('[data-action]');
+    switch (el?.dataset.action) {
+        case 'load-more':   loadApplications(false); break;
+        case 'bulk-delete': bulkDelete(); break;
+        case 'logout':      logout(); break;
+    }
+});
+
+// Dynamic card elements → #applicationsList listener
+list.addEventListener('click', e => {
+    // e.stopPropagation on input prevents card navigation
+    // data-action="delete"      → deleteApplication(id)
+    // data-action="set-tracking" → updateApplicationStatus(id, value | 'completed' if already active)
+    // card body click (no action) → viewApplication(cardId)
+});
+list.addEventListener('change', e => {
+    // data-action="toggle-select" → toggles _selected Set
+});
+```
+
+### Tracking button toggle logic
+
+```javascript
+// In the set-tracking click handler:
+const chosen = actionEl.dataset['value'];
+const app = _loadedApps.find(a => String(a['id']) === id);
+const currentStatus = app ? String(app['status']).toLowerCase() : '';
+// Clicking the already-active button deactivates it
+updateApplicationStatus(id, currentStatus === chosen ? 'completed' : chosen);
+```
+
+---
+
+## Authentication Guard
+
+Two-layer gate — both must pass before the dashboard renders content:
+
+1. **`checkAuthentication()`** — checks the auth token AND `localStorage.getItem('profile_completed') !== 'true'`; if either fails, immediately redirects to `/auth/login` or `/profile/setup` respectively.
+2. **`loadUserData()` (authoritative server-side check)** — calls `GET /api/v1/profile/` and checks `data.completion_status?.profile_completed`; if `false`, executes `window.location.href = '/profile/setup'; return;` immediately — **never just shows a banner**. This is the hard gate that prevents users with incomplete profiles from accessing the dashboard even if localStorage is stale.
+
+```javascript
+// ✅ Correct — hard redirect, stop all further rendering
+if (!data.completion_status?.profile_completed) {
+    window.location.href = '/profile/setup';
+    return;
+}
+
+// ❌ Wrong — soft banner, user can still see broken dashboard
+if (!data.completion_status?.profile_completed) {
+    document.getElementById('profileCompletionBanner')?.classList.remove('d-none');
+}
+```
+
+The hard gate is required because the Chrome extension and all API endpoints fail or return 403 for incomplete profiles, so a soft banner just leaves users on a broken page.
+
+---
+
+## Status Filter
+
+The `#statusFilter` dropdown only exposes **user-tracking stages** — not AI analysis states:
+
+```html
+<select id="statusFilter">
+    <option value="">All Status</option>
+    <option value="APPLIED">Applied</option>
+    <option value="INTERVIEW">Interview</option>
+    <option value="ACCEPTED">Offer</option>
+    <option value="REJECTED">Rejected</option>
+</select>
+```
+
+`Processing` and `Completed` are AI-internal states and must **not** appear in the filter. Users track progress through the four stages above, not through analysis states.
+
+---
+
+## Real-Time Updates from Extension (`handleUserWsMessage`)
+
+`handleUserWsMessage` listens for three WS event types:
+
+| type | action |
+|---|---|
+| `agent_update` — session **not yet** in `_loadedApps` | Call `loadApplications(true)` to surface a card submitted from another tab (extension); return immediately |
+| `agent_update` — session already in `_loadedApps` | Ignore (workflow progress update, no card action needed) |
+| `workflow_complete` / `workflow_error` | Mark notified → reload apps → fire `notifyReady` toast |
+
+**Critical ordering for deduplication:**
+1. `_markAnalysisNotified(sessionId)` — mark BEFORE `await loadApplications(true)` so that `syncProcessingApps` inside `renderApplications` sees the session as already handled and skips its own `notifyReady` call.
+2. After `loadApplications` resolves, look up the refreshed `appAfter` from `_loadedApps` to get the AI-extracted title/company for the toast text.
+
+```javascript
+async function handleUserWsMessage(msg) {
+    const type      = String(msg['type'] || '');
+    const sessionId = String(msg['session_id'] || '');
+    if (type !== 'workflow_complete' && type !== 'workflow_error' && type !== 'agent_update') return;
+
+    const appBefore = _loadedApps.find(a => String(a['workflow_session_id'] || a['id']) === sessionId);
+
+    if (type === 'agent_update' && !appBefore) { loadApplications(true); return; }
+    if (type !== 'workflow_complete' && type !== 'workflow_error') return;
+
+    if (appBefore) _processingApps.delete(String(appBefore['id'] ?? ''));
+
+    _markAnalysisNotified(sessionId);            // ← BEFORE await
+    await loadApplications(true);
+
+    const appAfter    = _loadedApps.find(a => String(a['workflow_session_id'] || a['id']) === sessionId);
+    const jobTitle    = appAfter ? String(appAfter['job_title']    || 'Job Application') : 'Job Application';
+    const companyName = appAfter ? String(appAfter['company_name'] || 'Company')         : 'Company';
+    notifyReady(jobTitle, companyName, sessionId, type === 'workflow_error');
+}
+```
+
+## Toast Deduplication — `notifyReady`
+
+`notifyReady` is guarded at its **entry point** to prevent duplicate toasts regardless of which code path calls it (WS handler, poll fallback, or `syncProcessingApps` "came back" path):
+
+```javascript
+function notifyReady(jobTitle, companyName, detailId, failed) {
+    // Guard: bail immediately if already notified (WS + poll race, or multiple calls)
+    if (detailId && _isAnalysisNotified(detailId)) return;
+
+    _markAnalysisNotified(detailId);  // Mark BEFORE DOM creation so concurrent callers see it
+
+    // ... create and append alert DOM element ...
+}
+```
+
+**Never remove this guard** — without it, the WebSocket handler and the `pollProcessingApps` fallback can both fire within the same event-loop turn (the poll's HTTP response arrives while `handleUserWsMessage` is awaiting `loadApplications`), producing two identical toasts.
+
+## Processing Cards — Skeleton Shimmer While Analyzing
+
+`renderCard` shows skeleton shimmer lines instead of empty or placeholder text when `status === 'processing'` and `job_title` / `company_name` are not yet populated:
+
+```javascript
+const isProcessing = status === 'processing';
+const titleHtml = app['job_title']
+    ? `<h6 class="application-title">${escapeHtml(String(app['job_title']))}</h6>`
+    : isProcessing
+        ? `<div class="skeleton-line skeleton-title" aria-hidden="true"></div>`
+        : `<h6 class="application-title">Job Application</h6>`;
+const companyHtml = app['company_name']
+    ? `<div class="company-name">${escapeHtml(String(app['company_name']))}</div>`
+    : isProcessing
+        ? `<div class="skeleton-line skeleton-subtitle" aria-hidden="true"></div>`
+        : `<div class="company-name">—</div>`;
+```
+
+The skeleton classes (`.skeleton-line`, `.skeleton-title`, `.skeleton-subtitle`) are defined in `app.css` with a shimmer animation. **Never show "Job Application" / "Company" placeholder text for a processing card** — the skeleton communicates loading state without suggesting incorrect data.
+
+---
+
+## Cross-Page Navbar Notification Badge (`navbar-notifications.js`)
+
+`ui/static/js/navbar-notifications.js` is loaded globally in `base.html`. It shows a small pulsing cyan dot on the "← Back to Dashboard" button in `navbar_subpage.html` when an analysis completes while the user is on a subpage (Career Tools, New Application, etc.).
+
+### localStorage keys
+| Key | Purpose |
+|---|---|
+| `applypilot_tracked_sessions` | `[{sessionId}]` — sessions to watch; added by `dashboard-new-application.js` on submit |
+| `applypilot_badge` | `'1'` when a completed analysis hasn't been toasted yet on the dashboard |
+| `applypilot_notified_analyses` | Managed by `dashboard-home.js`; read-only here — sessions already toasted are skipped |
+
+### Behaviour
+- **On subpages**: opens the same `/api/v1/ws/user` WebSocket as `dashboard-home.js`; on `workflow_complete` / `workflow_error` sets `applypilot_badge = '1'` and shows the dot
+- **One-shot load check**: on page load, checks any tracked sessions once (catches completions while browser was closed)
+- **On `/dashboard`**: clears `applypilot_badge` immediately and exits — `dashboard-home.js` owns all toasts there
+- **`window.clearNavBadge()`**: exposed function; called by `dashboard-home.js` `DOMContentLoaded` to clear the dot when user arrives on the dashboard
+
+### Adding the session to tracked list (in `dashboard-new-application.js`)
+```javascript
+const parsed = JSON.parse(responseText);
+const sessionId = parsed && parsed.session_id;
+if (sessionId) {
+    const raw = localStorage.getItem('applypilot_tracked_sessions') || '[]';
+    const tracked = JSON.parse(raw);
+    tracked.push({ sessionId });
+    if (tracked.length > 20) tracked.splice(0, tracked.length - 20);
+    localStorage.setItem('applypilot_tracked_sessions', JSON.stringify(tracked));
+}
+```
+
+### Badge dot HTML (in `navbar_subpage.html`)
+```html
+<a href="/dashboard" class="nav-back-btn">
+    <i class="fas fa-arrow-left"></i>Back to Dashboard
+    <span class="nav-badge-dot is-hidden" aria-label="Analysis ready"></span>
+</a>
+```
+
+CSS for `.nav-badge-dot` lives in `app.css` (not a page `<style>` block). Always include `.nav-badge-dot.is-hidden { display: none }` to ensure the companion hide rule wins.
+
+---
+
+## Non-Negotiables
+
+1. **Never re-add `/dashboard/history`** — the route is deleted; all application listing is on `/dashboard`
+2. **All user data through `escapeHtml()`** in `renderCard()` — job titles and company names may contain HTML entities (`&amp;`, `&#x27;`) from the backend sanitizer; `escapeHtml()` in `dashboard-home.js` must use the decode-first pattern (decode `&amp;` → `&` FIRST, then named entities, then re-encode) to avoid rendering `&amp;` literally in card titles. See `frontend-js-strict.mdc` §1.
+3. **`window.showConfirm()`** for all destructive actions (delete, bulk-delete) — never `confirm()`
+4. **`saveFilterState()`** before any navigation (`viewApplication()`, etc.) so the browser back button restores the same filters and scroll position
+5. **No `style="..."` in `renderCard()` output** — use CSS classes; inline styles are blocked by CSP `style-src`
+6. **`updateApplicationStatus()` updates in-memory state** before re-rendering so the UI is responsive without a full reload
+7. **Bulk delete uses `Promise.all`** — parallel requests, not sequential
+8. **`loadUserData()` must hard-redirect to `/profile/setup` when `profile_completed` is false** — `window.location.href = '/profile/setup'; return;` with an immediate `return` to stop all further rendering; never replace this with a banner or toast
+9. **All dashboard section-header CSS goes in `app.css`, never in an inline `<style>` block** — the CSP `style-src` nonce-based policy means inline `<style>` blocks without a correct server-issued nonce are silently ignored by the browser; external stylesheet rules always apply
+10. **The empty state is always "No applications yet"** — do not show a different message or icon when filters are active; the user can already see which filters are set in the dropdowns; a single consistent empty state is simpler and less noisy
+11. **No "Filtered" badge and no "×" clear button in the header** — the dropdowns themselves communicate which filters are active; extra indicators are redundant UI noise
+12. **Never use Bootstrap `form-control-sm` / `form-select-sm` on dashboard filter inputs**
+13. **Never use a `<select>` for inline card status** — the status dropdown was replaced with a read-only AI badge + explicit tracking stage buttons; do not restore the dropdown
+14. **The status filter only shows tracking stages** (Applied, Interview, Offer, Rejected) — never add Processing or Completed back to `#statusFilter`
+15. **Clicking an active tracking button must toggle it off** (reset to `completed`), not re-save the same status — the success toast must say `"Stage cleared."` not `"Status updated to Completed."`
+16. **`window.clearNavBadge()` must be called in `dashboard-home.js` DOMContentLoaded** before showing toasts — it clears the navbar dot that was set on subpages while the user was away from the dashboard
+17. **`handleUserWsMessage` must handle `agent_update` for new sessions** — if `type === 'agent_update'` and the session is NOT in `_loadedApps`, call `loadApplications(true)` immediately so extension-submitted jobs appear on the dashboard without a manual refresh
+18. **`_markAnalysisNotified` must be called BEFORE `await loadApplications(true)` in `handleUserWsMessage`** — if called after, `syncProcessingApps` inside `renderApplications` may fire a second `notifyReady` for the same session before the mark is set
+19. **`notifyReady` must guard at entry with `if (_isAnalysisNotified(detailId)) return`** — the WS handler and the poll fallback can race; without the guard two identical toasts appear for the same analysis
+20. **Processing cards must show skeleton shimmer, not placeholder text** — render `.skeleton-line.skeleton-title` / `.skeleton-line.skeleton-subtitle` when `status === 'processing'` and `job_title` / `company_name` are empty; never show `"Job Application"` / `"Company"` for a card that is still being analyzed

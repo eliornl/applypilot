@@ -1,0 +1,334 @@
+{% extends "base.html" %}
+{% block title %}Verify Email | {{ app_name or "ApplyPilot" }}{% endblock %}
+{% block description %}Verify your email address{% endblock %}
+{% block extra_head %}
+<style nonce="{{ request.state.csp_nonce | default('') }}">
+        .auth-page {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 1rem;
+        }
+
+        .auth-container {
+            max-width: 460px;
+            width: 100%;
+        }
+
+        .auth-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-xl);
+            padding: 2.5rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .auth-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--accent-gradient);
+        }
+
+        .auth-logo {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .brand-icon {
+            width: 60px;
+            height: 60px;
+            background: var(--accent-gradient);
+            border-radius: var(--radius-lg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            color: white;
+        }
+
+        .brand-text {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-top: 0.5rem;
+        }
+
+        .brand-accent {
+            color: var(--accent-primary);
+        }
+
+        .auth-title {
+            color: var(--text-primary);
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            text-align: center;
+        }
+
+        .auth-subtitle {
+            color: var(--text-secondary);
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        /* Code Input Styling */
+        .code-input-container {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 2rem 0;
+        }
+
+        .code-input {
+            width: 52px;
+            height: 64px;
+            text-align: center;
+            font-size: 28px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-color);
+            border-radius: var(--radius-md);
+            color: var(--accent-primary);
+            transition: all 0.2s ease;
+        }
+
+        .code-input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.15);
+        }
+
+        .code-input.filled {
+            border-color: var(--accent-primary);
+            background: rgba(0, 212, 255, 0.05);
+        }
+
+        .code-input.error {
+            border-color: var(--danger);
+            animation: shake 0.5s ease;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+
+        /* Email display */
+        .email-display {
+            background: rgba(0, 212, 255, 0.05);
+            border: 1px solid rgba(0, 212, 255, 0.2);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .email-display .email {
+            color: var(--accent-primary);
+            font-weight: 600;
+        }
+
+        /* Buttons */
+        .btn-primary-glow {
+            background: var(--accent-gradient);
+            border: none;
+            border-radius: var(--radius-md);
+            padding: 0.875rem 1.5rem;
+            font-weight: 600;
+            color: white;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary-glow:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: var(--glow-accent);
+            color: white;
+        }
+
+        .btn-primary-glow:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* Resend section */
+        .resend-section {
+            text-align: center;
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .resend-section p {
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+
+        .resend-link {
+            color: var(--accent-primary);
+            text-decoration: none;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .resend-link:hover {
+            text-decoration: underline;
+        }
+
+        .resend-link.disabled {
+            color: var(--text-muted);
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        /* Timer */
+        .timer {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        /* Alert */
+        .alert {
+            border-radius: var(--radius-md);
+            border: none;
+            padding: 0.875rem 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .alert-danger {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+        }
+
+        .alert-success {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+        }
+
+        /* Success state */
+        .success-icon {
+            font-size: 4rem;
+            color: var(--success);
+        }
+
+        .auth-footer {
+            text-align: center;
+            margin-top: 1.5rem;
+        }
+
+        .auth-footer a {
+            color: var(--accent-primary);
+            text-decoration: none;
+        }
+
+        .auth-footer a:hover {
+            text-decoration: underline;
+        }
+
+        /* ── CSP-safe utility classes (replaces inline style= attributes) ── */
+        #emailInput {
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.875rem;
+        }
+    </style>
+{% endblock %}
+{% block content %}
+    <main class="auth-page">
+    <div class="auth-container">
+        <div class="auth-card">
+            <!-- Logo -->
+            <div class="auth-logo">
+                <a href="/" class="text-decoration-none">
+                    <div class="brand-icon mx-auto mb-3">
+                        <i class="fas fa-rocket"></i>
+                    </div>
+                    <h1 class="brand-text">Apply<span class="brand-accent">Pilot</span></h1>
+                </a>
+            </div>
+
+            <!-- Code Entry Section -->
+            <div id="codeSection">
+                <h2 class="auth-title">Enter Verification Code</h2>
+                <p class="auth-subtitle">We sent a 6-digit code to your email</p>
+
+                <div class="email-display" id="emailDisplay">
+                    <span class="email" id="userEmail">your@email.com</span>
+                </div>
+
+                <div id="alertContainer"></div>
+
+                <form id="verifyForm">
+                    <div class="code-input-container">
+                        <input type="text" class="code-input" maxlength="1" inputmode="numeric" pattern="[0-9]" data-index="0" autocomplete="off">
+                        <input type="text" class="code-input" maxlength="1" inputmode="numeric" pattern="[0-9]" data-index="1" autocomplete="off">
+                        <input type="text" class="code-input" maxlength="1" inputmode="numeric" pattern="[0-9]" data-index="2" autocomplete="off">
+                        <input type="text" class="code-input" maxlength="1" inputmode="numeric" pattern="[0-9]" data-index="3" autocomplete="off">
+                        <input type="text" class="code-input" maxlength="1" inputmode="numeric" pattern="[0-9]" data-index="4" autocomplete="off">
+                        <input type="text" class="code-input" maxlength="1" inputmode="numeric" pattern="[0-9]" data-index="5" autocomplete="off">
+                    </div>
+
+                    <button type="submit" class="btn btn-primary-glow w-100" id="verifyBtn" disabled>
+                        <span class="btn-text">Verify Email</span>
+                        <span class="btn-loader d-none">
+                            <i class="fas fa-spinner fa-spin"></i> Verifying...
+                        </span>
+                    </button>
+                </form>
+
+                <div class="resend-section">
+                    <p>Didn't receive the code?</p>
+                    <a class="resend-link" id="resendLink" role="button" tabindex="0" data-action="resendCode">Resend Code</a>
+                    <span class="timer d-none" id="resendTimer"></span>
+                </div>
+            </div>
+
+            <!-- Success Section -->
+            <div id="successSection" class="d-none text-center">
+                <div class="success-icon mb-4">
+                    <i class="fas fa-check-circle"></i>
+                </div>
+                <h2 class="auth-title">Email Verified!</h2>
+                <p class="auth-subtitle" id="successMessage">Your email has been verified successfully. Welcome to ApplyPilot!</p>
+                <a href="/profile/setup" id="continueBtn" class="btn btn-primary-glow w-100 mt-4">
+                    <i class="fas fa-user-edit me-2"></i> Complete Your Profile
+                </a>
+            </div>
+
+            <!-- No Email Section (fallback) -->
+            <div id="noEmailSection" class="d-none">
+                <h2 class="auth-title">Enter Your Email</h2>
+                <p class="auth-subtitle">Enter your email to receive a verification code</p>
+
+                <form id="emailForm">
+                    <div class="mb-3">
+                        <input type="email" class="form-control" id="emailInput" placeholder="Enter your email" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary-glow w-100">
+                        <span class="btn-text">Send Verification Code</span>
+                        <span class="btn-loader d-none">
+                            <i class="fas fa-spinner fa-spin"></i> Sending...
+                        </span>
+                    </button>
+                </form>
+
+                <div class="auth-footer">
+                    <a href="/auth/login">Back to Sign In</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    </main>
+{% endblock %}
+{% block page_scripts %}
+<script src="{{ asset_url('js/auth-verify-email.js') }}"></script>
+
+{% endblock %}

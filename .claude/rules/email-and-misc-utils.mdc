@@ -1,0 +1,181 @@
+---
+description: Email service, resume parser, BYOK encryption utilities
+globs: utils/email_service.py,utils/resume_parser.py,utils/encryption.py
+alwaysApply: false
+---
+
+# Email, Resume Parser & Encryption Utilities
+
+## Email Service (Gmail SMTP)
+```python
+from utils.email_service import EmailService
+
+email_service = EmailService()
+
+await email_service.send_password_reset_email(
+    to_email="user@example.com",
+    reset_token="token",
+    reset_url="https://app.example.com/auth/reset-password?token=xxx",
+)
+await email_service.send_verification_email(
+    to_email="user@example.com",
+    verification_token="token",
+    verification_url="https://app.example.com/auth/verify-email?token=xxx",
+)
+await email_service.send_welcome_email(to_email="user@example.com", user_name="Jane Doe")
+```
+
+### When to Send the Welcome Email
+- **Email/password registration**: sent after successful `POST /auth/verify-code` (not at registration time, so unverified users don't get it).
+- **Google OAuth new user**: sent immediately inside the OAuth callback after the new user record is committed — Google has already verified the email. Existing Google users logging in again do **not** get a second welcome email.
+
+### Email Design Standards (all three transactional emails must match)
+
+All three emails — welcome, password reset, and verification code — share the same structural and visual template:
+
+| Property | Value |
+|----------|-------|
+| Outer container max-width | `580px` |
+| Card `border-radius` | `20px` |
+| Header corner radius | `20px 20px 0 0` |
+| Footer corner radius | `0 0 20px 20px` |
+| Title (`h1`) font size | `28px` |
+| Subtitle text | `"Companion"` |
+| Greeting (`h2`) font size | `22px`, `font-weight: 600` |
+| Page background | `#0d1117` |
+| Card background | `#161b22` |
+| Accent gradient | `linear-gradient(135deg, #00d4ff 0%, #7c3aed 100%)` |
+
+**Never deviate from these values** when editing a single email — update all three together to keep them consistent.
+
+### Absolute URLs in Email Templates — Always Use `settings.base_url`
+
+Email clients (Gmail, Outlook, etc.) do **not** resolve relative URLs. Every link or button inside an email must be an absolute URL built from `self.settings.base_url`:
+
+```python
+# ✅ Correct
+profile_setup_url = f"{self.settings.base_url.rstrip('/')}/profile/setup"
+
+# ❌ Wrong — renders as http:///profile/setup in Gmail
+href="/profile/setup"
+```
+
+This applies to all CTA buttons (Get Started, Reset Password, Verify Email) and any other clickable links in HTML content.
+
+### Welcome Email — New User Destination
+
+The "Get Started" button in the welcome email links to `/profile/setup`, not `/dashboard`. New users have not completed their profile and cannot access the full dashboard:
+
+```python
+dashboard_url = f"{self.settings.base_url.rstrip('/')}/profile/setup"
+```
+
+### Password Reset Email — Content Rules
+
+- **No "Password Reset Request" heading** — the subject line already makes the purpose clear.
+- **No fallback plain-text link** ("If the button doesn't work, copy and paste…") — the button is sufficient; the `text_content` version contains the URL separately.
+- Reset link is valid for **1 hour** (`PASSWORD_RESET_TOKEN_EXPIRY_SECONDS = 3600` in `api/auth.py`).
+- Old passwords **can** be reused — there is no reuse block in the reset flow (intentional consumer-UX decision).
+- After a successful reset the user is redirected to `/auth/login` — they must log in manually with the new password.
+
+### Numbered Step Circles in Email HTML
+
+Email clients often distort CSS `border-radius` on `<td>` elements, producing ovals instead of circles. To render a reliable circular badge, always use an **inner `<div>`** with explicit `width`, `height`, and `line-height`:
+
+```html
+<td width="28" valign="top" style="padding-top: 1px;">
+    <div style="width: 28px; height: 28px; line-height: 28px;
+                background: linear-gradient(135deg, #00d4ff 0%, #7c3aed 100%);
+                border-radius: 14px; text-align: center;
+                color: #ffffff; font-weight: 700; font-size: 13px;
+                font-family: -apple-system, BlinkMacSystemFont, sans-serif;">1</div>
+</td>
+```
+
+Never rely on `border-radius` alone on a `<td>` for circular shapes in email HTML.
+
+### SMTP Config
+```bash
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=your-email@gmail.com
+SMTP_PASSWORD=your-app-password   # Gmail App Password, not login password — stored as SecretStr
+SMTP_FROM_EMAIL=your-email@gmail.com
+SMTP_FROM_NAME=ApplyPilot
+```
+
+`SMTP_PASSWORD` is a `SecretStr` in settings. Always call `.get_secret_value()` before passing to `smtplib`:
+```python
+server.login(self.smtp_username, settings.smtp_password.get_secret_value())
+```
+
+### Email Header Injection Prevention
+**Never** insert `to_email` or `subject` directly into MIME headers. Always sanitize first:
+
+```python
+import re
+_HEADER_CONTROL_CHARS = re.compile(r"[\r\n\x00]")
+
+def _sanitize_email_header(value: str) -> str:
+    """Strip CRLF and null bytes that would allow header injection."""
+    return _HEADER_CONTROL_CHARS.sub("", value)
+
+# In send_email:
+safe_to_email = _sanitize_email_header(to_email)
+safe_subject  = _sanitize_email_header(subject)
+message["To"]      = safe_to_email
+message["Subject"] = safe_subject
+server.sendmail(self.from_email, safe_to_email, message.as_string())
+```
+
+An attacker-controlled email address like `victim@x.com\r\nBcc: spam@evil.com` would inject a BCC header without sanitization.
+
+### HTML Safety in Email Templates
+All user-controlled values (names, URLs) inserted into HTML email templates must be escaped:
+
+```python
+import html
+
+greeting = f"Hello, {html.escape(user_name)}!"
+# Never: f"Hello, {user_name}!"
+```
+
+## Resume Parser
+```python
+from utils.resume_parser import parse_resume_from_file, SUPPORTED_EXTENSIONS
+# SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt"}
+
+parsed = await parse_resume_from_file(file_content: bytes, filename: str)
+# Returns: full_name, email, phone, city, state, country, professional_title,
+#          years_experience, summary, work_experience, skills, education, parsing_confidence
+```
+- PDF extraction: PyPDF2
+- DOCX extraction: python-docx
+- API endpoint: `POST /api/v1/profile/parse-resume` (multipart `resume` field)
+- Profile setup wizard auto-fills form with `autoFillProfile()` JS function
+
+## BYOK Encryption
+```python
+from utils.encryption import encrypt_api_key, decrypt_api_key, validate_gemini_api_key
+
+encrypted = encrypt_api_key(plaintext_key)    # before DB storage
+plaintext = decrypt_api_key(encrypted_key)    # before use in agents
+is_valid  = validate_gemini_api_key(api_key)  # validate format before saving
+```
+Stored in `users.gemini_api_key_encrypted` (TEXT).
+
+**LLM cache invalidation on key change**: When a user updates or deletes their BYOK key, invalidate all cached LLM responses for that user. Otherwise the new key may receive results generated under the old key.
+
+```python
+from utils.cache import invalidate_user_llm_cache
+
+await invalidate_user_llm_cache(str(user_id))  # call after set and delete
+```
+
+Key management endpoints:
+```
+GET    /api/v1/profile/api-key/status   # has key?
+POST   /api/v1/profile/api-key          # save/update
+DELETE /api/v1/profile/api-key          # delete
+POST   /api/v1/profile/api-key/validate # validate before saving
+```

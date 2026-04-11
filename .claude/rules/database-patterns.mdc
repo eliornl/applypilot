@@ -1,0 +1,246 @@
+---
+description: PostgreSQL/SQLAlchemy patterns — JSONB, soft delete, indexes, migrations, User model
+globs: models/**/*.py,alembic/**/*.py,api/**/*.py
+alwaysApply: false
+---
+
+# Database Patterns
+
+## Soft Delete on `job_applications`
+The `JobApplication` model uses soft-delete via `deleted_at` (nullable `DateTime`). Always filter it in queries:
+
+```python
+# ✅ Always filter soft-deleted records
+select(JobApplication).where(
+    and_(JobApplication.user_id == user_id, JobApplication.deleted_at.is_(None))
+)
+
+# Delete = set timestamp, never hard DELETE
+application.deleted_at = datetime.now(timezone.utc)
+await db.commit()
+```
+
+## `User.is_admin` Field
+`users.is_admin` (Boolean, default False). Check before allowing admin-only operations:
+
+```python
+if not current_user.get("is_admin"):
+    raise forbidden_error("Admin access required")
+```
+
+## JSONB Fields — Always `flag_modified()`
+SQLAlchemy cannot detect in-place mutations to JSONB columns. Call `flag_modified()` for **every JSONB field update** before `commit()`:
+
+```python
+from sqlalchemy.orm.attributes import flag_modified
+
+user_profile.skills = new_skills
+flag_modified(user_profile, "skills")
+await db.commit()
+```
+
+JSONB columns in this codebase:
+- `UserProfile`: `work_experience`, `skills`, `job_types`, `work_arrangements`, `desired_salary_range`, `desired_company_sizes`
+
+## `UserProfile` — Field Reference
+
+The `UserProfile` model contains exactly these fields. **There is no `education` field.**
+
+| Field | Type | Notes |
+|---|---|---|
+| `professional_title` | String | Current job title |
+| `years_experience` | Integer | |
+| `summary` | Text | Professional summary, 3–4 sentences |
+| `city` | String(100) | Optional location |
+| `state` | String(100) | Optional |
+| `country` | String(100) | Optional |
+| `work_experience` | JSONB | List of past roles with title, company, dates, accomplishments |
+| `skills` | JSONB | List of skill strings |
+| `job_types` | JSONB | e.g. `["full-time", "contract"]` |
+| `work_arrangements` | JSONB | e.g. `["remote", "hybrid"]` |
+| `desired_salary_range` | JSONB | `{min, max}` |
+| `desired_company_sizes` | JSONB | e.g. `["startup", "medium"]` |
+| `is_student` | Boolean | |
+| `willing_to_relocate` | Boolean | default False |
+| `requires_visa_sponsorship` | Boolean | default False |
+| `has_security_clearance` | Boolean | default False |
+| `max_travel_preference` | String | Optional travel % or category |
+
+**Never add `education`, `location_preferences`, or `target_role` as profile fields** — they do not exist in the schema, the profile setup UI, or any agent prompt. Any content referencing these fields (help text, privacy policy, UI labels) must be corrected.
+- `WorkflowSession`: `job_analysis`, `company_research`, `profile_matching`, `resume_recommendations`, `cover_letter`, `interview_prep`, `agent_status`, `completed_agents`, `failed_agents`, `error_messages`, `warning_messages`, `job_input_data`, `user_data`, `agent_start_times`, `agent_durations`
+
+When updating multiple JSONB fields, loop:
+```python
+for field in ("job_types", "work_arrangements", "desired_salary_range"):
+    flag_modified(user_profile, field)
+await db.commit()
+```
+
+## Single-Field Updates — Direct SQL UPDATE
+Avoid loading the full ORM object just to set one field (race condition risk):
+
+```python
+from sqlalchemy import update
+
+await db.execute(
+    update(WorkflowSession)
+    .where(WorkflowSession.session_id == session_id)
+    .values(workflow_status="in_progress")
+)
+await db.commit()
+```
+
+## Partial Indexes for Soft-Delete Queries
+`job_applications` has three partial indexes with `WHERE deleted_at IS NULL`. These make every active-record query O(log n) on just the live rows, not the full table:
+
+```python
+# Migration: 20260306_0001_014_add_soft_delete_partial_indexes.py
+Index("ix_job_applications_user_status_active",
+      "user_id", "status",
+      postgresql_where=text("deleted_at IS NULL"))
+
+Index("ix_job_applications_user_created_active",
+      "user_id", "created_at",
+      postgresql_where=text("deleted_at IS NULL"))
+
+Index("ix_job_applications_user_active",
+      "user_id",
+      postgresql_where=text("deleted_at IS NULL"))
+```
+
+When adding new filtered queries on soft-delete tables, always check whether a partial index already covers the filter. If not, add one in a new migration. Never add a full index when a partial one suffices — the partial index is smaller and faster.
+
+## Composite Indexes Pattern
+Follow the existing index naming convention `ix_{table}_{field1}_{field2}`:
+
+```python
+__table_args__ = (
+    Index("ix_workflow_user_status", "user_id", "workflow_status"),
+    Index("ix_workflow_user_created", "user_id", "created_at"),
+)
+```
+
+## Alembic Migration Naming Convention
+Files: `{YYYYMMDD}_0001_{NNN}_{description}.py`
+- Revision ID: `{YYYYMMDD}_{NNN}` (e.g. `20260218_006`)
+- `down_revision` must reference the previous migration
+- Always create an index alongside a new nullable column that will be filtered
+
+## Relationship Loading
+- `lazy="selectin"` — for single-object relationships that are usually needed (e.g. `User.profile`)
+- `lazy="noload"` — for collection relationships to prevent N+1 (e.g. `User.applications`)
+- Load explicitly with `selectinload()` / `joinedload()` when needed in a query
+
+## `password_hash` Constraint — Local Auth Users
+The `password_hash` column is nullable to support OAuth-only accounts. A DB-level `CheckConstraint` enforces the integrity rule:
+
+```python
+# models/database.py — User model
+__table_args__ = (
+    CheckConstraint(
+        "(auth_method = 'google' AND password_hash IS NULL) OR (auth_method != 'google' AND password_hash IS NOT NULL)",
+        name="ck_users_password_hash_auth_method",
+    ),
+)
+```
+
+Never set `password_hash = None` on a local-auth user. Never expect `password_hash` to be non-null for Google-only users.
+
+## Upsert with Concurrent Request Protection
+When doing SELECT-then-INSERT (upsert), two concurrent requests can both see "no row" and both attempt INSERT, causing one to fail with `IntegrityError`. Use `begin_nested()` (savepoint) pattern:
+
+```python
+from sqlalchemy.exc import IntegrityError
+
+result = await db.execute(
+    select(UserWorkflowPreferences).where(UserWorkflowPreferences.user_id == user_id)
+)
+prefs_row = result.scalar_one_or_none()
+
+if prefs_row is None:
+    try:
+        async with db.begin_nested():  # savepoint
+            prefs_row = UserWorkflowPreferences(id=uuid.uuid4(), user_id=user_id)
+            db.add(prefs_row)
+    except IntegrityError:
+        # Savepoint auto-rolled back; parent transaction is still valid.
+        # DO NOT call await db.rollback() here — it would kill the parent transaction.
+        result2 = await db.execute(
+            select(UserWorkflowPreferences).where(UserWorkflowPreferences.user_id == user_id)
+        )
+        prefs_row = result2.scalar_one()
+```
+
+## Orphaned Session Cleanup
+
+`main.py` `lifespan()` calls `_cleanup_orphaned_sessions()` at startup. Resets sessions stuck in `INITIALIZED` or `IN_PROGRESS` older than 2 hours to `FAILED`.
+
+The cleanup endpoint `POST /api/v1/admin/internal/cleanup/orphaned-sessions` can also be called externally (e.g. by a cron job). It is protected by `secrets.compare_digest` on the `CLOUD_SCHEDULER_SECRET` header and is in `MAINTENANCE_BYPASS_PATHS` so it runs during maintenance mode.
+
+## Bulk Deletion for Account Data (GDPR Right to Erasure)
+When deleting a user account, use bulk SQL `DELETE` statements (not ORM `.delete()` loops). One atomic statement per table:
+
+```python
+from sqlalchemy import delete as sa_delete
+
+await db.execute(sa_delete(JobApplication).where(JobApplication.user_id == user_id))
+await db.execute(sa_delete(WorkflowSession).where(WorkflowSession.user_id == user_id))
+await db.execute(sa_delete(UserWorkflowPreferences).where(UserWorkflowPreferences.user_id == user_id))
+await db.execute(sa_delete(UserProfileModel).where(UserProfileModel.user_id == user_id))
+await db.execute(sa_delete(User).where(User.id == user_id))
+await db.commit()
+```
+
+This is atomic (all in one transaction), efficient (single SQL per table), and avoids N+1 ORM delete loops.
+
+## `UserWorkflowPreferences` — Per-User Workflow Settings
+A dedicated 1-to-1 table keyed on `user_id` (unique index + CASCADE delete). **No JSONB** — all fields are typed columns with server-side defaults so queries are indexable and migrating new fields is clean.
+
+```
+Table: user_workflow_preferences
+  id                       UUID PK
+  user_id                  UUID FK → users.id (unique, CASCADE)
+  workflow_gate_threshold  FLOAT   NOT NULL  DEFAULT 0.5
+  auto_generate_documents  BOOLEAN NOT NULL  DEFAULT false
+  cover_letter_tone        VARCHAR(32) NOT NULL DEFAULT 'professional'
+  resume_length            VARCHAR(16) NOT NULL DEFAULT 'concise'
+  preferred_model          VARCHAR(64) NULLABLE DEFAULT NULL
+  created_at / updated_at  TIMESTAMPTZ
+```
+
+**Upsert pattern** — create the row on first PATCH, never on GET:
+
+```python
+result = await db.execute(
+    select(UserWorkflowPreferences).where(UserWorkflowPreferences.user_id == user_id)
+)
+prefs_row = result.scalar_one_or_none()
+
+if prefs_row is None:
+    prefs_row = UserWorkflowPreferences(id=uuid.uuid4(), user_id=user_id, **defaults)
+    db.add(prefs_row)
+
+# Apply only the fields that were sent in the request
+if request.workflow_gate_threshold is not None:
+    prefs_row.workflow_gate_threshold = request.workflow_gate_threshold
+# … etc
+await db.commit()
+```
+
+**Inject into workflow state** at `start_workflow` (not inside the agents):
+
+```python
+# api/workflow.py — before dispatching background task
+prefs_result = await db.execute(
+    select(UserWorkflowPreferences).where(UserWorkflowPreferences.user_id == user_id)
+)
+prefs_row = prefs_result.scalar_one_or_none()
+user_data["application_preferences"] = prefs_row.to_dict() if prefs_row else {}
+```
+
+The workflow then passes this as `workflow_preferences` in `WorkflowState` so agents can read it without touching the DB.
+
+**Valid values** (enforced in the API layer):
+- `cover_letter_tone`: `professional` | `conversational` | `enthusiastic`
+- `resume_length`: `concise` | `detailed`
+- `preferred_model`: one of the values in `_VALID_MODELS` set in `api/profile.py`, or `null`

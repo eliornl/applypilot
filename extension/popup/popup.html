@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ApplyPilot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="popup-header">
+      <div class="logo">
+        <div class="logo-icon">
+          <i class="fas fa-rocket"></i>
+        </div>
+        <span>Apply<span class="brand-accent">Pilot</span></span>
+      </div>
+      <div id="authStatus" class="auth-status">
+        <span class="status-dot"></span>
+      </div>
+    </header>
+
+    <!-- Inline notification bar (replaces floating toast) -->
+    <div id="popupNotification" class="popup-notification hidden" role="alert" aria-live="polite"></div>
+
+    <!-- Not Authenticated View -->
+    <div id="notAuthView" class="view">
+      <div class="login-section">
+        <div class="login-header">
+          <h3>Sign In</h3>
+          <p>Enter your ApplyPilot credentials</p>
+        </div>
+
+        <form id="loginForm" class="login-form">
+          <div class="form-group">
+            <label for="loginEmail">Email</label>
+            <input type="email" id="loginEmail" class="form-input"
+              placeholder="you@example.com" required autocomplete="email">
+          </div>
+          <div class="form-group">
+            <label for="loginPassword">Password</label>
+            <input type="password" id="loginPassword" class="form-input"
+              placeholder="Your password" required autocomplete="current-password">
+          </div>
+          <div id="loginError" class="login-error hidden"></div>
+          <button type="submit" id="loginSubmitBtn" class="btn btn-primary btn-block">
+            Sign In
+          </button>
+        </form>
+
+        <div class="login-footer">
+          <span class="text-muted">Don't have an account?</span>
+          <a href="#" id="openRegisterBtn" class="text-link">Create one</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Authenticated View -->
+    <div id="authView" class="view hidden">
+      <!-- User Info -->
+      <div id="userInfo" class="user-info">
+        <div class="user-avatar">
+          <span id="userInitials">?</span>
+        </div>
+        <div class="user-details">
+          <span id="userName" class="user-name">Loading...</span>
+          <span id="userEmail" class="user-email"></span>
+        </div>
+      </div>
+
+      <!-- Job Detection -->
+      <div id="jobDetection" class="job-detection">
+        <i class="fas fa-briefcase detection-icon"></i>
+        <span class="detection-label">Job detected on</span>
+        <span id="detectedSource" class="detection-source">this page</span>
+      </div>
+
+      <!-- Actions -->
+      <div class="actions">
+        <div class="action-row">
+          <button id="extractBtn" class="btn btn-primary btn-lg action-main">
+            <i class="fas fa-bolt btn-icon"></i>
+            <span class="btn-text">Analyze This Job</span>
+          </button>
+        </div>
+        <p class="action-hint">Extracts page content and sends it to AI for analysis</p>
+      </div>
+
+      <!-- Extraction Status -->
+      <div id="extractionStatus" class="extraction-status hidden">
+        <div class="status-spinner"></div>
+        <span id="statusText">Extracting content...</span>
+      </div>
+
+      <!-- Success Message -->
+      <div id="successMessage" class="success-message hidden">
+        <i class="fas fa-circle-check success-icon"></i>
+        <h4>Job Sent for Analysis!</h4>
+        <p>Check your dashboard for results.</p>
+        <button id="openDashboardBtn" class="btn btn-primary btn-block">
+          Open Dashboard
+        </button>
+      </div>
+
+      <!-- Error Message -->
+      <div id="errorMessage" class="error-message hidden">
+        <i class="fas fa-circle-xmark error-icon"></i>
+        <h4 id="errorTitle">Extraction Failed</h4>
+        <p id="errorText">Please try again or paste the job content manually.</p>
+        <button id="retryBtn" class="btn btn-secondary btn-block">
+          Try Again
+        </button>
+      </div>
+
+      <!-- Quick Links -->
+      <div class="quick-links">
+        <a href="#" id="dashboardLink" class="quick-link">
+          <i class="fas fa-chart-line"></i>
+          <span>Dashboard</span>
+        </a>
+        <a href="#" id="settingsLink" class="quick-link">
+          <i class="fas fa-gear"></i>
+          <span>Settings</span>
+        </a>
+        <a href="#" id="helpLink" class="quick-link">
+          <i class="fas fa-circle-question"></i>
+          <span>Help</span>
+        </a>
+        <a href="#" id="logoutLink" class="quick-link danger">
+          <i class="fas fa-right-from-bracket"></i>
+          <span>Logout</span>
+        </a>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="popup-footer">
+      <span>v1.1.0</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,585 @@
+---
+description: Application detail page — 8-tab layout, render functions, CSS classes, data field mappings, content regeneration
+globs: ui/dashboard/application.html,ui/static/js/application-detail.js
+alwaysApply: false
+---
+
+# Application Detail Page
+
+## Tab Architecture
+Tab order (left to right): Job Details → Your Fit → Strategy → Company → Cover Letter → Resume → Interview
+
+| Tab | Pane ID | Container | Sub-tabs? |
+|-----|---------|-----------|-----------|
+| Job Details | `pane-jobdetails` | `#jobDetailsContent` | No |
+| Your Fit | `pane-fit` | `#fitContent` | No |
+| Strategy | `pane-strategy` | `#strategyContent` | No |
+| Company | `pane-company` | `#companyContent` | No |
+| Cover Letter | `pane-cover` | `#coverContent` | No |
+| Resume | `pane-resume` | `#resumeContent` | **Yes: Overview, Experience, Keywords & ATS, Summary** |
+| Interview | `pane-interview` | `#interviewContent` | Yes: Process, Questions, Preparation |
+
+**First active tab is `jobdetails`** (not `company`). `pane-jobdetails` carries the `active` class in HTML.
+
+## Profile Match Corner Widget
+A `position: fixed` widget (`#matchCornerWidget`) lives in the top-right corner. Shows profile match score and **Export PDF** button only. No per-tab copy/export buttons.
+
+## Tab Switching
+```javascript
+function switchTab(tabId) { /* toggles .active on .page-tab and .tab-pane */ }
+function switchSubTab(parentId, subTabId) { /* toggles .active on sub-tab buttons and .sub-pane */ }
+// Sub-tab pane IDs: sub-{parentId}-{subTabId}
+// e.g. sub-resume-overview, sub-interview-process
+```
+
+## Render Functions
+| Function | Populates |
+|----------|-----------|
+| `renderMainContent(job, company, match)` | Company, Fit, Strategy, Job Details panes |
+| `renderCoverLetter(cover, job)` | `#coverContent` — requires `job` for context |
+| `renderResumeTips(resume)` | `#sub-resume-*` panes + `#resumeRegenBtn` |
+| `renderRichInterviewPrep(prep)` | `#sub-interview-*` panes + `#interviewRegenBtn` |
+| `renderInterviewPrep(company, job)` | Fallback before rich prep is generated |
+
+## `ensureArray()` — Always Use in Render Functions
+```javascript
+function ensureArray(value) {
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === 'object') return Object.values(value);
+    return [];
+}
+```
+
+## `toTitleCase()` — Module-Level Helper
+`toTitleCase` is defined at module scope (right after `ensureArray`) and must **not** be redeclared inside any render function:
+```javascript
+/** @param {string} s @returns {string} */
+function toTitleCase(s) {
+    return s ? s.replace(/\w\S*/g, t => t.charAt(0).toUpperCase() + t.slice(1).toLowerCase()) : s;
+}
+```
+Use it for any LLM-returned enum-like string that should appear in title case: `employment_type`, `work_arrangement`, priority labels, etc. Always pair with `decodeEntities()` for fields that came from the server: `toTitleCase(decodeEntities(value))`.
+
+## `escapeHtml()` — Decode `&amp;` First, Then Named Entities
+`application-detail.js` uses the decode-first pattern. **Decode order matters**: `&amp;` must be decoded before `&#x27;` / `&#039;` so that bleach's double-encoded `&amp;#x27;` is correctly resolved to `'`. Wrong order leaves `&#x27;` displaying literally as text in `innerHTML`.
+
+See `frontend-js-strict.mdc` §1 for the canonical implementation.
+
+## `decodeEntities()` — For `.textContent` Fields
+`renderHeader()` assigns job title and company name via `.textContent`, which does not interpret HTML entities. Always use `decodeEntities(str)` (decode-only, no re-encode) for these assignments, never raw server-rendered strings:
+
+```javascript
+if (jtEl) jtEl.textContent = decodeEntities(job.job_title || 'Job Application');
+if (cnEl) cnEl.textContent = decodeEntities(job.company_name || 'Company');
+```
+
+---
+
+## Cover Letter Tab
+The tab renders a single `.cover-letter-box` card. No separate header bar with job title.
+
+```html
+<div class="cover-letter-wrapper">
+  <div class="cover-letter-box">
+    <div class="cover-letter-body" id="coverLetterText">…letter text…</div>
+    <div class="cover-letter-box-footer">
+      <div class="cl-footer-meta">…word count + generated date…</div>
+      <div class="cl-footer-actions">
+        <button class="cl-copy-btn" data-action="copy-cover">Copy</button>
+        <button class="cl-copy-btn regen-btn" data-action="regen-cover">Regenerate</button>
+      </div>
+    </div>
+  </div>
+</div>
+```
+
+**Both action buttons use `.cl-copy-btn` + `.regen-btn`** — same size and style. Do NOT add a separate header bar or job title inside the cover letter card.
+
+### Cover Letter CSS Classes
+```
+.cover-letter-wrapper        outer container
+.cover-letter-box            the single unified card (border, bg, radius)
+.cover-letter-body           letter text area (pre-wrap, id="coverLetterText")
+.cover-letter-box-footer     footer bar (space-between: meta left, actions right)
+.cl-footer-meta              word count + timestamp (flex row, muted text)
+.cl-footer-actions           button group (flex row, gap)
+.cl-copy-btn                 ghost-style button; both Copy and Regenerate use it
+```
+
+---
+
+## Resume Tab — Sub-Tab Structure
+Resume uses 4 inner sub-tabs. Sub-panes live inside `#resumeContent`. The regenerate button lives in `#resumeRegenBtn` (outside sub-panes, always visible).
+
+```html
+<div id="resumeContent">
+  <div class="sub-tabs" data-parent="resume">
+    <button class="sub-tab active" data-subtab="overview">Overview</button>
+    <button class="sub-tab" data-subtab="experience">Experience</button>
+    <button class="sub-tab" data-subtab="keywords">Keywords & ATS</button>
+    <button class="sub-tab" data-subtab="summary">Summary</button>
+  </div>
+  <div class="sub-pane active" id="sub-resume-overview"></div>
+  <div class="sub-pane" id="sub-resume-experience"></div>
+  <div class="sub-pane" id="sub-resume-keywords"></div>
+  <div class="sub-pane" id="sub-resume-summary"></div>
+  <div id="resumeRegenBtn"></div>
+</div>
+```
+
+### Resume Sub-Pane Contents
+| Pane | Content |
+|------|---------|
+| Overview | Score cards + competitiveness text + Biggest Opportunity + Main Risk + Quick Wins (`.quick-win` cards) + Fix Before Applying |
+| Experience | Experience Strategy boxes + Bullet Rewrites by Role |
+| Keywords & ATS | Must Include + Missing Keywords + Keyword Density + ATS Format Tips + Section Order + Skills to Update columns |
+| Summary | Professional Summary issue + recommended text + key elements + Before You Submit checklist |
+
+### Score Card Structure (Overview pane)
+```html
+<div class="resume-score-cards">  <!-- 2-col grid, align-items: stretch -->
+  <div class="resume-score-card {high|medium|low}">  <!-- top border colored by level -->
+    <div class="resume-score-icon-circle {high|medium|low}"><i class="fas fa-robot"></i></div>
+    <div class="resume-score-label">ATS Pass Rate</div>
+    <div class="resume-score-value {high|medium|low}">MEDIUM</div>
+    <div class="resume-score-note">explanation text (optional)</div>
+  </div>
+</div>
+```
+
+Use `extractLevel(str)` helper inside `renderResumeTips` to split `"HIGH – explanation"` into `{ level, levelText, note }`.
+
+### Quick Wins (Overview pane)
+Use the global `.quick-win` + `.quick-win-icon` card style (same as Interview preparation tips). Do NOT use `.resume-flat-row` table rows.
+
+**Do NOT display `time_to_implement`** — that field is intentionally excluded from Quick Win cards. Only the `impact` priority badge (HIGH / MEDIUM / LOW) is shown alongside the title and description.
+
+### Section Headers in Resume
+Use `<div class="section-title"><i class="fas fa-..."></i> Title</div>` — same as all other tabs. Do NOT use `<h3 class="resume-section-title">`.
+
+### Skills to Update (Keywords pane)
+```html
+<div class="resume-skills-cols">  <!-- 2-col grid -->
+  <div class="resume-skills-col add">   <!-- green tinted -->
+    <div class="resume-skills-col-label">Add to Resume</div>
+    <span class="resume-flat-tag add-tag">Skill</span>
+  </div>
+  <div class="resume-skills-col remove">  <!-- red tinted -->
+    <div class="resume-skills-col-label">Remove / Deprioritize</div>
+    <span class="resume-flat-tag remove-tag">Skill</span>  <!-- strikethrough -->
+  </div>
+</div>
+```
+
+### Professional Summary Box (Summary pane)
+```html
+<div class="resume-summary-box">   <!-- left accent border, bg-secondary -->
+  <div class="resume-summary-body">…text…</div>
+  <div class="resume-summary-footer">
+    <button class="cl-copy-btn" data-action="copy-text" data-copy-text="…">Copy</button>
+  </div>
+</div>
+```
+
+### Resume Tab CSS Classes
+```
+.resume-score-cards            2-col grid (align-items: stretch)
+.resume-score-card             vertical flex card with colored top border
+.resume-score-card.high/medium/low  border-top color
+.resume-score-icon-circle      colored square icon at top of card
+.resume-score-label            uppercase muted label
+.resume-score-value.high/medium/low  large colored value
+.resume-score-note             small explanation text below value
+.resume-summary-box            left accent border card for recommended summary
+.resume-summary-body           summary text area
+.resume-summary-footer         copy button footer (justify-content: flex-end)
+.resume-skills-cols            2-col grid for add/remove skill columns
+.resume-skills-col.add/remove  colored column cards
+.resume-skills-col-label       column header (colored icon + uppercase label)
+.resume-flat-tag.add-tag       green pill
+.resume-flat-tag.remove-tag    red strikethrough pill
+.resume-flat-checklist / .resume-flat-check  custom-styled checklist for Before You Submit
+.resume-flag-card / .resume-flag-issue / .resume-flag-current / .resume-flag-fix
+.resume-exp-strategy-box / .resume-exp-strategy-box.gap / .resume-exp-strategy-label
+.resume-flat-tag.muted         strikethrough tag (de-emphasize roles)
+.resume-role-block / .resume-role-header / .resume-role-title / .resume-role-company / .resume-role-why
+.resume-bullet-list            ul inside role block
+.resume-role-keywords / .resume-role-kw-label
+.resume-flat-callout.tip/warn/neutral/sm  callout variants
+.resume-flat-label             uppercase muted section label
+.resume-flat-tags / .resume-flat-tag / .resume-flat-tag.sm
+.resume-section-order / .section-order-item / .section-order-num / .section-order-arrow
+.resume-format-tips            ul for ATS format recs
+.resume-submission-meta / .resume-submission-item / .resume-filename
+.resume-flat-regen             regenerate button wrapper (border-top separator)
+```
+
+---
+
+## Company Tab — Data Field Mapping
+Source: `company` object from `CompanyResearchResult`
+
+| Section | Fields |
+|---------|--------|
+| Stats bar | `company_size`, `founded`, `website` (only rendered when value starts with `http://` or `https://`), `industry`, `hiring_timeline` (appended with `(estimated)`) |
+| Mission & Vision | `mission_statement`, `vision` |
+| Key Products & Services | `key_products: List[str]` |
+| Values | `core_values: List[str]` — `"Name: description"` → cards |
+| Workplace Culture | `work_environment`, `remote_work_policy`, `diversity_inclusion` |
+| Leadership | `key_leadership: List[{name, title, background}]` — `.leader-title` in muted color |
+| Benefits | `employee_benefits: List[str]` |
+| Market Context | `competitors`, `market_position`, `competitive_advantages`, `growth_opportunities`, `recent_developments` |
+| Recent Developments | Shown with `company.research_date` as "as of [Date]" |
+| What They Look For | `what_to_emphasize: List[str]` |
+| How to Show Culture Fit | `how_to_show_culture_fit: List[str]` |
+| Things to Be Aware Of | `red_flags_to_watch: List[str]` — amber (not red) warning style |
+
+### Company Website URL Validation
+Before rendering the `website` stat link, validate it:
+```javascript
+const _rawWebsite = company.website || '';
+const _validWebsite = /^https?:\/\//i.test(_rawWebsite) ? _rawWebsite : '';
+// Only render the stat block if _validWebsite is non-empty
+```
+LLMs sometimes return `"Unknown"`, `"N/A"`, or other non-URL strings. Rendering these as `<a href="Unknown">` creates relative links that navigate away from the app and show an error page. Silently hiding the stat is the correct behaviour when no valid URL is present.
+
+### Company CSS Classes
+```
+.tag.product / .values-grid / .value-card / .value-name / .value-desc
+.context-row / .recent-dev-box / .recent-dev-date   "as of [date]" label
+.stat-estimated          muted italic for estimated hiring timeline
+.watch-out-title / .watch-out-note  amber warning block (not red)
+.content-list li i.amber  amber icon for warning list items (not .red)
+```
+
+---
+
+## Your Fit Tab — Data Field Mapping
+Source: `match` object from `ProfileMatchingResult`
+
+| Section | Fields |
+|---------|--------|
+| Apply Decision Banner | `match.executive_summary.{should_apply, priority_level, success_probability, confidence}` |
+| Verdict Card | `match.executive_summary.{fit_assessment, recommendation}` |
+| Qualification Breakdown | `match.qualification_breakdown` + `skill_gaps_analysis`, `career_trajectory`. **Do NOT render a trajectory badge (`ASCENDING`/`LATERAL`/`DESCENDING`) inline with the Experience row label** — the score bar and description already convey fit quality clearly. |
+| Competitive Position | `match.competitive_positioning.{estimated_percentile, unique_value_proposition, strengths_vs_typical_applicant, weaknesses_vs_typical_applicant}` |
+| Salary Fit | If `salaryF.assessment === 'UNKNOWN'` → show "N/A — salary not listed" instead of a score |
+| Percentile bar | Has a `.percentile-marker` dot. Position is set via `data-pct` attribute + JS after `innerHTML` assignment — do NOT use `style="left: X%"` inside the HTML string (the property is not reliably applied when set inside dynamically injected HTML). |
+| Employer Concerns | `match.red_flags_for_employer` — amber `fa-minus-circle` icons (not red `fa-times-circle`). Section label: **"Potential Employer Concerns"** (not "What the Employer Might Worry About") |
+
+### Percentile Marker — Set Position via JS After innerHTML
+The `.percentile-marker` dot position **must** be set in JavaScript after the `innerHTML` assignment, using `data-pct`:
+```javascript
+// Inside the HTML string:
+`<div class="percentile-marker" data-pct="${Math.min(percentile, 100)}"></div>`
+// After innerHTML:
+const marker = fcEl.querySelector('.percentile-marker[data-pct]');
+if (marker) marker.style.left = marker.dataset['pct'] + '%';
+```
+Do NOT use `style="left: X%"` inside the HTML string — browsers may not reliably apply `left` when the element is created via `innerHTML` injection.
+
+### Your Fit CSS Classes
+```
+.apply-decision-banner / .apply-good / .apply-review / .apply-poor / .apply-muted
+.percentile-track (position: relative, no overflow: hidden) / .percentile-marker (animated dot, position set via JS)
+.breakdown-na              "N/A" salary text style
+.skill-gap-note / .mitigation-tip / .competitive-card
+.uvp-box / .uvp-label / .uvp-text
+.vs-typical / .vs-label.green / .vs-label.orange
+.ai-insights-block / .ai-career-advice / .ai-sub-label
+```
+
+---
+
+## Strategy Tab — Data Field Mapping
+Source: `appStrategy`, `riskAssessment`
+
+| Section | Fields |
+|---------|--------|
+| Your Action Plan | `appStrategy.key_talking_points`, `appStrategy.cover_letter_angle` |
+| Resume Optimization | `appStrategy.resume_optimization_tips` |
+| Address These Concerns | `appStrategy.address_these_concerns` |
+| Interview Questions | `appStrategy.interview_preparation` — minimum 5 Q&A pairs |
+| Networking | `appStrategy.networking_suggestions` |
+| Risk Assessment | `riskAssessment` — uses `fa-shield-halved` icon |
+
+### Strategy CSS Classes
+```
+.talking-points-grid    2-col auto-fill grid (not flex column)
+.cover-angle-box        left accent border callout
+.investigate-list / .investigate-item   green left-border callout cards for "Things to Investigate"
+.risk-list / .risk-card.employer-risk / .risk-card.role-risk
+```
+
+---
+
+## Job Details Tab — Data Field Mapping
+Source: `job` object from `JobAnalysisResult`
+
+| Section | Fields |
+|---------|--------|
+| At a Glance grid | `job_city/state/country`, `work_arrangement` (title-cased), `salary_range` (currency symbol from code), `employment_type` (title-cased), `years_experience_required`, `education_requirements`, `industry`, `visa_sponsorship`, `security_clearance`, `posted_date`, `application_deadline` |
+| Header badges | `employment_type` and `work_arrangement` in the page header also use `toTitleCase(decodeEntities(value))` — never render them raw (LLM may return lowercase like "full-time") |
+| Education | Hide card if `required === false`; show "Not specified" for generic "Required" |
+| Salary | Currency codes converted to symbols: USD→$, EUR→€, GBP→£, etc. |
+| Team Context | `team_info`, `reporting_to` |
+| What You'll Do | `responsibilities` |
+| Requirements | `required_qualifications` |
+| Nice to Have | `preferred_qualifications` — `fa-plus-circle` icon |
+| ATS Keywords | `ats_keywords` — `fa-key` icon, shown separately from `required_skills` |
+
+### Job Details CSS Classes
+```
+.jd-glance-grid (repeat(auto-fill, minmax(160px, 190px)), justify-content: start)
+.jd-glance-item / .jd-glance-icon / .jd-glance-label / .jd-glance-value
+.tag.ats-keyword    accent-colored, distinct from .tag
+```
+
+---
+
+## Interview Tab — Rich Prep Schema (`renderRichInterviewPrep`)
+
+### Process Sub-Pane
+```
+prep.interview_process.typical_rounds[]  → {type, duration, with, focus, tips}
+prep.interview_process.total_timeline / preparation_time_needed / format_prediction
+```
+
+### Questions Sub-Pane
+```
+prep.predicted_questions.behavioral[]     → {question, why_likely, your_story{…}, what_they_evaluate, danger_zone}
+prep.predicted_questions.technical[]      → {question, why_likely, preparation_approach, key_points_to_cover, follow_up_questions}
+prep.predicted_questions.role_specific[]  → {question, why_likely, answer_strategy, incorporate_your_experience}
+prep.predicted_questions.company_specific[] → {question, why_likely, personalized_answer}
+
+prep.questions_for_them.for_recruiter[]      → {question, why_good, listen_for}
+prep.questions_for_them.for_hiring_manager[] → {question, why_good, listen_for}
+prep.questions_for_them.for_team_members[]   → {question, why_good, listen_for}
+prep.questions_for_them.red_flag_questions[] → {question, when_to_ask, what_youre_checking}
+```
+
+**Section headers** use `.iv-q-section-header` class. First section gets `.first` (no top border/margin). Subsequent sections get a `border-top` separator.
+
+**Questions to Ask Them cards** (`.iv-ask-card`):
+- `border-left: 3px solid var(--accent-primary)` — matches question card visual weight
+- "Listen for" rendered as a green callout box (`.iv-ask-listen`) with background+border
+- Group label (`.iv-ask-group-label`) has a bottom border separator
+
+### Preparation Sub-Pane
+```
+prep.quick_reference_card.{elevator_pitch, three_key_selling_points, weakness_answer, why_this_company, salary_discussion, closing_statement}
+prep.addressing_concerns[]  → {concern, why_its_a_concern, your_counter_narrative, talking_points, proof_points_from_experience, when_to_bring_up}
+prep.logistics.{dress_code, what_to_bring, timing, virtual_interview_tips, post_interview}
+prep.day_before_checklist[]   ← correct field (NOT preparation_checklist)
+prep.confidence_boosters[]
+```
+
+**Day-Before Checklist** uses `.iv-day-checklist` + `.iv-day-check` (card-style items with checkbox). CSS `:has(input:checked)` turns checked items green with strikethrough.
+
+**Technical Topics to Review** (old schema fallback) renders as `.iv-tech-topics-grid` pill tags, not a plain list.
+
+### Interview CSS Classes
+```
+.iv-rounds-list / .iv-round-card / .iv-round-num / .iv-round-type / .iv-round-focus / .iv-round-tip
+.iv-q-section-header       section divider (border-top + margin). Add .first to remove top border
+.iv-cat-badge              category pill (behavioral/technical/etc)
+.iv-question-card / .iv-question-text / .iv-question-why / .iv-question-evaluate
+.iv-star-block / .iv-star-grid / .iv-star-item / .iv-star-letter / .iv-star-letter.iv-star-r
+.iv-danger-zone            red "don't say" warning
+.iv-tech-approach / .iv-key-points / .iv-followups / .iv-followup-tag
+.iv-ask-group / .iv-ask-group-label / .iv-ask-group-label.red (left-border card style)
+.iv-ask-card               left accent border card (border-left: 3px solid accent)
+.iv-ask-question / .iv-ask-meta / .iv-ask-listen (green callout box)
+.iv-qrc-block / .iv-qrc-header / .iv-qrc-section / .iv-qrc-label / .iv-qrc-pitch / .iv-closing
+.iv-selling-point / .iv-sp-num / .iv-weakness-block / .iv-weakness-row / .iv-salary-range
+.iv-concern-card / .iv-concern-issue / .iv-concern-why / .iv-concern-counter
+.iv-logistics-grid / .iv-logistics-item / .iv-logistics-label / .iv-bring-list / .iv-post-interview
+.iv-boosters / .iv-booster-item
+.iv-day-checklist          card-style checklist wrapper
+.iv-day-check              individual checklist card (hover + :has(:checked) green state)
+.iv-tech-topics-grid       flex-wrap pill tag container for tech topics
+.iv-tech-topic-tag         accent-colored pill for individual tech topic
+```
+
+---
+
+## Content Regeneration Endpoints
+```
+POST /api/v1/workflow/generate-documents/{session_id}        # on-demand (analysis_complete apps); generates cover letter + resume advisor together
+POST /api/v1/workflow/regenerate-cover-letter/{session_id}   # rate: 5/hour; allowed for completed, awaiting_confirmation, analysis_complete
+POST /api/v1/workflow/regenerate-resume/{session_id}         # rate: 5/hour; allowed for completed, awaiting_confirmation, analysis_complete
+POST /api/v1/workflow/continue/{session_id}                  # resume workflow from awaiting_confirmation (triggers company + cover + resume)
+POST /api/v1/interview-prep/{session_id}/generate            # rate: 5/hour; allowed for completed, awaiting_confirmation, analysis_complete
+GET  /api/v1/interview-prep/{session_id}                     # get prep
+GET  /api/v1/interview-prep/{session_id}/status              # poll status
+```
+
+All three regeneration endpoints (`regenerate-cover-letter`, `regenerate-resume`, `generate-interview-prep`) accept the statuses: `completed`, `awaiting_confirmation`, **and `analysis_complete`** — not just `completed`. This is intentional: users on all three states can trigger or re-trigger content generation.
+
+## Workflow Status — `workflowStatus` Module Variable
+`application-detail.js` stores the current workflow status in a module-level `workflowStatus` string (populated by `loadApplicationData()` from `statusData.status`). Render functions use this to detect gate-stopped applications:
+```javascript
+let workflowStatus = '';
+// In loadApplicationData():
+workflowStatus = statusData.status || '';
+```
+
+Dashboard display mapping (set in `api/workflow.py` sync endpoint):
+| Workflow status | App card status shown |
+|---|---|
+| `completed` | COMPLETED |
+| `awaiting_confirmation` | **COMPLETED** (not PROCESSING — analysis is fully done) |
+| `analysis_complete` | COMPLETED |
+| `in_progress` / `initialized` | PROCESSING |
+| `failed` | FAILED |
+
+## Generate Button — `analysis_complete` Applications
+
+Four generation scenarios:
+1. **Auto-generate ON + above gate** → both docs created automatically by workflow
+2. **Auto-generate ON + below gate** → workflow stops at `awaiting_confirmation`, no docs
+3. **Auto-generate OFF** → workflow ends at `analysis_complete`, no docs ever created
+4. **Manual trigger** → user clicks individual button in each tab to generate that doc only
+
+For scenarios 2 and 4, **each tab has its own independent "Generate" button** that calls `generateSingle()`. Never combine them unless the user explicitly asks to generate both.
+
+### `generateSingle(which, btn)`
+Generates a single document (cover letter **or** resume tips) without touching the other:
+```javascript
+async function generateSingle(which, btn) {
+    const endpoint = which === 'cover'
+        ? `${API_BASE}/workflow/regenerate-cover-letter/${currentSessionId}`
+        : `${API_BASE}/workflow/regenerate-resume/${currentSessionId}`;
+    // Sets btn.disabled + btn.classList.add('loading'), POSTs, then loadApplicationData()
+}
+```
+
+### Empty State Pattern (Cover Letter and Resume tabs)
+Both empty-state render blocks use `regen-btn` style (not `btn-primary`). **Do NOT add an icon inside `<span class="btn-text">`** — the four generate buttons are icon-free:
+```javascript
+// Cover Letter tab
+`<div class="empty-state">
+  <i class="fas fa-envelope empty-state-icon"></i>
+  <p class="empty-state-title">Cover Letter</p>
+  <p class="empty-state-desc">…reason…</p>
+  <button class="regen-btn" data-action="gen-cover">
+    <span class="spinner"></span>
+    <span class="btn-text">Generate Cover Letter</span>
+  </button>
+</div>`
+// Resume tab — same pattern, data-action="gen-resume", btn-text "Generate Resume Tips"
+// Interview tab — data-action="gen-interview", btn-text "Generate Interview Prep"
+// Company tab continue button — btn-text "Run Full Analysis Anyway"
+```
+Event is bound via `data-action` delegation in the pane's `addEventListener('click')` block — never inline `onclick`.
+
+## Company Tab — Empty State for Low Match / Gate Stop
+
+When `workflowStatus === 'awaiting_confirmation'` **or** `match.executive_summary.recommendation` signals a weak match, company research was skipped. The Company tab shows:
+```javascript
+const isBelowGate = workflowStatus === 'awaiting_confirmation';
+const isWeakMatch = (match.executive_summary?.recommendation || '').toUpperCase().includes('NOT RECOMMENDED') ||
+                    (match.executive_summary?.recommendation || '').toUpperCase().includes('WEAK');
+
+if (isBelowGate || isWeakMatch) {
+    // show structured empty state with continueWorkflowBtn
+}
+```
+
+Empty state uses `id="continueWorkflowBtn"` with `data-action="continue-workflow"`. Clicking it calls `continueWorkflow()`.
+
+### `continueWorkflow(btn)`
+Resumes the workflow from `awaiting_confirmation`, triggering company research + cover letter + resume tips:
+```javascript
+async function continueWorkflow() {
+    // POST /api/v1/workflow/continue/{session_id}
+    // Shows toast, polls status every 3s, calls loadApplicationData() on completion
+    // 40-attempt cap with error toast on timeout
+}
+```
+
+## Empty State CSS Classes
+All four content tabs (Company, Cover Letter, Resume, Interview) use the same structured empty state layout:
+```
+.empty-state                   flex column, align-items center, justify-content center, min-height 320px
+.empty-state-icon              fa icon at 2.5rem, accent color, opacity 1 (overrides the muted .empty-state i default)
+.empty-state-title             1rem, 600 weight, primary text color
+.empty-state-desc              0.85rem, muted color, max-width 420px, centered
+.regen-btn                     dark-background subtle button (not btn-primary gradient)
+```
+
+The default `.empty-state i` selector is scoped to `:not(.empty-state-icon)` to prevent specificity conflicts:
+```css
+.empty-state i:not(.empty-state-icon) {
+    font-size: 2rem;
+    opacity: 0.5;
+}
+.tab-pane > div > .empty-state,
+.sub-pane > .empty-state {
+    min-height: 320px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+```
+
+## Interview Tab — Basic Data Notice (`iv-basic-notice`)
+When the workflow stopped before AI interview prep was generated but basic job description data exists, the Interview tab renders a notice **above** the basic content, not just an empty state:
+```
+.iv-basic-notice               horizontal card (flex row, space-between), accent-tinted border
+.iv-basic-notice-body          text column (title + description)
+.iv-basic-notice-title         bold, primary text
+.iv-basic-notice-desc          small muted explanation
+.iv-regen-sep                  top border separator above the generate button in the basic-notice card
+```
+
+The "Generate Full Prep" `regen-btn` lives inside the `.iv-basic-notice` card (not at the bottom of the content). Only one notice renders per tab — never duplicate it.
+
+## Job Header Badges — Salary Badge Visibility
+
+```html
+<span class="job-badge badge-salary is-hidden" id="salaryBadge">
+    <i class="fas fa-dollar-sign"></i>
+    <span id="salaryRange"></span>
+</span>
+```
+
+**The salary badge is hidden by default and only shown when there is actual numeric salary data.** Two guards in `renderHeader()`:
+
+1. **Object check**: `salary_range.min || salary_range.max` must be truthy (both `null` and `0` keep badge hidden)
+2. **String check**: `salary_range` string must contain at least one digit — `/\d/.test(trimmed)` — so bare currency symbols (`"$"`, `"USD"`) never show the badge
+
+```javascript
+} else if (typeof job.salary_range === 'string') {
+    const trimmed = job.salary_range.trim();
+    if (trimmed && /\d/.test(trimmed)) salaryDisplay = trimmed;
+}
+if (salaryDisplay) {
+    srEl.textContent = salaryDisplay;
+    sbEl.style.display = 'inline-flex';
+}
+```
+
+### `.job-badge.is-hidden` — CSS Specificity Fix
+`.job-badge { display: inline-flex }` in the page `<style>` block has the same specificity (one class) as `.is-hidden { display: none }` in `app.css`. Since the page `<style>` loads after the linked CSS, it wins and **all badges are permanently visible** unless overridden.
+
+Fix: add a two-class rule in the page `<style>` block — higher specificity (two classes) beats both:
+```css
+.job-badge.is-hidden {
+    display: none;
+}
+```
+**This pattern applies any time a page-level single-class display rule conflicts with `.is-hidden`.** Use `.element-class.is-hidden { display: none }` in the page `<style>` to restore correct hide/show behaviour.
+
+## Sub-Tab Empty States
+```javascript
+// Pattern for all tabs with sub-tabs (resume, interview):
+if (!hasData) {
+    document.querySelector('.sub-tabs[data-parent="resume"]').style.display = 'none';
+    // show error/empty in first sub-pane
+} else {
+    document.querySelector('.sub-tabs[data-parent="resume"]').style.display = '';
+    // populate each sub-pane by ID
+}
+```

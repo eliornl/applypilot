@@ -1,0 +1,237 @@
+---
+description: Landing page structure, screenshot showcase section, CSS classes and JS patterns
+alwaysApply: false
+---
+
+# Landing Page
+
+The landing page lives at `ui/index.html` and uses `ui/static/css/landing.css` + `ui/static/js/landing.js`.
+
+## Page Sections (in order)
+
+| Section | ID / Class | Notes |
+|---------|-----------|-------|
+| Hero | `.hero-section` | Headline + 3-step explainer; scroll hint at bottom |
+| ↓ section arrow | `.section-arrow.section-arrow--hero` | First inter-section arrow, between hero and tech-bar |
+| Tech Bar | `.section-tech-bar` | Built-with tags + GitHub link |
+| ↓ section arrow | `.section-arrow` | Between each subsequent section pair |
+| Problem | `#problem` `.section-problem` | 118-application stat + time comparison cards |
+| Features | `#features` `.section-features` | 6 AI agent feature cards (`.features-grid`) |
+| Chrome Extension | `#extension` `.section-extension` | Extension popup mockup |
+| Career Tools | `#tools` `.section-tools` | 6 tool cards in Bootstrap rows |
+| **Screenshot Showcase** | `#example` `.section-example` | Real app screenshots — see below |
+| Pricing / CTA | `#pricing` `.section-pricing` | BYOK / open-source CTA |
+
+---
+
+## Inter-Section Scroll Hints
+
+A `<div class="section-arrow">` sits **between every pair of adjacent sections**. It contains an anchor linking to the next section's ID with a `fas fa-chevron-down` icon.
+
+```html
+<div class="section-arrow">
+    <a href="#problem" aria-label="Scroll to next section">
+        <i class="fas fa-chevron-down"></i>
+    </a>
+</div>
+```
+
+The first arrow (hero → tech-bar) uses an additional modifier class:
+
+```html
+<div class="section-arrow section-arrow--hero">
+    <a href="#tech-bar" aria-label="Scroll to next section">
+        <i class="fas fa-chevron-down"></i>
+    </a>
+</div>
+```
+
+### CSS
+
+All section arrows use the same pulsing-circle style as the hero scroll hint. The `.section-arrow--hero` adds extra vertical padding so it sits a little higher above the tech-bar.
+
+```css
+.section-arrow {
+    display: flex;
+    justify-content: center;
+    padding: 1.5rem 0;
+}
+
+.section-arrow--hero {
+    padding-top: 2.5rem;
+    padding-bottom: 1.5rem;
+}
+
+.section-arrow a {
+    /* same circle/pulse style as .scroll-hint */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    border: 2px solid rgba(0, 212, 255, 0.4);
+    background: rgba(0, 212, 255, 0.08);
+    color: var(--accent-primary);
+    text-decoration: none;
+    animation: scroll-bounce 2s ease-in-out infinite, scroll-pulse 2s ease-in-out infinite;
+}
+```
+
+**Non-negotiable:** Every pair of adjacent landing page sections must have a `.section-arrow` between them — never skip a gap.
+
+---
+
+## "See It In Action" — Tab/Scroll Discoverability Hint
+
+Above the tab bar, two small pill badges remind visitors they can interact:
+
+```html
+<div class="ss-click-hint">
+    <span><i class="fas fa-hand-pointer"></i> Click a tab to explore</span>
+    <span><i class="fas fa-arrows-up-down"></i> Scroll to read</span>
+</div>
+```
+
+CSS — these match the `.section-label` pill style:
+
+```css
+.ss-click-hint {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+
+.ss-click-hint span {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    background: rgba(0,212,255,0.06);
+    border: 1px solid rgba(0,212,255,0.2);
+    border-radius: var(--radius-full);
+    padding: 0.3rem 0.85rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+```
+
+---
+
+## Screenshot Showcase — "See It In Action"
+
+The `#example` section shows real screenshots of the live application in a tabbed, scrollable frame.
+
+### File locations
+
+```
+ui/static/img/screenshots/
+├── tab-job-details.png     # merged tall PNG of full Job Details tab
+├── tab-your-fit.png        # merged tall PNG of full Your Fit tab
+├── tab-strategy.png        # merged tall PNG of full Strategy tab
+├── tab-company.png         # merged tall PNG of full Company tab
+├── tab-cover-letter.png    # Cover Letter tab
+├── tab-resume.png          # Resume tab
+└── tab-interview.png       # Interview tab
+```
+
+Each file is a **single merged PNG** (not multiple images stacked) that shows the full scrollable content of that tab. When updating screenshots, always produce one tall merged file per tab rather than multiple separate images — this avoids all seam/gap alignment issues.
+
+### HTML structure
+
+```html
+<div class="screenshot-showcase">
+    <!-- Tab bar -->
+    <div class="ss-tabs" role="tablist">
+        <button class="ss-tab active" data-ss-tab="job-details" role="tab" aria-selected="true">
+            <i class="fas fa-briefcase"></i>
+            <span>Job Details</span>
+        </button>
+        <!-- … 6 more tabs … -->
+    </div>
+
+    <!-- Browser chrome frame -->
+    <div class="ss-frame">
+        <div class="ss-browser-chrome">
+            <div class="ss-dots"><span></span><span></span><span></span></div>
+            <div class="ss-url-bar">
+                <i class="fas fa-lock"></i>
+                <span>applypilot.app / dashboard / applications / …</span>
+            </div>
+        </div>
+        <div class="ss-panels">
+            <div class="ss-panel active" id="ss-panel-job-details">
+                <img src="/static/img/screenshots/tab-job-details.png" alt="…" loading="lazy">
+            </div>
+            <!-- … 6 more panels … -->
+        </div>
+    </div>
+</div>
+```
+
+### CSS classes
+
+| Class | Purpose |
+|-------|---------|
+| `.screenshot-showcase` | Outer wrapper — `width: 100%` (matches container) |
+| `.ss-tabs` | Flex tab bar, rounded top corners, `overflow-x: auto`, `scrollbar-width: none` |
+| `.ss-tab` | `flex: 1` — all tabs share equal width; active state uses `box-shadow: inset 0 -2px 0 var(--accent-primary)` |
+| `.ss-tab.active` | Cyan underline, accent color, semi-bold |
+| `.ss-frame` | Border + rounded bottom corners + drop shadow |
+| `.ss-browser-chrome` | Fake browser top bar with dots and URL |
+| `.ss-dots span` | Traffic-light circles (red / yellow / green) |
+| `.ss-url-bar` | Pill-shaped address bar with lock icon |
+| `.ss-panels` | Scrollable area — `max-height: 580px; overflow-y: auto; scroll-behavior: smooth` |
+| `.ss-panel` | Hidden by default (`display: none`) |
+| `.ss-panel.active` | Visible with fade-in animation (`ss-fade-in`) |
+| `.ss-panel img` | `width: 100%; height: auto; display: block` |
+
+### JavaScript (`landing.js`)
+
+```javascript
+// Activate a tab by ID and scroll the panel back to the top.
+function ssActivateTab(tabId) {
+    ssTabs.forEach(t => {
+        const isActive = t.dataset['ssTab'] === tabId;
+        t.classList.toggle('active', isActive);
+        t.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+    ssPanels.forEach(p => {
+        p.classList.toggle('active', p.id === `ss-panel-${tabId}`);
+    });
+    if (ssPanelsContainer) ssPanelsContainer.scrollTop = 0;
+}
+```
+
+Tab buttons use `data-ss-tab="<id>"`. Panel IDs follow `ss-panel-<id>`. No auto-advance — switching is fully manual.
+
+### Mobile behaviour
+
+```css
+@media (max-width: 768px) {
+    .ss-tab span { display: none; }   /* icon-only tabs */
+    .ss-panels { max-height: 340px; }
+}
+```
+
+### Non-negotiables
+
+1. **Never stack multiple `<img>` elements** inside one `.ss-panel` — always merge into one tall PNG first to avoid seam/gap issues between screenshots
+2. **Always use a single `<img>` per panel** — no `.ss-continuation` wrappers or crop hacks
+3. **Tab labels must use `<span>` tags** so they can be hidden on mobile without hiding the icon
+4. **`flex: 1` on `.ss-tab`** — never `flex-shrink: 0`; all tabs must share equal width
+5. **Images are served from `/static/img/screenshots/`** — never inline base64 or CDN URLs
+6. **`loading="lazy"`** on all screenshot `<img>` elements — these are large below-fold images
+7. **`alt` text must describe the tab content** — "Job Details — At a Glance grid…" not just "screenshot"
+
+### Updating screenshots
+
+When the app UI changes and screenshots need refreshing:
+
+1. Run the app locally and navigate to the application detail page
+2. For each tab, scroll through the entire tab content
+3. Take a **full-page or scrolling screenshot** of the tab content (one tall merged image per tab)
+4. Save as `tab-{name}.png` directly into `ui/static/img/screenshots/` — overwrite the old file
+5. No build step needed — screenshots are served as raw static files, not processed by esbuild
+6. Hard-refresh the browser to verify (`Cmd+Shift+R`)

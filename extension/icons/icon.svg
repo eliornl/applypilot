@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00d4ff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#7c3aed;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background rounded square -->
+  <rect x="4" y="4" width="120" height="120" rx="28" ry="28" fill="url(#gradient)"/>
+  
+  <!-- Rocket icon (matching fa-rocket) -->
+  <g fill="white" transform="translate(28, 20) scale(0.56)">
+    <!-- Rocket body -->
+    <path d="M64 8C64 8 40 32 40 80L56 96H72L88 80C88 32 64 8 64 8Z"/>
+    <!-- Rocket window -->
+    <circle cx="64" cy="52" r="10" fill="url(#gradient)"/>
+    <!-- Left fin -->
+    <path d="M40 80L24 96L40 96Z"/>
+    <!-- Right fin -->
+    <path d="M88 80L104 96L88 96Z"/>
+    <!-- Flame -->
+    <path d="M52 96L56 120C60 112 64 116 64 116C64 116 68 112 72 120L76 96Z" opacity="0.9"/>
+  </g>
+</svg>

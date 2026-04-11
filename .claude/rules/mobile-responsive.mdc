@@ -1,0 +1,217 @@
+---
+description: Mobile responsiveness patterns — breakpoints, navbar collapse, scrollable tabs, CSS conventions
+globs: ui/**/*.html,ui/static/css/**/*.css,ui/partials/*.html
+alwaysApply: false
+---
+
+# Mobile Responsiveness
+
+ApplyPilot targets full mobile support down to 390px (iPhone 14). The viewport meta tag is set in `base.html`. Bootstrap 5 provides the grid and collapse utilities.
+
+---
+
+## Breakpoints Used
+
+| Breakpoint | Width | Purpose |
+|---|---|---|
+| `xl` | `< 1200px` | Landing navbar collapses to hamburger |
+| `lg` | `< 992px` | Dashboard navbar collapses to hamburger |
+| `md` | `< 768px` | Primary mobile breakpoint — stack layouts, reduce padding |
+| `sm` | `< 576px` | Auth card margins, small tweaks |
+| `xs` | `< 480px` | Extra-small phones — font/padding reductions |
+
+---
+
+## Navbars
+
+### Landing Page (`navbar_landing.html`)
+Uses **`navbar-expand-xl`** — collapses at `< 1200px`.
+
+```html
+<nav class="navbar navbar-expand-xl navbar-dark fixed-top">
+    <a class="navbar-brand" href="/">...</a>
+    <button class="navbar-toggler" type="button"
+            data-bs-toggle="collapse" data-bs-target="#navbarNav"
+            aria-controls="navbarNav" aria-expanded="false"
+            aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav mx-auto">...</ul>
+        <div class="nav-cta">...</div>
+    </div>
+</nav>
+```
+
+**Why `navbar-expand-xl`**: The landing nav has 6 links + 2 CTA buttons. At tablet widths (992–1199px) the items wrap to 2 lines without the xl breakpoint.
+
+The hamburger icon uses a custom white SVG (Bootstrap's default is invisible on dark backgrounds):
+```css
+.navbar-toggler-icon {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba%28255%2C255%2C255%2C0.85%29' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
+}
+```
+
+The collapsed menu gets a dark glass background **only on mobile** via:
+```css
+@media (max-width: 1199px) {
+    .navbar-collapse {
+        background: rgba(10, 10, 15, 0.98);
+        backdrop-filter: blur(24px);
+        border-top: 1px solid var(--border-color);
+        padding: 0.75rem 0 1rem 0;
+        ...
+    }
+    .navbar-collapse .nav-cta {
+        padding: 0 1rem;   /* ← padding on nav-cta, NOT negative margin on collapse */
+    }
+}
+```
+
+**Never use `margin: 0 -1rem` on `.navbar-collapse`** — it clips nav items at the left edge.
+
+---
+
+### Dashboard Home (`navbar_dashboard.html`)
+Uses **`navbar-expand-lg`** — collapses at `< 992px`. The collapsed menu shows Help / Settings / Logout as full-width stacked buttons.
+
+```html
+<nav class="navbar navbar-expand-lg">
+    <a class="navbar-brand" href="/dashboard">...</a>
+    <button class="navbar-toggler" type="button"
+            data-bs-toggle="collapse" data-bs-target="#dashboardNavMenu"
+            aria-controls="dashboardNavMenu" aria-expanded="false"
+            aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="dashboardNavMenu">
+        <div class="user-info ms-auto">
+            <a href="/help" class="btn btn-outline-secondary btn-sm nav-btn">...</a>
+            <a href="/dashboard/settings" class="btn btn-outline-secondary btn-sm nav-btn">...</a>
+            <button class="btn btn-outline-secondary btn-sm nav-btn" data-action="logout">...</button>
+        </div>
+    </div>
+</nav>
+```
+
+The inline `<style>` in `dashboard/index.html` handles the collapsed state — **no negative margin**:
+```css
+@media (max-width: 991px) {
+    .navbar-collapse {
+        background: var(--bg-card);
+        border-top: 1px solid var(--border-color);
+        padding: 1rem 0;          /* ← zero horizontal padding on the collapse panel */
+    }
+    .user-info {
+        flex-direction: column;
+        align-items: stretch;
+        width: 100%;
+        padding: 0 1rem;          /* ← horizontal spacing on child, not negative margin on collapse */
+    }
+    .user-info .nav-btn {
+        width: 100%;
+        justify-content: flex-start;
+    }
+}
+```
+
+### Sub-page Navbar (`navbar_subpage.html`)
+Simple logo + "Back to Dashboard" link — no collapse needed. The back button text shrinks at `< 576px`.
+
+---
+
+## Scrollable Tab/Pill Bars
+
+Any horizontal tab or pill navigation must scroll on mobile instead of wrapping or overflowing. Apply this pattern to `.page-tabs`, `.settings-nav`, `.tools-nav`, `.nav-pills`, `.sub-tabs`, `.method-tabs`:
+
+```css
+@media (max-width: 768px) {
+    .my-tab-bar {
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+    .my-tab-bar::-webkit-scrollbar { display: none; }
+    .my-tab-bar .tab-item { white-space: nowrap; }
+}
+```
+
+The **application detail page** tabs hide their text labels on mobile (icons only) via:
+```css
+@media (max-width: 768px) {
+    .page-tab span { display: none; }
+}
+```
+
+---
+
+## `app.css` — Global Mobile Utilities
+
+These classes/rules are in `ui/static/css/app.css` and apply to all dashboard pages:
+
+| Rule | Effect at mobile |
+|---|---|
+| `.page-container` | `margin: 1rem auto` at 768px |
+| `.card-body` / `.card-header` | Reduced padding at 768px and 480px |
+| `.modal-dialog` | `margin: 0.5rem` at 768px, `margin: 0.25rem` at 480px |
+| `.toast-container` | Moves to **bottom** of screen (`bottom: 16px; left/right: 8px`) |
+| `.alert-container` | Same — moves to bottom, full-width |
+| `.file-upload-area` | Reduced padding at 768px |
+
+---
+
+## Per-Page Responsive Patterns
+
+Every dashboard template has an inline `<style>` block with `@media (max-width: 768px)`. The standard pattern for containers:
+
+```css
+@media (max-width: 768px) {
+    .my-container {
+        margin: 1rem auto;
+        padding: 0 0.5rem;
+    }
+    .my-header {
+        padding: 1.25rem;   /* down from 2rem */
+    }
+}
+
+@media (max-width: 480px) {
+    .my-container { /* further reductions for very small phones */ }
+}
+```
+
+### Grids — Collapsing on Mobile
+
+| Desktop | Mobile (`≤768px`) |
+|---|---|
+| `repeat(auto-fit, minmax(200px, 1fr))` | Becomes 1-col via `grid-template-columns: 1fr` |
+| `repeat(auto-fit, minmax(150px, 1fr))` | Stays 2-col (`1fr 1fr`) |
+| `.stats-cards` (4 cols) | Becomes `1fr 1fr` (2-col) |
+| `.resume-score-cards` (2 cols) | Becomes `1fr` |
+| `.iv-logistics-grid` | Becomes `1fr` |
+| `.talking-points-grid` | Becomes `1fr` |
+| `.jd-glance-grid` | Becomes `repeat(2, 1fr)` |
+| `.resume-skills-cols` | Becomes `1fr` |
+| `.applications-list` (dashboard) | Single-col cards; filter bar scrolls horizontally |
+
+---
+
+## Landing Page (`landing.css`) Breakpoints
+
+| Breakpoint | Key changes |
+|---|---|
+| `max-width: 1199px` | Hero text centered, nav-cta stacks vertically, `code-preview` hidden |
+| `max-width: 768px` | `agents-grid` / `features-grid` → 1-col, diagram stacks vertically |
+| `max-width: 576px` | Hero title `2rem`, CTA buttons full-width, footer links wrap |
+| `max-width: 480px` | Hero title `1.75rem`, pricing cards / CTA reduced padding |
+
+---
+
+## Non-Negotiables
+
+1. **Never use `navbar-expand-lg` on the landing navbar** — it has too many items and wraps at tablet widths; always use `navbar-expand-xl`
+2. **Never use `margin: 0 -Xrem` on `.navbar-collapse`** — clips nav item text; use `padding` on child elements instead
+3. **Always add `scrollbar-width: none` + `::-webkit-scrollbar { display: none }`** when making a container `overflow-x: auto` — prevents an ugly scrollbar stub on desktop
+4. **Toast and alert containers move to the bottom on mobile** — do not override `top` positioning in page-specific CSS without also overriding the mobile `bottom` rule in `app.css`
+5. **`make build-frontend` instead of `npm run build` directly on macOS** — the Make target strips esbuild's quarantine flag first

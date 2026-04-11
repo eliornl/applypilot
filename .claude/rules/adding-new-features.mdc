@@ -1,0 +1,191 @@
+---
+description: Checklists for adding new API endpoints, agents, database columns, and career tools
+alwaysApply: false
+---
+
+# Adding New Features — Checklists
+
+## New API Endpoint
+
+1. Add Pydantic request/response models
+2. Add route handler with `Depends(get_current_user)` + `Depends(get_database)`
+3. Check ownership — verify the resource belongs to `current_user`
+4. Apply rate limiting for sensitive or expensive operations
+5. Log operations with `logger.info()`, errors with `logger.error()`
+6. Use `APIError` / `create_error_response` for all errors — **never bare `HTTPException`**
+7. Register router in `main.py` under `/api/v1/` prefix
+8. If the endpoint is also in the legacy `/api/` prefix, add `include_in_schema=False`
+9. Add API integration tests in `tests/test_api/` using `authed_client` (mocked user) or `authed_client_with_user` (real DB user) as appropriate
+10. Add E2E mocked coverage in `api-validation.spec.ts` — add a test that mocks the endpoint and verifies the frontend renders its response without JS errors
+11. If the endpoint returns 429, add a matching test in `rate-limit.spec.ts`
+
+## New Database Column
+
+1. Add mapped column to the SQLAlchemy model in `models/database.py`
+2. Create Alembic migration: `alembic revision --autogenerate -m "description"`
+3. Verify migration file naming: `{YYYYMMDD}_0001_{NNN}_{description}.py`
+4. Update `to_dict()` method on the model
+5. If the column is JSONB, add `flag_modified()` calls everywhere it is updated
+6. If the column is a soft-delete timestamp, add an index and filter in all list queries
+
+## New Agent (Workflow)
+
+1. Create agent class in `agents/` following the standard structure
+2. Add `process()` or equivalent async method with BYOK support
+3. Add state fields in `workflows/state_schema.py`
+4. Add node and edges in `workflows/job_application_workflow.py`
+5. Add `flag_modified()` for the new JSONB result field in `_save_workflow_state`
+6. Add agent timing tracking (`agent_durations`)
+7. If the agent caches shared (non-user-specific) results, add stampede protection via `acquire_compute_lock()` / `release_compute_lock()` (see `agent-patterns.mdc`)
+8. Add a `get_cached_*` / `cache_*` helper pair in `utils/cache.py` using versioned keys (`_get_my_cache_key()` with `CACHE_VERSION` prefix) and register required fields in `_CACHE_REQUIRED_FIELDS`
+9. Add unit tests in `tests/test_agents/test_{agent_name}.py` — patch `agents.{module}.genai` or the LLM client directly; test success, LLM JSON parse failure (fallback), BYOK override, and empty-input edge cases
+
+## New Standalone Agent (Career Tool or On-Demand)
+
+1. Create agent class in `agents/`
+2. Add `CRITICAL WRITING RULES` to agent prompt — **no bracket placeholders** (`[Your Name]`, `[Company]`, etc.); use first name only for greetings, `Best regards,` close without sender name (see `career-tools.mdc`)
+3. If the tool outputs an email, split into separate `subject` and `body` JSON fields — never a single `template` string
+4. Add API endpoint in `api/tools.py` (career tools) or a dedicated router
+5. Add rate limiting (recommended: 10/hour for tools, 5/hour for expensive ops)
+6. Register router in `main.py`
+7. Add frontend form/tab to `ui/dashboard/tools.html` following the sectioned card layout (`.salary-content-section` / `.salary-section-title` pattern)
+8. For email outputs: add a copy button using `data-action="copyXxx"` that calls `_clipboardWrite(subject + '\n\n' + body)` — never `navigator.clipboard` directly
+9. For large text inputs (>1000 chars): add `maxlength` + live `.char-counter` element (see `career-tools.mdc`)
+10. Add unit tests in `tests/test_agents/test_{tool_name}.py` (mock the LLM client)
+11. Add API integration tests in `tests/test_api/test_career_tools.py` using `authed_client`
+12. Add E2E coverage in `e2e/tests/dashboard-pages.spec.ts` — form field visibility, input fillability, tab switching; mock the API and verify 200/429 responses do not crash the page (add matching test in `rate-limit.spec.ts`)
+
+## New Content Regeneration Endpoint
+
+1. `POST /api/v1/workflow/regenerate-{name}/{session_id}`
+2. Validate session ownership
+3. Load existing state from DB
+4. Re-invoke the target agent with existing state
+5. Save with `flag_modified()` on the relevant JSONB field
+6. Rate limit: 5/hour per user
+7. Add regenerate button to `application.html` and wire to re-render function
+
+## Adding a New Field to an Existing Agent Result
+
+When adding a new field to an agent (e.g. `CompanyResearchResult`, `ProfileMatchingResult`):
+
+1. Add the field to the dataclass in `workflows/state_schema.py` with an appropriate default
+2. Update the agent prompt in `agents/*.py` to instruct the LLM to populate it
+3. Map it in the agent's `_map_to_result()` method (if one exists)
+4. Render it in `ui/static/js/application-detail.js` inside the appropriate render function
+5. Add CSS for any new UI components in `ui/dashboard/application.html`
+6. Update `ui-application-detail.mdc` to document the new field and its CSS classes
+
+## Adding a New Tab Section to application.html
+
+1. Add the HTML section within the correct `#pane-*` container
+2. Render data in `renderMainContent()` or the appropriate render function
+3. Always use `escapeHtml()` for all LLM-generated strings
+4. Always use `ensureArray()` for any field that could be null, undefined, or an object
+5. Add CSS classes in `application.html` — use CSS variables, no inline colors
+6. Update `ui-application-detail.mdc` with the new field mapping and CSS class list
+
+## New Database Migration Checklist
+
+- [ ] `revision` ID matches filename date prefix
+- [ ] `down_revision` correctly references previous revision
+- [ ] `upgrade()` and `downgrade()` are both implemented
+- [ ] New indexes created in `upgrade()` and dropped in `downgrade()`
+- [ ] Nullable columns get a `server_default` or `nullable=True`
+
+## Updating Landing Page Screenshots
+
+The landing page "See It In Action" section shows real app screenshots. Refresh them when the application UI changes meaningfully (new tabs, redesigned sections, colour changes).
+
+1. Run the app locally and open any completed job analysis
+2. For **each tab** that changed (Job Details, Your Fit, Strategy, Company, Cover Letter, Resume, Interview):
+   - Expand or scroll through the entire tab content to load all sections
+   - Take a **full-page / scrolling screenshot** that captures the whole tab in one shot
+   - If your tool produces multiple images, merge them into a **single tall PNG** before saving — never stack multiple images inside one `.ss-panel`
+3. Save the merged PNG as `ui/static/img/screenshots/tab-{name}.png` — overwrite the existing file
+   - Names: `tab-job-details.png`, `tab-your-fit.png`, `tab-strategy.png`, `tab-company.png`, `tab-cover-letter.png`, `tab-resume.png`, `tab-interview.png`
+4. No build step required — screenshots are raw static files, not processed by esbuild
+5. Hard-refresh the landing page (`Cmd+Shift+R`) and verify each tab in the showcase
+6. Update `CHANGELOG.md` with a note about the refreshed screenshots
+
+See `landing-page.mdc` for the full showcase structure and CSS/JS reference.
+
+## Adding a New Static JS or CSS File
+
+1. Create the file in `ui/static/js/` or `ui/static/css/`
+2. Reference it in the template with `{{ asset_url('js/my-file.js') }}` — **never** a raw `/static/` path
+3. Run `make build-frontend` (macOS/Linux) or `just build-frontend` (Windows) to regenerate the manifest with the new file
+4. The Dockerfile and CI handle the build automatically on deploy
+
+See `frontend-build-pipeline.mdc` for full details.
+
+## Adding a New Workflow Preference
+
+1. **Model** — Add a typed column to `UserWorkflowPreferences` in `models/database.py` with a `default=` and update `to_dict()`
+2. **Migration** — Create `alembic/versions/{date}_00{N}_{N+1}_{name}.py` with `server_default` matching the Python default
+3. **API defaults dict** — Add the new field to `_PREFERENCE_DEFAULTS` in `api/profile.py`
+4. **Pydantic models** — Add `Optional[T]` field to `ApplicationPreferencesRequest` and a required field to `ApplicationPreferencesResponse`
+5. **Validation** — If the field has an allowed-values set, add a `_VALID_*` set and validate in the PATCH handler
+6. **PATCH handler** — Apply the new field only when it is explicitly set (use `if request.field is not None:` pattern)
+7. **GET handler** — Return the new field in `ApplicationPreferencesResponse(...)`
+8. **UI** — Add a card to `preferencesSection` in `ui/dashboard/settings.html`. Use `.pref-select.pref-select-inline` for dropdowns (right-aligned inline) or `.pref-toggle` for booleans
+9. **JS** — Update `_applyPreferencesToUI()` and `_readPrefsFromUI()` in `ui/static/js/dashboard-settings.js`; the debounced auto-save (`_schedulePreferencesSave`) and event listener wiring happen in `DOMContentLoaded`
+10. **Agent wiring** — If the preference affects LLM output, read it from `state.get("workflow_preferences") or {}` inside the relevant agent's `process()` and inject it into the prompt or pass it as a `generate()` parameter
+
+See `settings-page.mdc` for settings UI patterns and `database-patterns.mdc` for the upsert pattern.
+
+## New Background Task with WebSocket Broadcasts
+
+When adding a new background task that runs an LLM or long operation:
+
+1. **Add broadcast functions** to `api/websocket.py` following the existing pattern:
+   - `broadcast_{feature}_started` — sent before the work begins
+   - `broadcast_{feature}_complete` — sent after saving to DB
+   - `broadcast_{feature}_error` — sent in the except block
+2. **Pass `user_id` from the endpoint** when scheduling the task — never rely solely on a DB lookup inside the task:
+   ```python
+   background_tasks.add_task(_my_task, session_id=session_id, user_id=str(user_id))
+   ```
+3. **Resolve `user_id` defensively** inside the task in case the parameter is missing:
+   ```python
+   ws_user_id = user_id or str(workflow_session.user_id)
+   ```
+4. **Broadcast in the right order**:
+   ```python
+   await broadcast_feature_started(ws_user_id, session_id)
+   try:
+       # ... do work, save to DB ...
+       await broadcast_feature_complete(ws_user_id, session_id)
+   except Exception as e:
+       await broadcast_feature_error(ws_user_id, session_id, str(e))
+       raise
+   ```
+5. **Update `websocket-patterns.mdc`** — add the new message types to the reference table.
+6. **Frontend**: open the WebSocket **before** calling the trigger endpoint, handle the complete/error events, and keep a slow polling loop (5 s) as a fallback:
+   ```javascript
+   connectWs();           // open WS first
+   await triggerApi();    // then fire the task
+   startPollingFallback(); // slow poll as safety net
+   ```
+
+## BYOK Check Before LLM Call
+
+Any endpoint that triggers an LLM call must check API key availability first. Use `no_api_key_error()` — **never bare `HTTPException`** — so the frontend can detect `CFG_6001` and show a targeted prompt:
+
+```python
+from utils.error_responses import no_api_key_error
+
+# Decrypt user's stored BYOK key if present
+user_api_key = None
+if user and user.gemini_api_key_encrypted:
+    try:
+        user_api_key = decrypt_api_key(user.gemini_api_key_encrypted)
+    except Exception as e:
+        logger.warning(f"Failed to decrypt user API key: {e}")
+
+server_has_key = bool(getattr(settings, 'gemini_api_key', None)) or settings.use_vertex_ai
+if not user_api_key and not server_has_key:
+    raise no_api_key_error()
+```
+
+The frontend (`dashboard-new-application.js`) reads `error_code` from the 422 response body. When it equals `"CFG_6001"` it skips the generic danger toast and instead shows `showApiKeyAlert()` — a dismissible amber warning banner with a direct link to `/settings?tab=ai-setup`.

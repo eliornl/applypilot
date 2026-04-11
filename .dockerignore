@@ -1,0 +1,84 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Private / cloud-specific files (infrastructure, CI/CD, internal docs)
+_private/
+
+# Tests (not needed in production)
+tests/
+pytest.ini
+conftest.py
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# Development files
+.env
+.env.local
+.env.local.example
+
+# Logs
+*.log
+logs/
+
+# Local development
+tmp/
+temp/
+
+# Runtime directories — user uploads and server-generated files
+uploads/
+generated/
+
+# Extension source (can be built separately)
+extension/
+
+# E2E tests (not needed in production)
+e2e/
+
+# Frontend build tooling (only compiled dist output is needed at runtime)
+ui/node_modules/
+ui/build.mjs
+ui/package.json
+ui/package-lock.json
+
+# AI tooling / editor rules (no place in a production image)
+.cursor/
+.claude/
+.cursorrules
+CLAUDE.md
+
+# Dev-only docs and tooling
+CONTRIBUTING.md
+USER_GUIDE.md
+CHANGELOG.md
+Justfile
+docker-compose.yml

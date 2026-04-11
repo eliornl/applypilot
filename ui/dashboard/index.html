@@ -1,0 +1,881 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - ApplyPilot{% endblock %}
+{% block description %}Your job application management dashboard{% endblock %}
+{% block extra_head %}
+<!-- Dashboard Specific Styles -->
+    <style nonce="{{ request.state.csp_nonce | default('') }}">
+        body {
+            background: var(--bg-primary);
+            min-height: 100vh;
+            font-family: var(--font-primary);
+        }
+
+        .navbar {
+            background: var(--bg-card) !important;
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 0;
+        }
+
+        .navbar-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            text-decoration: none;
+        }
+
+        .brand-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: var(--radius-md);
+            background: var(--accent-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1rem;
+        }
+
+        .brand-text {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .brand-accent {
+            color: var(--accent-primary);
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .user-info .nav-btn {
+            width: 100px;
+            text-align: center;
+            justify-content: center;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .navbar-toggler {
+            border-color: var(--border-color);
+            padding: 0.35rem 0.55rem;
+        }
+
+        .navbar-toggler-icon {
+            filter: invert(1) brightness(0.8);
+        }
+
+        .navbar-toggler:focus {
+            box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.2);
+        }
+
+        @media (max-width: 991px) {
+            .navbar-collapse {
+                background: var(--bg-card);
+                border-top: 1px solid var(--border-color);
+                padding: 1rem 0;
+            }
+
+            .user-info {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 0.5rem;
+                width: 100%;
+                padding: 0 1rem;
+            }
+
+            .user-info .nav-btn {
+                width: 100%;
+                justify-content: flex-start;
+                padding: 0.65rem 1rem;
+                font-size: 0.9rem;
+            }
+        }
+
+        /* ── Layout ─────────────────────────────────────────────────────────── */
+        .dashboard-container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* ── Welcome card ────────────────────────────────────────────────────── */
+        .welcome-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-xl);
+            padding: 2rem;
+            margin-bottom: 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .welcome-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--accent-gradient);
+        }
+
+        .welcome-card h2 { color: var(--text-primary); font-weight: 700; }
+        .welcome-card p  { color: var(--text-secondary); }
+
+        /* ── Alert container ─────────────────────────────────────────────────── */
+        #alertContainer:not(:empty) { margin-bottom: 1.5rem; }
+
+        /* ── Stats cards ─────────────────────────────────────────────────────── */
+        .stats-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            text-align: center;
+            transition: all var(--transition-base);
+        }
+
+        .stat-card:hover {
+            border-color: var(--border-accent);
+            transform: translateY(-2px);
+        }
+
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--accent-primary);
+            font-family: var(--font-mono);
+        }
+
+        .stat-label {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+        }
+
+        /* ── Action buttons ──────────────────────────────────────────────────── */
+        .action-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .action-btn {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            text-decoration: none;
+            color: var(--text-primary);
+            transition: all var(--transition-base);
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .action-btn:hover {
+            border-color: var(--accent-primary);
+            background: var(--bg-card-hover);
+            color: var(--text-primary);
+            transform: translateY(-2px);
+            box-shadow: var(--glow-accent);
+        }
+
+        .action-btn i { font-size: 2rem; color: var(--accent-primary); }
+        .action-btn-content h5 { margin: 0; font-weight: 600; color: var(--text-primary); }
+        .action-btn-content p  { margin: 0; font-size: 0.9rem; color: var(--text-secondary); }
+
+        /* ── Applications section ────────────────────────────────────────────── */
+        .applications-section {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-xl);
+            padding: 1.5rem;
+        }
+
+        .applications-section h4 { color: var(--text-primary); }
+
+        /* ── Section header + filter bar ─────────────────────────────────────── */
+        .section-header {
+            overflow: hidden;
+            margin-bottom: 0.75rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 1rem;
+        }
+        .section-title-row {
+            float: left;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .filter-bar {
+            float: right;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: nowrap;
+            min-width: 0;
+        }
+
+        /* Higher specificity so is-hidden wins over display:flex on .bulk-actions-bar */
+        .bulk-actions-bar.is-hidden { display: none; }
+
+        .results-count {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-full);
+            padding: 0.2rem 0.65rem;
+        }
+
+        .filter-bar { min-width: 0; }
+
+        /* Search input */
+        .search-wrapper {
+            position: relative;
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 0.6rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            pointer-events: none;
+        }
+
+        .search-input {
+            padding-left: 1.75rem;
+            width: 160px;
+            min-width: 0;
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-radius: var(--radius-md);
+        }
+
+        .search-input:focus {
+            background-color: var(--bg-secondary);
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.15);
+            color: var(--text-primary);
+        }
+
+        .search-input::placeholder { color: var(--text-muted); }
+
+        /* Active filter badge */
+        .filter-active-badge {
+            font-size: 0.7rem;
+            font-weight: 600;
+            background: rgba(0, 212, 255, 0.12);
+            color: var(--accent-primary);
+            border: 1px solid rgba(0, 212, 255, 0.3);
+            border-radius: var(--radius-full);
+            padding: 0.2rem 0.55rem;
+            white-space: nowrap;
+        }
+
+        /* ── Bulk actions bar ────────────────────────────────────────────────── */
+        .bulk-actions-bar {
+            background: rgba(0, 212, 255, 0.06);
+            border: 1px solid rgba(0, 212, 255, 0.2);
+            border-radius: var(--radius-md);
+            padding: 0.6rem 1rem;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .selected-count {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--accent-primary);
+        }
+
+        /* ── Application cards ───────────────────────────────────────────────── */
+        .application-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.9rem 1.1rem 0.9rem 0.9rem;
+            margin-bottom: 0.6rem;
+            transition: all var(--transition-base);
+            border-left-width: 3px;
+        }
+
+        .application-card:hover { border-color: var(--border-accent); }
+
+        /* Status border colours */
+        .border-status-draft                { border-left-color: var(--text-muted); }
+        .border-status-processing           { border-left-color: var(--info); }
+        .border-status-ready                { border-left-color: var(--accent-primary); }
+        .border-status-completed            { border-left-color: var(--accent-primary); }
+        .border-status-analysis_complete    { border-left-color: var(--accent-primary); }
+        .border-status-awaiting_confirmation{ border-left-color: var(--accent-primary); }
+        .border-status-applied              { border-left-color: var(--warning); }
+        .border-status-interview            { border-left-color: var(--success); }
+        .border-status-rejected             { border-left-color: var(--danger); }
+        .border-status-accepted             { border-left-color: #22c55e; }
+        .border-status-failed               { border-left-color: var(--danger); }
+
+        /* Card: left content col + right status/actions col */
+        .card-layout {
+            display: flex;
+            gap: 1rem;
+            align-items: stretch;
+        }
+
+        .card-left {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+        }
+
+        /* Right column — badge pinned top, buttons+trash pinned bottom */
+        .card-right {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            justify-content: space-between;
+            flex-shrink: 0;
+            gap: 0.5rem;
+        }
+
+        .card-right-top {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .card-right-bottom {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .application-title {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 0;
+        }
+
+        .company-name {
+            color: var(--accent-primary);
+            font-size: 0.875rem;
+        }
+
+        /* Follow-up nudge */
+        .follow-up-badge {
+            font-size: 0.75rem;
+            color: var(--warning);
+            title: 'No reply in 14+ days — consider following up';
+        }
+
+        /* AI analysis status badge (read-only, top-right) */
+        .card-ai-badge {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 0.22rem 0.55rem;
+            border-radius: var(--radius-full);
+            border: 1px solid currentColor;
+            white-space: nowrap;
+            flex-shrink: 0;
+            pointer-events: none;
+        }
+
+        .ai-processing { background: rgba(59,130,246,0.1);  color: var(--info);           border-color: rgba(59,130,246,0.3); }
+        .ai-ready      { background: rgba(0,212,255,0.1);   color: var(--accent-primary); border-color: rgba(0,212,255,0.3);  }
+        .ai-failed     { background: rgba(239,68,68,0.1);   color: var(--danger);         border-color: rgba(239,68,68,0.3);  }
+        .ai-draft      { background: rgba(107,114,128,0.1); color: var(--text-muted);     border-color: rgba(107,114,128,0.3); }
+
+        /* Tracking stage buttons — inline in bottom row */
+        .card-tracking-row {
+            display: flex;
+            gap: 0.35rem;
+            flex-wrap: nowrap;
+            flex-shrink: 0;
+        }
+
+        .track-btn {
+            font-size: 0.7rem;
+            font-weight: 500;
+            padding: 0.22rem 0.65rem;
+            border-radius: var(--radius-full);
+            border: 1px solid var(--border-color);
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: color 0.15s, border-color 0.15s, background 0.15s;
+            white-space: nowrap;
+            flex-shrink: 0;
+            line-height: 1.4;
+        }
+
+        /* Hover — show the colour hint */
+        .track-applied:hover   { color: var(--warning); border-color: rgba(245,158,11,0.5); }
+        .track-interview:hover { color: var(--success); border-color: rgba(16,185,129,0.5); }
+        .track-accepted:hover  { color: #22c55e;        border-color: rgba(34,197,94,0.5);  }
+        .track-rejected:hover  { color: var(--danger);  border-color: rgba(239,68,68,0.5);  }
+
+        /* Active — currently selected stage */
+        .track-applied.track-btn-active   { background: rgba(245,158,11,0.12);  color: var(--warning); border-color: rgba(245,158,11,0.45); }
+        .track-interview.track-btn-active { background: rgba(16,185,129,0.12);  color: var(--success); border-color: rgba(16,185,129,0.45); }
+        .track-accepted.track-btn-active  { background: rgba(34,197,94,0.12);   color: #22c55e;        border-color: rgba(34,197,94,0.45);  }
+        .track-rejected.track-btn-active  { background: rgba(239,68,68,0.12);   color: var(--danger);  border-color: rgba(239,68,68,0.45);  }
+
+        /* Delete button — inline in bottom row, always visible */
+        .card-delete-btn {
+            background: transparent;
+            border: none;
+            padding: 0.2rem 0.3rem;
+            line-height: 1;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            opacity: 0.45;
+            transition: color 0.15s, opacity 0.15s;
+            cursor: pointer;
+            flex-shrink: 0;
+            margin-left: auto;
+        }
+
+        .card-delete-btn:hover {
+            color: var(--danger);
+            opacity: 1;
+        }
+
+        /* Application meta (date, match score) */
+        .application-meta {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-top: 0.15rem;
+        }
+
+        .application-meta span[title] { cursor: default; }
+
+        .btn-sm {
+            padding: 0.3rem 0.65rem;
+            font-size: 0.78rem;
+            border-radius: var(--radius-md);
+        }
+
+        .btn-outline-success,
+        .btn-outline-info,
+        .btn-outline-primary,
+        .btn-outline-danger,
+        .btn-outline-warning,
+        .btn-outline-secondary,
+        .btn-outline-dark { border-width: 1px; }
+
+        /* Fade existing cards while a filter reload is in progress */
+        .list-refreshing {
+            opacity: 0.4;
+            pointer-events: none;
+            transition: opacity 0.12s ease;
+        }
+
+        /* ── Empty state ─────────────────────────────────────────────────────── */
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-muted);
+        }
+
+        .empty-state i { font-size: 4rem; margin-bottom: 1rem; color: var(--text-muted); }
+
+        /* ── Skeleton loader ─────────────────────────────────────────────────── */
+        @keyframes shimmer {
+            0%   { background-position: -200% 0; }
+            100% { background-position:  200% 0; }
+        }
+
+        .skeleton-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-left: 3px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.25rem;
+            margin-bottom: 0.875rem;
+        }
+
+        .skeleton-line {
+            background: linear-gradient(
+                90deg,
+                var(--bg-tertiary, #1a1a2e) 25%,
+                var(--bg-card-hover, #252545) 50%,
+                var(--bg-tertiary, #1a1a2e) 75%
+            );
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: var(--radius-sm);
+            height: 13px;
+            margin-bottom: 0.65rem;
+        }
+
+        .skeleton-title    { width: 55%; height: 17px; }
+        .skeleton-subtitle { width: 35%; }
+        .skeleton-meta     { width: 75%; height: 11px; }
+        .skeleton-actions  { width: 50%; height: 28px; margin-top: 0.5rem; }
+
+        /* ── Load more ───────────────────────────────────────────────────────── */
+        .load-more-wrapper {
+            text-align: center;
+            padding: 1.25rem 0 0.25rem;
+        }
+
+        /* ── Form controls ───────────────────────────────────────────────────── */
+        .form-select {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-radius: var(--radius-md);
+        }
+
+        .form-select:focus {
+            background-color: var(--bg-secondary);
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.15);
+            color: var(--text-primary);
+        }
+
+        .filter-select-auto { width: auto; min-width: max-content; flex-shrink: 0; }
+
+        .btn-outline-primary {
+            color: var(--accent-primary);
+            border-color: var(--accent-primary);
+        }
+
+        .btn-outline-primary:hover {
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
+            color: white;
+        }
+
+        .btn-outline-secondary {
+            color: var(--text-secondary);
+            border-color: var(--border-color);
+        }
+
+        .btn-outline-secondary:hover {
+            background: var(--bg-tertiary);
+            border-color: var(--border-accent);
+            color: var(--text-primary);
+        }
+
+        .alert { border-radius: var(--radius-md); border: none; }
+        .alert-success  { background: rgba(16,185,129,0.1); color: var(--success); }
+        .alert-danger   { background: rgba(239,68,68,0.1);  color: var(--danger); }
+        .alert-warning  { background: rgba(245,158,11,0.1); color: var(--warning); }
+        .alert-info     { background: rgba(59,130,246,0.1); color: var(--info); }
+
+        /* ── Onboarding tour overlay ─────────────────────────────────────────── */
+        #onboarding-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.85);
+            backdrop-filter: blur(5px);
+            z-index: 100000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        #onboarding-overlay.visible { opacity: 1; }
+        .onboarding-modal {
+            background: linear-gradient(135deg, rgba(20,20,45,0.98), rgba(30,30,60,0.98));
+            border: 1px solid rgba(99,102,241,0.3);
+            border-radius: 20px;
+            width: 90%;
+            max-width: 500px;
+            padding: 2rem;
+            text-align: center;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+            transform: scale(0.9);
+            transition: transform 0.3s ease;
+        }
+        #onboarding-overlay.visible .onboarding-modal { transform: scale(1); }
+        .onboarding-image {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            animation: ob-bounce 2s ease-in-out infinite;
+        }
+        @keyframes ob-bounce {
+            0%,100% { transform: translateY(0); }
+            50%      { transform: translateY(-10px); }
+        }
+        .onboarding-title {
+            color: #fff; font-size: 1.5rem; font-weight: 700; margin-bottom: 1rem;
+        }
+        .onboarding-body {
+            color: rgba(255,255,255,0.8); font-size: 1rem; line-height: 1.7;
+            text-align: left; margin-bottom: 1.5rem;
+        }
+        .onboarding-body p  { margin-bottom: 0.75rem; }
+        .onboarding-body ul,
+        .onboarding-body ol { margin: 0.75rem 0; padding-left: 1.5rem; }
+        .onboarding-body li { margin-bottom: 0.5rem; }
+        .onboarding-body a  { color: #818cf8; }
+        .onboarding-body strong { color: #fff; }
+        .onboarding-progress {
+            display: flex; justify-content: center; gap: 8px; margin-bottom: 1.5rem;
+        }
+        .progress-dot {
+            width: 10px; height: 10px; border-radius: 50%;
+            background: rgba(255,255,255,0.2); transition: all 0.3s ease;
+        }
+        .progress-dot.active    { background: #6366f1; transform: scale(1.2); }
+        .progress-dot.completed { background: #22c55e; }
+        .onboarding-actions {
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .onboarding-nav { display: flex; gap: 10px; }
+        .onboarding-btn {
+            padding: 10px 20px; border-radius: 8px; font-weight: 500; font-size: 0.9rem;
+            cursor: pointer; transition: all 0.2s ease; border: none;
+            display: inline-flex; align-items: center; gap: 8px;
+        }
+        .onboarding-btn-skip { background: transparent; color: rgba(255,255,255,0.5); }
+        .onboarding-btn-skip:hover { color: rgba(255,255,255,0.8); }
+        .onboarding-btn-prev { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.8); }
+        .onboarding-btn-prev:hover { background: rgba(255,255,255,0.15); }
+        .onboarding-btn-next {
+            background: linear-gradient(135deg,#667eea 0%,#764ba2 100%); color: white;
+        }
+        .onboarding-btn-next:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(102,126,234,0.4);
+        }
+        .onboarding-highlight {
+            position: relative; z-index: 100001;
+            box-shadow: 0 0 0 4px rgba(99,102,241,0.8), 0 0 20px rgba(99,102,241,0.5);
+            border-radius: 8px;
+            animation: ob-highlight-pulse 2s ease-in-out infinite;
+        }
+        @keyframes ob-highlight-pulse {
+            0%,100% { box-shadow: 0 0 0 4px rgba(99,102,241,0.8), 0 0 20px rgba(99,102,241,0.5); }
+            50%      { box-shadow: 0 0 0 6px rgba(99,102,241,0.6), 0 0 30px rgba(99,102,241,0.7); }
+        }
+
+        /* ── Responsive ──────────────────────────────────────────────────────── */
+        @media (max-width: 768px) {
+            .dashboard-container { margin: 1rem auto; padding: 0 0.5rem; }
+            .welcome-card { padding: 1.25rem; }
+            .welcome-card .col-md-4 { display: none; }
+            .stats-cards { grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+            .action-buttons { grid-template-columns: 1fr; }
+            .applications-section { padding: 1.25rem; }
+            .application-card { padding: 1rem; }
+            .application-header { flex-direction: column; gap: 0.5rem; }
+            .app-card-right { align-self: flex-start; }
+            .application-meta { flex-wrap: wrap; gap: 0.5rem; }
+            .section-header { flex-direction: column; align-items: stretch; }
+            .filter-bar {
+                overflow-x: auto;
+                flex-wrap: nowrap;
+                scrollbar-width: none;
+                -webkit-overflow-scrolling: touch;
+                padding-bottom: 2px;
+            }
+            .filter-bar::-webkit-scrollbar { display: none; }
+            .search-input { min-width: 140px; }
+        }
+
+        @media (max-width: 480px) {
+            .stats-cards { grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+            .stat-card { padding: 1rem; }
+            .stat-number { font-size: 1.5rem; }
+            .onboarding-modal { padding: 1.5rem; margin: 1rem; }
+            .onboarding-image { font-size: 3rem; }
+            .onboarding-title { font-size: 1.25rem; }
+            .onboarding-actions { flex-direction: column; gap: 1rem; }
+            .onboarding-btn-skip { order: 1; }
+        }
+    </style>
+{% endblock %}
+{% block navbar %}
+{% include "partials/navbar_dashboard.html" %}
+{% endblock %}
+{% block content %}
+<div class="dashboard-container">
+
+    <!-- Welcome Card -->
+    <div class="welcome-card">
+        <div class="row align-items-center">
+            <div class="col-md-8">
+                <h2 id="welcomeMessage">Welcome back, <span id="userName">there</span>!</h2>
+                <p class="mb-0">Ready to create your next job application? Let's get started.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alert Container -->
+    <div id="alertContainer"></div>
+
+    <!-- Stats Cards -->
+    <div class="stats-cards">
+        <div class="stat-card">
+            <div class="stat-number" id="totalApplications">0</div>
+            <div class="stat-label">Total Applications</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number" id="appliedCount">0</div>
+            <div class="stat-label">Applied</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number" id="interviewCount">0</div>
+            <div class="stat-label">Interviews</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number" id="responseRate">0%</div>
+            <div class="stat-label">Response Rate</div>
+        </div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="action-buttons">
+        <a href="/dashboard/new-application" class="action-btn">
+            <i class="fas fa-plus-circle"></i>
+            <div class="action-btn-content">
+                <h5>New Application</h5>
+                <p>Create a tailored application package</p>
+            </div>
+        </a>
+        <a href="/dashboard/tools" class="action-btn">
+            <i class="fas fa-tools"></i>
+            <div class="action-btn-content">
+                <h5>Career Tools</h5>
+                <p>Thank you notes, rejection analysis &amp; more</p>
+            </div>
+        </a>
+    </div>
+
+    <!-- Applications Section -->
+    <div class="applications-section">
+
+        <!-- Section header -->
+        <div class="dash-section-header">
+            <div class="dash-section-title">
+                <h4 class="mb-0">Applications</h4>
+                <span id="resultsCount" class="results-count is-hidden"></span>
+            </div>
+            <div class="dash-filter-bar" id="filterBar">
+                <!-- Search -->
+                <div class="search-wrapper">
+                    <i class="fas fa-search search-icon" aria-hidden="true"></i>
+                    <input
+                        type="text"
+                        id="searchInput"
+                        class="search-input"
+                        placeholder="Search title or company…"
+                        aria-label="Search applications"
+                        autocomplete="off"
+                    >
+                </div>
+                <!-- Date filter -->
+                <select id="dateFilter" class="filter-select-auto" aria-label="Filter by date range">
+                    <option value="">All Time</option>
+                    <option value="1">Today</option>
+                    <option value="7">This week</option>
+                    <option value="30">This month</option>
+                    <option value="90">This quarter</option>
+                    <option value="365">This year</option>
+                </select>
+                <!-- Status filter (tracking stages only) -->
+                <select id="statusFilter" class="filter-select-auto" aria-label="Filter by status">
+                    <option value="">All Status</option>
+                    <option value="APPLIED">Applied</option>
+                    <option value="INTERVIEW">Interview</option>
+                    <option value="ACCEPTED">Offer</option>
+                    <option value="REJECTED">Rejected</option>
+                </select>
+                <!-- Sort -->
+                <select id="sortFilter" class="filter-select-auto" aria-label="Sort applications">
+                    <option value="created_desc">Newest first</option>
+                    <option value="created_asc">Oldest first</option>
+                    <option value="company_asc">Company A–Z</option>
+                    <option value="title_asc">Title A–Z</option>
+                    <option value="updated_desc">Recently updated</option>
+                </select>
+                <!-- Active indicator -->
+            </div>
+        </div>
+
+        <!-- Bulk actions bar (shown when ≥1 card selected) -->
+        <div id="bulkActionsBar" class="bulk-actions-bar is-hidden" role="toolbar" aria-label="Bulk actions">
+            <input
+                type="checkbox"
+                id="selectAllCheckbox"
+                class="form-check-input"
+                data-action="select-all"
+                aria-label="Select all visible applications"
+            >
+            <span id="selectedCount" class="selected-count">0 selected</span>
+            <button class="btn btn-outline-danger btn-sm" data-action="bulk-delete" aria-label="Delete selected applications">
+                <i class="fas fa-trash me-1" aria-hidden="true"></i>Delete selected
+            </button>
+        </div>
+
+        <!-- Applications list -->
+        <div id="applicationsList" class="applications-list mt-3" role="list">
+            <!-- skeleton placeholder on first load -->
+            <div class="skeleton-card" aria-hidden="true">
+                <div class="skeleton-line skeleton-title"></div>
+                <div class="skeleton-line skeleton-subtitle"></div>
+                <div class="skeleton-line skeleton-meta"></div>
+                <div class="skeleton-line skeleton-actions"></div>
+            </div>
+            <div class="skeleton-card" aria-hidden="true">
+                <div class="skeleton-line skeleton-title"></div>
+                <div class="skeleton-line skeleton-subtitle"></div>
+                <div class="skeleton-line skeleton-meta"></div>
+                <div class="skeleton-line skeleton-actions"></div>
+            </div>
+            <div class="skeleton-card" aria-hidden="true">
+                <div class="skeleton-line skeleton-title"></div>
+                <div class="skeleton-line skeleton-subtitle"></div>
+                <div class="skeleton-line skeleton-meta"></div>
+                <div class="skeleton-line skeleton-actions"></div>
+            </div>
+        </div>
+
+        <!-- Load more -->
+        <div id="loadMoreWrapper" class="load-more-wrapper is-hidden">
+            <button class="btn btn-outline-secondary" data-action="load-more" id="loadMoreBtn">
+                <i class="fas fa-chevron-down me-2" aria-hidden="true"></i>Load more
+            </button>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
+{% block page_scripts %}
+<script src="{{ asset_url('js/dashboard-home.js') }}"></script>
+{% endblock %}
+{% block extra_scripts %}
+<script src="{{ asset_url('js/onboarding.js') }}"></script>
+{% endblock %}

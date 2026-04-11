@@ -1,0 +1,555 @@
+{% extends "base.html" %}
+{% block title %}Login - {{ app_name or "ApplyPilot" }}{% endblock %}
+{% block description %}Login to your ApplyPilot account{% endblock %}
+{% block extra_head %}
+<!-- Auth Page Specific Styles -->
+    <style nonce="{{ request.state.csp_nonce | default('') }}">
+        /* Auth page layout */
+        .auth-page {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 1rem;
+            position: relative;
+        }
+
+        .auth-container {
+            max-width: 420px;
+            width: 100%;
+            z-index: 1;
+        }
+
+        .auth-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-xl);
+            padding: 2.5rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .auth-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--accent-gradient);
+        }
+
+        .auth-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .auth-header h2 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+        }
+
+        .auth-header p {
+            color: var(--text-secondary);
+            margin: 0;
+        }
+
+        /* Form styling overrides for auth pages */
+        .auth-card .form-floating {
+            margin-bottom: 1rem;
+            position: relative;
+        }
+
+        .auth-card .form-floating > .form-control {
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-color);
+            border-radius: var(--radius-md);
+            color: var(--text-primary);
+            height: calc(3.5rem + 4px);
+            padding: 1.5rem 0.75rem 0.5rem 0.75rem;
+        }
+
+        .auth-card .form-floating > .form-control:focus {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.15);
+            background: var(--bg-secondary);
+        }
+
+        .auth-card .form-floating > label {
+            color: var(--text-muted);
+            padding: 1rem 0.75rem;
+            background: transparent !important;
+            background-color: transparent !important;
+            transition: all 0.2s ease;
+            transform-origin: left top;
+            border: none !important;
+        }
+
+        .auth-card .form-floating > label::before,
+        .auth-card .form-floating > label::after {
+            display: none !important;
+            background: none !important;
+        }
+
+        .auth-card .form-floating > .form-control:focus ~ label,
+        .auth-card .form-floating > .form-control:not(:placeholder-shown) ~ label {
+            color: var(--accent-primary);
+            background: transparent !important;
+            background-color: transparent !important;
+            padding: 0.25rem 0.5rem;
+            margin-left: 0.25rem;
+            transform: scale(0.85) translateY(-0.1rem);
+            opacity: 1;
+            font-size: 0.9rem;
+        }
+
+        /* Override browser autofill background */
+        .auth-card .form-control:-webkit-autofill,
+        .auth-card .form-control:-webkit-autofill:hover,
+        .auth-card .form-control:-webkit-autofill:focus,
+        .auth-card .form-control:-webkit-autofill:active {
+            -webkit-box-shadow: 0 0 0 30px #0a0a0f inset !important;
+            -webkit-text-fill-color: #e8e6e3 !important;
+            caret-color: #e8e6e3 !important;
+        }
+
+        .auth-card .form-control::placeholder {
+            color: transparent;
+        }
+
+        .auth-card .form-control.is-valid {
+            border-color: var(--success);
+        }
+
+        .auth-card .form-control.is-invalid {
+            border-color: var(--danger);
+        }
+
+        .invalid-feedback {
+            color: var(--danger);
+            font-size: 0.85rem;
+            margin-top: 0.25rem;
+        }
+
+        .invalid-feedback.show {
+            display: block;
+        }
+
+        /* Validation icons */
+        .email-validation-container {
+            position: relative;
+        }
+
+        .email-validation-icon {
+            position: absolute;
+            right: 12px;
+            top: 1.85rem;
+            display: none;
+            z-index: 5;
+        }
+
+        .password-validation-container .email-validation-icon {
+            right: 45px;
+        }
+
+        .email-validation-valid .email-validation-icon.valid {
+            display: inline-block;
+            color: var(--success);
+        }
+
+        .email-validation-invalid .email-validation-icon.invalid {
+            display: inline-block;
+            color: var(--danger);
+        }
+
+        .suggestion-link {
+            color: var(--accent-primary);
+            cursor: pointer;
+            text-decoration: underline;
+            margin-left: 5px;
+            font-weight: 500;
+        }
+
+        .suggestion-link:hover {
+            color: var(--accent-secondary);
+        }
+
+        /* Password field container */
+        .password-field-container {
+            position: relative;
+        }
+
+        .password-check-icon {
+            position: absolute;
+            right: 38px;
+            top: 1.85rem;
+            color: var(--success);
+            z-index: 5;
+        }
+
+        .password-requirements {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 0.5rem;
+            padding-left: 0.25rem;
+        }
+
+        .password-requirements.hidden {
+            display: none;
+        }
+
+        /* Password toggle */
+        .password-toggle {
+            position: absolute;
+            right: 12px;
+            top: 1.85rem;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 0;
+            z-index: 10;
+            transition: color var(--transition-base);
+        }
+
+        .password-toggle:hover {
+            color: var(--text-primary);
+        }
+
+        /* Hide browser password suggestions and strength indicators */
+        input::-webkit-credentials-auto-fill-button,
+        input::-webkit-contacts-auto-fill-button,
+        input::-webkit-textfield-decoration-container,
+        input::-webkit-strong-password-auto-fill-button,
+        input::-internal-input-suggested {
+            visibility: hidden !important;
+            display: none !important;
+            pointer-events: none !important;
+        }
+        
+        /* Disable password reveal in Edge */
+        input::-ms-reveal,
+        input::-ms-clear {
+            display: none !important;
+        }
+
+        /* Remember me row */
+        .remember-forgot-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 1.25rem 0;
+            flex-wrap: nowrap;
+        }
+
+        /* Form check (Remember me) */
+        .auth-card .form-check {
+            margin: 0;
+        }
+
+        .auth-card .form-check-input {
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+        }
+
+        .auth-card .form-check-input:checked {
+            background-color: var(--accent-primary);
+            border-color: var(--accent-primary);
+        }
+
+        .auth-card .form-check-label {
+            color: var(--text-secondary);
+        }
+
+        /* Submit button */
+        .btn-auth {
+            background: var(--accent-gradient);
+            border: none;
+            border-radius: var(--radius-md);
+            padding: 0.875rem 1.5rem;
+            font-weight: 600;
+            width: 100%;
+            color: white;
+            transition: all var(--transition-base);
+        }
+
+        .btn-auth:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: var(--glow-accent);
+            color: white;
+        }
+
+        .btn-auth:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* OAuth divider */
+        .oauth-divider {
+            display: flex;
+            align-items: center;
+            text-align: center;
+            margin: 1.5rem 0;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+        .oauth-divider.is-hidden { display: none; }
+
+        .oauth-divider::before,
+        .oauth-divider::after {
+            content: '';
+            flex: 1;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .oauth-divider span {
+            padding: 0 1rem;
+        }
+
+        /* Google button */
+        .btn-google {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            width: 100%;
+            padding: 0.875rem 1.5rem;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-color);
+            border-radius: var(--radius-md);
+            color: var(--text-primary);
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all var(--transition-base);
+        }
+        .btn-google.is-hidden { display: none; }
+
+        .btn-google:hover {
+            background: var(--bg-tertiary);
+            border-color: var(--border-accent);
+        }
+
+        .btn-google:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* Auth links */
+        .auth-link {
+            text-align: center;
+            margin-top: 2rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        .auth-link a {
+            color: var(--accent-primary);
+            text-decoration: none;
+            font-weight: 600;
+            transition: var(--transition-base);
+        }
+
+        .auth-link a:hover {
+            color: var(--accent-secondary);
+            text-decoration: underline;
+        }
+
+        /* Forgot password link */
+        .forgot-password-link {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            text-decoration: none;
+            transition: var(--transition-base);
+        }
+
+        .forgot-password-link:hover {
+            color: var(--accent-primary);
+            text-decoration: underline;
+        }
+
+        /* Back to home */
+        .back-to-home {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.95rem;
+            font-weight: 500;
+            transition: all var(--transition-base);
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .back-to-home:hover {
+            color: var(--accent-primary);
+            transform: translateX(-3px);
+        }
+
+        /* Alerts */
+        .auth-card .alert {
+            border-radius: var(--radius-md);
+            border: none;
+            padding: 0.875rem 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .auth-card .alert-danger {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+        }
+
+        .auth-card .alert-success {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+        }
+
+        .auth-card .alert-info {
+            background: rgba(59, 130, 246, 0.1);
+            color: var(--info);
+        }
+
+        /* Responsive */
+        @media (max-width: 576px) {
+            .auth-card {
+                padding: 1.25rem;
+                margin: 0 0.5rem;
+            }
+
+            .back-to-home {
+                position: relative;
+                top: auto;
+                left: auto;
+                margin-bottom: 1rem;
+                justify-content: center;
+            }
+        }
+
+        @media (max-width: 400px) {
+            .auth-card {
+                padding: 1rem;
+            }
+        }
+    </style>
+{% endblock %}
+{% block content %}
+<!-- Background glows -->
+    <!-- Back to Home Link -->
+    <a href="/" class="back-to-home" aria-label="Go back to home page">
+        <i class="fas fa-arrow-left"></i>
+        Back to Home
+    </a>
+
+    <main class="auth-page">
+        <div class="auth-container">
+            <div class="auth-card">
+                <div class="auth-header">
+                    <h2>Welcome Back</h2>
+                    <p>Sign in to your account to continue</p>
+                </div>
+
+                <!-- Alert container for messages -->
+                <div id="alert-container" aria-live="polite" aria-atomic="true"></div>
+
+                <!-- Login Form -->
+                <form id="loginForm" novalidate>
+                    <div class="form-floating email-validation-container">
+                        <input 
+                            type="email" 
+                            class="form-control" 
+                            id="email" 
+                            name="email" 
+                            placeholder="name@example.com"
+                            autocomplete="email"
+                            required
+                            data-validate="email"
+                            aria-describedby="emailHelp"
+                        >
+                        <label for="email">Email address</label>
+                        <div class="email-validation-icon valid">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                        <div class="email-validation-icon invalid">
+                            <i class="fas fa-exclamation-circle"></i>
+                        </div>
+                        <div class="invalid-feedback" id="email-feedback"></div>
+                    </div>
+
+                    <div class="form-floating password-field-container email-validation-container password-validation-container" id="password-container">
+                        <input 
+                            type="password" 
+                            class="form-control" 
+                            id="password" 
+                            name="password" 
+                            placeholder="Password"
+                            autocomplete="current-password"
+                            required
+                        >
+                        <label for="password">Password</label>
+                        <div class="email-validation-icon valid">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                        <button type="button" class="password-toggle" aria-label="Toggle password visibility">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                        <div class="password-requirements" id="password-requirements">
+                            Password must be at least 8 characters with uppercase, lowercase, number, and special character.
+                        </div>
+                    </div>
+
+                    <div class="remember-forgot-row">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="remember-me" name="remember_me">
+                            <label class="form-check-label" for="remember-me">
+                                Remember me
+                            </label>
+                        </div>
+                        <a href="/auth/forgot-password" class="forgot-password-link">Forgot password?</a>
+                    </div>
+
+                    <button type="submit" class="btn btn-auth" id="login-btn" data-original-text="Sign In">
+                        <span class="login-text">Sign In</span>
+                        <span class="login-spinner d-none">
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                            Signing in...
+                        </span>
+                    </button>
+                </form>
+
+                <!-- OAuth Divider -->
+                <div class="oauth-divider is-hidden" id="oauth-divider">
+                    <span>or continue with</span>
+                </div>
+
+                <!-- Google Sign-In Button -->
+                <button type="button" class="btn-google is-hidden" id="google-login-btn" data-action="handleGoogleLogin">
+                    <svg class="google-icon" viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                    </svg>
+                    <span>Continue with Google</span>
+                </button>
+
+                <div class="auth-link">
+                    <p class="mb-0">Don't have an account? <a href="/auth/register">Sign up</a></p>
+                </div>
+            </div>
+        </div>
+    </main>
+    <!-- Authentication Manager -->
+{% endblock %}
+{% block page_scripts %}
+<script src="{{ asset_url('js/auth-login.js') }}"></script>
+
+    <!-- Login Page JavaScript -->
+    
+{% endblock %}

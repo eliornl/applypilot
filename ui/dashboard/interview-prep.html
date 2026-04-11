@@ -1,0 +1,763 @@
+{% extends "base.html" %}
+{% block title %}Interview Prep - ApplyPilot{% endblock %}
+{% block description %}Your AI-Powered Job Search Companion{% endblock %}
+{% block extra_head %}
+<meta charset="UTF-8" />
+
+        <meta
+            name="description"
+            content="Personalized interview preparation materials"
+        />
+
+        <link
+            href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+            rel="stylesheet"
+        />
+
+        <link
+            rel="stylesheet"
+            href="{{ asset_url('vendor/fontawesome/css/all.min.css') }}"
+        />
+
+        <!-- Page Specific Styles -->
+        <style nonce="{{ request.state.csp_nonce | default('') }}">
+            body {
+                background: var(--bg-primary);
+                min-height: 100vh;
+                font-family: var(--font-primary);
+            }
+
+            .navbar {
+                background: var(--bg-card) !important;
+                border-bottom: 1px solid var(--border-color);
+                padding: 1rem 0;
+            }
+
+            .navbar-brand {
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+                text-decoration: none;
+            }
+
+            .brand-icon {
+                width: 36px;
+                height: 36px;
+                border-radius: var(--radius-md);
+                background: var(--accent-gradient);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: white;
+                font-size: 1rem;
+            }
+
+            .brand-text {
+                font-size: 1.2rem;
+                font-weight: 700;
+                color: var(--text-primary);
+            }
+
+            .brand-accent {
+                color: var(--accent-primary);
+            }
+
+            .prep-container {
+                max-width: 1200px;
+                margin: 2rem auto;
+                padding: 0 1rem;
+                position: relative;
+                z-index: 1;
+            }
+
+            .prep-header {
+                background: var(--bg-card);
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-xl);
+                padding: 2rem;
+                margin-bottom: 2rem;
+                position: relative;
+                overflow: hidden;
+            }
+
+            .prep-header::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 3px;
+                background: var(--accent-gradient);
+            }
+
+            .job-title {
+                color: var(--text-primary);
+                margin: 0;
+                font-weight: 600;
+            }
+
+            .company-name {
+                color: var(--accent-primary);
+                font-size: 1.2rem;
+                margin: 0.5rem 0;
+            }
+
+            .section-card {
+                background: var(--bg-card);
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-xl);
+                padding: 1.5rem;
+                margin-bottom: 1.5rem;
+            }
+
+            .section-card h5 {
+                color: var(--text-primary);
+            }
+
+            .section-header {
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+                margin-bottom: 1.5rem;
+                padding-bottom: 1rem;
+                border-bottom: 1px solid var(--border-color);
+            }
+
+            .section-icon {
+                width: 45px;
+                height: 45px;
+                border-radius: var(--radius-md);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 1.2rem;
+                color: white;
+            }
+
+            .icon-questions { background: var(--accent-gradient); }
+            .icon-concerns { background: linear-gradient(135deg, var(--accent-secondary), #f5576c); }
+            .icon-ask { background: linear-gradient(135deg, var(--accent-primary), #00f2fe); }
+            .icon-logistics { background: linear-gradient(135deg, #43e97b, #38f9d7); }
+            .icon-reference { background: linear-gradient(135deg, #fa709a, #fee140); }
+            .icon-process { background: linear-gradient(135deg, #a8edea, var(--accent-primary)); }
+
+            .question-card {
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-lg);
+                padding: 1.25rem;
+                margin-bottom: 1rem;
+                border-left: 4px solid var(--accent-primary);
+            }
+
+            .question-text {
+                font-weight: 600;
+                color: var(--text-primary);
+                margin-bottom: 0.75rem;
+            }
+
+            .question-meta {
+                font-size: 0.85rem;
+                color: var(--text-muted);
+                margin-bottom: 0.75rem;
+            }
+
+            .star-section {
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-md);
+                padding: 1rem;
+                margin-top: 0.75rem;
+            }
+
+            .star-section p {
+                color: var(--text-secondary);
+            }
+
+            .star-label {
+                font-weight: 600;
+                color: var(--accent-primary);
+                font-size: 0.8rem;
+                text-transform: uppercase;
+                margin-bottom: 0.25rem;
+            }
+
+            .concern-card {
+                background: rgba(245, 158, 11, 0.1);
+                border: 1px solid rgba(245, 158, 11, 0.2);
+                border-radius: var(--radius-lg);
+                padding: 1.25rem;
+                margin-bottom: 1rem;
+                border-left: 4px solid var(--warning);
+            }
+
+            .concern-title {
+                font-weight: 600;
+                color: var(--warning);
+                margin-bottom: 0.5rem;
+            }
+
+            .concern-card p {
+                color: var(--text-secondary);
+            }
+
+            .talking-point {
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-md);
+                padding: 0.75rem;
+                margin-top: 0.5rem;
+                color: var(--text-secondary);
+            }
+
+            .ask-question-card {
+                background: rgba(0, 212, 255, 0.1);
+                border: 1px solid rgba(0, 212, 255, 0.2);
+                border-radius: var(--radius-lg);
+                padding: 1.25rem;
+                margin-bottom: 1rem;
+                border-left: 4px solid var(--accent-primary);
+            }
+
+            .ask-question-card p {
+                color: var(--text-secondary);
+            }
+
+            .logistics-item {
+                display: flex;
+                align-items: flex-start;
+                gap: 1rem;
+                padding: 0.75rem;
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-md);
+                margin-bottom: 0.5rem;
+            }
+
+            .logistics-item p {
+                color: var(--text-secondary);
+            }
+
+            .logistics-icon {
+                width: 35px;
+                height: 35px;
+                border-radius: var(--radius-md);
+                background: var(--accent-gradient);
+                color: white;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+            }
+
+            .reference-card {
+                background: var(--accent-gradient);
+                color: white;
+                border-radius: var(--radius-xl);
+                padding: 2rem;
+            }
+
+            .reference-card h5 {
+                color: white;
+                margin-bottom: 1.5rem;
+            }
+
+            .reference-item {
+                background: rgba(255, 255, 255, 0.15);
+                border-radius: var(--radius-md);
+                padding: 1rem;
+                margin-bottom: 1rem;
+            }
+
+            .reference-label {
+                font-size: 0.75rem;
+                text-transform: uppercase;
+                opacity: 0.8;
+                margin-bottom: 0.25rem;
+            }
+
+            .checklist-item {
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+                padding: 0.75rem;
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-md);
+                margin-bottom: 0.5rem;
+                color: var(--text-secondary);
+            }
+
+            .checklist-item i {
+                color: var(--accent-primary);
+            }
+
+            .confidence-booster {
+                background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+                color: white;
+                border-radius: var(--radius-md);
+                padding: 1rem;
+                margin-bottom: 0.5rem;
+            }
+
+            .round-timeline {
+                position: relative;
+                padding-left: 2rem;
+            }
+
+            .round-timeline::before {
+                content: "";
+                position: absolute;
+                left: 10px;
+                top: 0;
+                bottom: 0;
+                width: 2px;
+                background: var(--border-color);
+            }
+
+            .round-item {
+                position: relative;
+                margin-bottom: 1.5rem;
+            }
+
+            .round-item::before {
+                content: "";
+                position: absolute;
+                left: -24px;
+                top: 5px;
+                width: 12px;
+                height: 12px;
+                border-radius: 50%;
+                background: var(--accent-primary);
+                border: 2px solid var(--bg-card);
+                box-shadow: 0 0 0 2px var(--accent-primary);
+            }
+
+            .round-content {
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-md);
+                padding: 1rem;
+                color: var(--text-secondary);
+            }
+
+            .round-content h6 {
+                color: var(--text-primary);
+            }
+
+            .loading-spinner {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                padding: 4rem;
+                color: var(--text-muted);
+            }
+
+            .danger-zone {
+                background: rgba(239, 68, 68, 0.1);
+                border: 1px solid rgba(239, 68, 68, 0.2);
+                border-radius: var(--radius-md);
+                padding: 0.75rem;
+                margin-top: 0.75rem;
+                border-left: 3px solid var(--danger);
+            }
+
+            .danger-zone-label {
+                font-weight: 600;
+                color: var(--danger);
+                font-size: 0.8rem;
+                margin-bottom: 0.25rem;
+            }
+
+            .danger-zone p {
+                color: var(--text-secondary);
+            }
+
+            .tab-content {
+                padding-top: 1.5rem;
+            }
+
+            .nav-pills .nav-link {
+                color: var(--text-secondary);
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-md);
+                padding: 0.75rem 1.25rem;
+                margin-right: 0.5rem;
+                transition: all var(--transition-base);
+            }
+
+            .nav-pills .nav-link:hover {
+                border-color: var(--border-accent);
+                color: var(--text-primary);
+            }
+
+            .nav-pills .nav-link.active {
+                background: var(--accent-gradient);
+                border-color: transparent;
+                color: white;
+            }
+
+            .empty-state {
+                text-align: center;
+                padding: 3rem;
+                color: var(--text-muted);
+            }
+
+            .empty-state i {
+                font-size: 4rem;
+                margin-bottom: 1rem;
+                opacity: 0.5;
+            }
+
+            .badge-category {
+                font-size: 0.7rem;
+                padding: 0.35rem 0.65rem;
+                border-radius: var(--radius-full);
+                margin-right: 0.5rem;
+            }
+
+            .btn-outline-primary {
+                color: var(--accent-primary);
+                border-color: var(--accent-primary);
+            }
+
+            .btn-outline-primary:hover {
+                background: var(--accent-primary);
+                border-color: var(--accent-primary);
+                color: white;
+            }
+
+            .btn-outline-secondary {
+                color: var(--text-secondary);
+                border-color: var(--border-color);
+            }
+
+            .btn-outline-secondary:hover {
+                background: var(--bg-tertiary);
+                border-color: var(--border-accent);
+                color: var(--text-primary);
+            }
+
+            @media print {
+                .no-print {
+                    display: none !important;
+                }
+                
+                .section-card {
+                    break-inside: avoid;
+                    box-shadow: none;
+                    border: 1px solid #ddd;
+                }
+                
+                body {
+                    background: white;
+                }
+            }
+
+            @media (max-width: 768px) {
+                .prep-container {
+                    margin: 1rem auto;
+                    padding: 0 0.5rem;
+                }
+
+                .prep-header {
+                    padding: 1.25rem;
+                }
+
+                .nav-pills {
+                    overflow-x: auto;
+                    flex-wrap: nowrap;
+                    scrollbar-width: none;
+                    -webkit-overflow-scrolling: touch;
+                    padding-bottom: 0.25rem;
+                }
+
+                .nav-pills::-webkit-scrollbar {
+                    display: none;
+                }
+
+                .nav-pills .nav-link {
+                    white-space: nowrap;
+                    padding: 0.5rem 0.75rem;
+                    font-size: 0.82rem;
+                }
+            }
+
+            @media (max-width: 480px) {
+                .nav-pills .nav-link {
+                    padding: 0.45rem 0.6rem;
+                    font-size: 0.75rem;
+                }
+            }
+
+        /* ── CSP-safe utility classes (replaces inline style= attributes) ── */
+        .section-icon--gradient { background: var(--accent-gradient); }
+        </style>
+{% endblock %}
+{% block navbar %}
+<nav class="navbar navbar-expand-lg no-print">
+            <div class="container">
+                <a class="navbar-brand" href="/dashboard">
+                    <div class="brand-icon">
+                        <i class="fas fa-rocket"></i>
+                    </div>
+                    <span class="brand-text">Apply<span class="brand-accent">Pilot</span></span>
+                </a>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-outline-secondary btn-sm" data-action="print-page">
+                        <i class="fas fa-print me-1"></i>Print
+                    </button>
+                    <a href="/dashboard" class="btn btn-outline-primary btn-sm">
+                        <i class="fas fa-arrow-left me-1"></i>Back
+                    </a>
+                </div>
+            </div>
+        </nav>
+{% endblock %}
+{% block content %}
+<!-- Loading State -->
+        <div class="prep-container" id="loadingState">
+            <div class="section-card">
+                <div class="loading-spinner">
+                    <div class="spinner-border text-primary mb-3" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="text-muted">Loading interview preparation...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Generate State -->
+        <div class="prep-container is-hidden" id="generateState">
+            <div class="section-card text-center py-5">
+                <i class="fas fa-microphone-alt fa-4x text-primary mb-4"></i>
+                <h3>Generate Interview Prep</h3>
+                <p class="text-muted mb-4">
+                    Create personalized interview preparation materials based on your profile and the job requirements.
+                </p>
+                <button class="btn btn-primary btn-lg" data-action="generate-interview-prep">
+                    <i class="fas fa-magic me-2"></i>Generate Interview Prep
+                </button>
+            </div>
+        </div>
+
+        <!-- Generating State -->
+        <div class="prep-container is-hidden" id="generatingState">
+            <div class="section-card text-center py-5">
+                <div class="spinner-border text-primary mb-3" role="status">
+                    <span class="visually-hidden">Generating...</span>
+                </div>
+                <h4>Generating Your Interview Prep</h4>
+                <p class="text-muted">
+                    This may take a minute. We're analyzing the job requirements and creating personalized preparation materials...
+                </p>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="prep-container is-hidden" id="mainContent">
+            <!-- Header -->
+            <div class="prep-header">
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <h2 class="job-title" id="jobTitle">Interview Preparation</h2>
+                        <div class="company-name" id="companyName"></div>
+                        <div class="mt-2 text-muted">
+                            <small>
+                                <i class="fas fa-clock me-1"></i>
+                                Generated: <span id="generatedAt">-</span>
+                            </small>
+                        </div>
+                    </div>
+                    <div class="col-md-4 text-end no-print">
+                        <button class="btn btn-outline-primary btn-sm me-2" data-action="regenerate-interview-prep">
+                            <i class="fas fa-sync-alt me-1"></i>Regenerate
+                        </button>
+                        <button class="btn btn-primary btn-sm" data-action="print-page">
+                            <i class="fas fa-print me-1"></i>Print
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Navigation Tabs -->
+            <ul class="nav nav-pills mb-3 no-print" id="prepTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="questions-tab" data-bs-toggle="pill" data-bs-target="#questions" type="button">
+                        <i class="fas fa-question-circle me-1"></i>Questions
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="concerns-tab" data-bs-toggle="pill" data-bs-target="#concerns" type="button">
+                        <i class="fas fa-exclamation-triangle me-1"></i>Address Concerns
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="ask-tab" data-bs-toggle="pill" data-bs-target="#ask" type="button">
+                        <i class="fas fa-comments me-1"></i>Questions to Ask
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="logistics-tab" data-bs-toggle="pill" data-bs-target="#logistics" type="button">
+                        <i class="fas fa-tasks me-1"></i>Logistics
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="reference-tab" data-bs-toggle="pill" data-bs-target="#reference" type="button">
+                        <i class="fas fa-sticky-note me-1"></i>Quick Reference
+                    </button>
+                </li>
+            </ul>
+
+            <!-- Tab Content -->
+            <div class="tab-content" id="prepTabsContent">
+                <!-- Questions Tab -->
+                <div class="tab-pane fade show active" id="questions" role="tabpanel">
+                    <!-- Interview Process -->
+                    <div class="section-card" id="interviewProcess">
+                        <div class="section-header">
+                            <div class="section-icon icon-process">
+                                <i class="fas fa-route"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">Interview Process</h5>
+                                <small class="text-muted">What to expect at each stage</small>
+                            </div>
+                        </div>
+                        <div id="processContent"></div>
+                    </div>
+
+                    <!-- Predicted Questions -->
+                    <div class="section-card">
+                        <div class="section-header">
+                            <div class="section-icon icon-questions">
+                                <i class="fas fa-question-circle"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">Predicted Questions</h5>
+                                <small class="text-muted">Questions likely to be asked and how to answer them</small>
+                            </div>
+                        </div>
+                        
+                        <!-- Question Categories -->
+                        <ul class="nav nav-tabs mb-3" role="tablist">
+                            <li class="nav-item">
+                                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#behavioral">Behavioral</button>
+                            </li>
+                            <li class="nav-item">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#technical">Technical</button>
+                            </li>
+                            <li class="nav-item">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#roleSpecific">Role-Specific</button>
+                            </li>
+                            <li class="nav-item">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#companySpecific">Company-Specific</button>
+                            </li>
+                        </ul>
+                        
+                        <div class="tab-content">
+                            <div class="tab-pane fade show active" id="behavioral"></div>
+                            <div class="tab-pane fade" id="technical"></div>
+                            <div class="tab-pane fade" id="roleSpecific"></div>
+                            <div class="tab-pane fade" id="companySpecific"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Concerns Tab -->
+                <div class="tab-pane fade" id="concerns" role="tabpanel">
+                    <div class="section-card">
+                        <div class="section-header">
+                            <div class="section-icon icon-concerns">
+                                <i class="fas fa-shield-alt"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">Addressing Concerns</h5>
+                                <small class="text-muted">How to handle potential interviewer concerns</small>
+                            </div>
+                        </div>
+                        <div id="concernsContent"></div>
+                    </div>
+                </div>
+
+                <!-- Questions to Ask Tab -->
+                <div class="tab-pane fade" id="ask" role="tabpanel">
+                    <div class="section-card">
+                        <div class="section-header">
+                            <div class="section-icon icon-ask">
+                                <i class="fas fa-comments"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">Questions to Ask Them</h5>
+                                <small class="text-muted">Smart questions that show engagement</small>
+                            </div>
+                        </div>
+                        <div id="askContent"></div>
+                    </div>
+                </div>
+
+                <!-- Logistics Tab -->
+                <div class="tab-pane fade" id="logistics" role="tabpanel">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="section-card">
+                                <div class="section-header">
+                                    <div class="section-icon icon-logistics">
+                                        <i class="fas fa-clipboard-check"></i>
+                                    </div>
+                                    <div>
+                                        <h5 class="mb-0">Day-Before Checklist</h5>
+                                        <small class="text-muted">Prepare the night before</small>
+                                    </div>
+                                </div>
+                                <div id="checklistContent"></div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="section-card">
+                                <div class="section-header">
+                                    <div class="section-icon icon-logistics">
+                                        <i class="fas fa-info-circle"></i>
+                                    </div>
+                                    <div>
+                                        <h5 class="mb-0">Interview Day</h5>
+                                        <small class="text-muted">Practical tips and logistics</small>
+                                    </div>
+                                </div>
+                                <div id="logisticsContent"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="section-card">
+                        <div class="section-header">
+                            <div class="section-icon section-icon--gradient">
+                                <i class="fas fa-star"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">Confidence Boosters</h5>
+                                <small class="text-muted">Remember your strengths!</small>
+                            </div>
+                        </div>
+                        <div id="confidenceContent"></div>
+                    </div>
+                </div>
+
+                <!-- Quick Reference Tab -->
+                <div class="tab-pane fade" id="reference" role="tabpanel">
+                    <div class="reference-card" id="quickReferenceCard">
+                        <h5><i class="fas fa-sticky-note me-2"></i>Quick Reference Card</h5>
+                        <p class="mb-4 opacity-75">Review this 5 minutes before your interview</p>
+                        <div id="referenceContent"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Interview Prep JavaScript -->
+{% endblock %}
+{% block page_scripts %}
+<script src="{{ asset_url('js/dashboard-interview-prep.js') }}"></script>
+
+{% endblock %}

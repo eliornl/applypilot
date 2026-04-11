@@ -1,0 +1,110 @@
+---
+description: Frontend asset build pipeline — esbuild, asset_url(), adding new JS/CSS files
+globs: ui/**/*.html,ui/static/js/**/*.js,ui/static/css/**/*.css,ui/build.mjs,ui/package.json
+alwaysApply: false
+---
+
+# Frontend Build Pipeline
+
+ApplyPilot uses **esbuild** (not Vite/Webpack) to minify and content-hash all JS and CSS files.
+The JS files use vanilla global scope — no ES modules, no bundling across files.
+
+## How It Works
+
+1. `ui/build.mjs` minifies every file in `ui/static/js/` and `ui/static/css/` independently
+2. Each output file gets an 8-char content hash: `app.js` → `app.e40b2f1a.js`
+3. A manifest is written to `ui/static/dist/manifest.json`
+4. `asset_url()` in `main.py` reads the manifest at startup and resolves hashed paths
+5. Templates use `{{ asset_url('js/app.js') }}` — never a raw `/static/` path
+
+## Running the Build
+
+```bash
+cd ui
+npm install          # first time only
+npm run build        # production build → ui/static/dist/
+npm run build:watch  # rebuilds every 2s on file change (dev)
+```
+
+**macOS** — use the Makefile targets which automatically strip the macOS Gatekeeper quarantine flag from `node_modules` binaries before running esbuild (otherwise macOS blocks esbuild with "cannot be opened because the developer cannot be verified"):
+
+```bash
+make build-frontend   # strips quarantine → npm run build
+make setup            # full setup: venv + npm install + quarantine strip for both
+```
+
+**Windows** — use `just` (`winget install Casey.Just`) which works natively in PowerShell without WSL2:
+
+```powershell
+just build-frontend   # runs npm run build inside ui/
+just setup            # full setup: venv + npm install + build + .env
+```
+
+**In development** (no build run): `asset_url()` falls back to `/static/<path>` — nothing breaks.
+
+## Adding a New JS File
+
+1. Create `ui/static/js/my-page.js`
+2. Reference it in the template with `{{ asset_url('js/my-page.js') }}` — never hardcode `/static/js/`
+3. Run `npm run build` to generate the hashed output
+4. The manifest and dist/ are gitignored — the Dockerfile builds them at image build time
+
+```html
+<!-- ✅ Correct -->
+<script src="{{ asset_url('js/my-page.js') }}"></script>
+
+<!-- ❌ Wrong — bypasses hashing, breaks cache busting -->
+<script src="/static/js/my-page.js"></script>
+```
+
+## Adding a New CSS File
+
+Same as JS — place in `ui/static/css/`, reference with `{{ asset_url('css/my-styles.css') }}`.
+Subdirectories are supported: `{{ asset_url('css/base/variables.css') }}`.
+
+## asset_url() — How It Resolves
+
+```python
+# In main.py
+def asset_url(path: str) -> str:
+    manifest = _load_asset_manifest()       # reads ui/static/dist/manifest.json
+    hashed = manifest.get(path)
+    if hashed:
+        return f"/static/dist/{hashed}"     # production: hashed path
+    return f"/static/{path}"               # dev fallback: original path
+```
+
+**Manifest caching behaviour differs by environment:**
+
+| Environment | Behaviour |
+|---|---|
+| Production (`is_production=True`) | Manifest loaded once at startup, cached in memory for the process lifetime |
+| Development | Manifest re-read from disk on **every request** — `npm run build` takes effect immediately without a server restart |
+
+This means in development you can run `npm run build` (or `npm run build:watch`) and hard-refresh the browser — no server restart needed. In production the startup log line `Loaded asset manifest with N entries` is the single point of truth.
+
+## Make / Just Targets
+
+| `make` (macOS/Linux) | `just` (Windows) | What it does |
+|---|---|---|
+| `make setup` | `just setup` | Creates venv, `pip install`, `npm install`, strips quarantine (macOS), **builds frontend** |
+| `make dev` | `just dev` | Strips quarantine (macOS), **builds frontend**, starts uvicorn |
+| `make build-frontend` | `just build-frontend` | Strips quarantine (macOS), runs `npm run build` |
+| `make start-local` | — (macOS only) | Installs Postgres + Redis via Homebrew, migrates, starts app |
+| `make clean-frontend` | — | Removes `ui/static/dist/` (keeps `node_modules`) |
+
+**`make setup` and `make dev` both run `build-frontend` automatically** — the dist files are always fresh before the server starts. This prevents stale compiled CSS/JS from causing issues (e.g. missing utility classes like `.is-hidden` that are defined in `app.css` source but not yet compiled).
+
+**`_macos_sign_node`** — internal Make target that runs `xattr -r -d com.apple.quarantine ui/node_modules`. Called automatically by `setup`, `dev`, and `build-frontend`. Needed because macOS Gatekeeper blocks downloaded Node binaries (esbuild, etc.) until their quarantine flag is stripped.
+
+**`just build-frontend`** uses `[working-directory: 'ui']` to run `npm run build` directly — no `&&` shell chaining, works in PowerShell 5.x and cmd.exe.
+
+## CI / Docker
+
+- **Dockerfile** Stage 0: `node:20-slim` runs `node build.mjs` before the Python builder
+- `ui/node_modules/` and `ui/static/dist/` are gitignored — the Dockerfile builds them
+
+## Non-Negotiable
+
+Never write `src="/static/js/..."` or `href="/static/css/..."` directly in any template.
+Always use `{{ asset_url('js/...') }}` or `{{ asset_url('css/...') }}`.

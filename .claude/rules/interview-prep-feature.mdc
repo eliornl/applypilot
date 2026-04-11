@@ -1,0 +1,123 @@
+---
+description: Interview prep — standalone agent, background generation, atomic Redis locking
+globs: agents/interview_prep.py,api/interview_prep.py,ui/static/js/dashboard-interview-prep.js
+alwaysApply: false
+---
+
+# Interview Prep Feature
+
+## Standalone Agent (NOT in LangGraph workflow)
+`InterviewPrepAgent` in `agents/interview_prep.py` is invoked **on-demand**, independently of the main 5-agent LangGraph workflow. It is called from `api/interview_prep.py` via `BackgroundTasks`.
+
+```python
+agent = InterviewPrepAgent()
+result = await agent.generate(
+    job_analysis=workflow_session.job_analysis or {},
+    company_research=workflow_session.company_research or {},
+    profile_matching=workflow_session.profile_matching or {},
+    user_profile=workflow_session.user_data or {},
+    user_api_key=user_api_key,  # BYOK
+)
+```
+
+## Background Generation with Atomic Redis Locking
+Use the Redis lock to prevent duplicate concurrent generations:
+
+```python
+from utils.cache import (
+    is_interview_prep_generating,
+    set_interview_prep_generating,   # Returns False if already locked
+    clear_interview_prep_generating,
+    cache_interview_prep,
+    invalidate_interview_prep,
+)
+
+# Atomically claim the slot (NX SET)
+claimed = await set_interview_prep_generating(session_id)
+if not claimed:
+    raise APIError(ErrorCode.RES_3001, "Interview prep generation already in progress", status_code=409)
+
+# Always pass user_id so WebSocket broadcasts work inside the background task
+background_tasks.add_task(_generate_background, session_id=session_id, user_id=str(user_id), ...)
+```
+
+Always clear the lock in `finally` and broadcast lifecycle events:
+```python
+from api.websocket import (
+    broadcast_interview_prep_started,
+    broadcast_interview_prep_complete,
+    broadcast_interview_prep_error,
+)
+
+async def _generate_background(
+    session_id: str,
+    user_id: Optional[str] = None,
+    user_api_key: Optional[str] = None,
+):
+    try:
+        async with get_session() as db:
+            workflow_session = await _load_session(db, session_id)
+            ws_user_id = user_id or str(workflow_session.user_id)
+
+            await broadcast_interview_prep_started(ws_user_id, session_id)
+
+            # generate and save
+            workflow_session.interview_prep = result
+            flag_modified(workflow_session, "interview_prep")
+            await db.commit()
+            await cache_interview_prep(session_id, result)
+
+            await broadcast_interview_prep_complete(ws_user_id, session_id)
+    except Exception as e:
+        logger.error(f"Interview prep failed: {e}", exc_info=True)
+        await broadcast_interview_prep_error(ws_user_id, session_id, "Interview prep generation failed")
+    finally:
+        await clear_interview_prep_generating(session_id)
+```
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/interview-prep/{session_id}` | Get prep (checks cache first, then DB) |
+| `GET` | `/api/v1/interview-prep/{session_id}/status` | Poll generation status |
+| `POST` | `/api/v1/interview-prep/{session_id}/generate` | Start background generation |
+| `DELETE` | `/api/v1/interview-prep/{session_id}` | Delete prep (DB + cache) |
+
+Rate limit: 5 generations per hour per user.
+
+## WebSocket Push (replaces polling)
+
+The frontend connects to `WS /api/v1/ws/workflow/{session_id}` **before** calling the generate endpoint, then listens for push events instead of polling. A 5 s polling loop runs as a fallback.
+
+| WS message type | Meaning |
+|---|---|
+| `interview_prep_started` | Background task began — show spinner |
+| `interview_prep_complete` | Generation saved to DB — reload from API |
+| `interview_prep_error` | Generation failed — show error, reset UI |
+
+Frontend pattern (see `ui/static/js/dashboard-interview-prep.js`):
+```javascript
+connectWs();                    // open WS before firing the task
+await triggerGenerateApi();     // POST /generate
+startPollingFallback();         // 5 s poll as safety net
+// WS complete/error stops polling and calls loadInterviewPrep()
+```
+
+## Prerequisite Check
+Before generating, verify `workflow_session.job_analysis` is not None. The workflow must have completed at least the job analysis phase.
+
+## XSS Sanitization of LLM Output
+Before storing, sanitize all string values:
+
+```python
+from utils.security import sanitize_llm_output
+
+interview_prep = {
+    k: sanitize_llm_output(v) if isinstance(v, str) else v
+    for k, v in interview_prep.items()
+}
+```
+
+## Cache Keys
+Interview prep uses dedicated cache functions (TTL in `utils/cache.py`). Do not use generic `cache_llm_response` for this feature — use `cache_interview_prep` / `get_cached_interview_prep`.

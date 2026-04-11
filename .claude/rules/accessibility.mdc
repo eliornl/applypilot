@@ -1,0 +1,55 @@
+---
+description: WCAG 2.1 AA accessibility requirements for all HTML and JS code
+globs: ui/**/*.html,ui/**/*.js
+alwaysApply: false
+---
+
+# Accessibility (WCAG 2.1 AA)
+
+Target: **100% Lighthouse accessibility score**. Run `npx lighthouse http://localhost:8000/ --only-categories=accessibility` to verify.
+
+## Heading Hierarchy — Never Skip Levels
+```html
+<!-- ✅ Correct -->
+<h1>Page Title</h1>
+<h2>Section</h2>
+<h3>Subsection</h3>
+
+<!-- ❌ Wrong — skips h2 -->
+<h1>Page Title</h1>
+<h3>Section</h3>
+```
+Use CSS classes to change visual size without changing semantic level: `<h2 class="h4">`.
+
+## Page Landmarks — Required on Every Page
+```html
+<body>
+    <nav>...</nav>
+    <main><!-- all primary content --></main>
+    <footer>...</footer>
+</body>
+```
+`<main>` must NOT include `<nav>` or `<footer>`.
+
+## Buttons and Interactive Elements
+```html
+<!-- ✅ Icon-only button — must have aria-label -->
+<button aria-label="Delete application" data-action="delete" data-id="...">
+    <i class="fas fa-trash"></i>
+</button>
+
+<!-- ❌ Wrong — no accessible name -->
+<button><i class="fas fa-trash"></i></button>
+```
+- All `<input>` / `<select>` / `<textarea>` must have associated `<label for="...">` or `aria-label`
+- Links must have descriptive text, not just "click here"
+
+## Images and Icons
+- Decorative: `<img alt="">` (empty string, not missing)
+- Informative: descriptive `alt` text
+- Icon fonts (Font Awesome): decorative unless they are the only content of a button
+
+## Color and Contrast
+- Normal text: minimum 4.5:1 contrast ratio
+- Large text (18px+ or 14px+ bold): minimum 3:1
+- Never use color as the sole means to convey information (add icons or text labels)

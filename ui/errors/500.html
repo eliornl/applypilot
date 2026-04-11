@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}Server Error | {{ app_name or "ApplyPilot" }}{% endblock %}
+{% block description %}Something went wrong on our end.{% endblock %}
+{% block extra_head %}
+<style nonce="{{ request.state.csp_nonce | default('') }}">
+        .error-page {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+        }
+        .error-content {
+            text-align: center;
+            max-width: 600px;
+        }
+        .error-code {
+            font-size: 8rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--danger) 0%, #dc2626 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            line-height: 1;
+            margin-bottom: 1rem;
+        }
+        .error-title {
+            font-size: 2rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 1rem;
+        }
+        .error-message {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+        }
+        .error-illustration {
+            font-size: 6rem;
+            margin-bottom: 2rem;
+            opacity: 0.8;
+        }
+        .error-actions {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .status-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+            margin-top: 2rem;
+            text-align: left;
+        }
+        .status-card h4 {
+            color: var(--text-primary);
+            font-size: 1rem;
+            margin-bottom: 1rem;
+        }
+        .status-item {
+            display: flex;
+            align-items: center;
+            padding: 0.5rem 0;
+            color: var(--text-secondary);
+        }
+        .status-item i {
+            width: 24px;
+            margin-right: 0.75rem;
+        }
+        .status-ok {
+            color: var(--success);
+        }
+        .status-error {
+            color: var(--danger);
+        }
+        .status-warning {
+            color: var(--warning);
+        }
+
+        /* ── CSP-safe utility classes (replaces inline style= attributes) ── */
+        .support-link { color: var(--accent-primary); }
+        .error-meta { color: rgba(255, 255, 255, 0.5); font-size: 0.9rem; }
+        .error-id-code { color: var(--accent-primary); font-family: var(--font-mono); }
+    </style>
+{% endblock %}
+{% block body_attrs %} class="landing-page"{% endblock %}
+{% block content %}
+<!-- Animated Background -->
+    <div class="error-page">
+        <div class="error-content">
+            <div class="error-illustration">
+                ⚠️
+            </div>
+            <div class="error-code">500</div>
+            <h1 class="error-title">Something Went Wrong</h1>
+            <p class="error-message">
+                Something went wrong. Please try again in a few moments. If the problem
+                persists, check that the server is running and your database is reachable.
+            </p>
+            
+            <div class="error-actions">
+                <button data-action="reload" class="btn btn-primary-glow">
+                    <i class="fas fa-redo me-2"></i> Try Again
+                </button>
+                <a href="/" class="btn btn-outline-light">
+                    <i class="fas fa-home me-2"></i> Go Home
+                </a>
+                <button data-action="go-back" class="btn btn-ghost">
+                    <i class="fas fa-arrow-left me-2"></i> Go Back
+                </button>
+            </div>
+
+            <div class="status-card">
+                <h4><i class="fas fa-server me-2"></i> Quick Checks</h4>
+                <div class="status-item">
+                    <i class="fas fa-wifi"></i>
+                    <span>Check your internet connection</span>
+                </div>
+                <div class="status-item">
+                    <i class="fas fa-clock"></i>
+                    <span>Wait a moment and try again</span>
+                </div>
+                <div class="status-item">
+                    <i class="fas fa-broom"></i>
+                    <span>Clear your browser cache</span>
+                </div>
+                <div class="status-item">
+                    <i class="fab fa-github"></i>
+                    <span>If the problem persists, <a href="https://github.com/yourusername/applypilot/issues" target="_blank" rel="noopener noreferrer" class="support-link">open a GitHub issue</a></span>
+                </div>
+            </div>
+
+            <p class="mt-4 error-meta">
+                Error ID: <code id="errorId" class="error-id-code">{{ error_id or "N/A" }}</code>
+            </p>
+        </div>
+    </div>
+{% endblock %}
+{% block page_scripts %}
+<script nonce="{{ request.state.csp_nonce | default('') }}">
+        if (document.getElementById('errorId').textContent === 'N/A') {
+            document.getElementById('errorId').textContent =
+                'ERR-' + Date.now().toString(36).toUpperCase();
+        }
+        document.addEventListener('click', function (e) {
+            var el = e.target.closest('[data-action]');
+            if (!el) return;
+            if (el.dataset.action === 'reload') { location.reload(); }
+            if (el.dataset.action === 'go-back') { history.back(); }
+        });
+    </script>
+{% endblock %}

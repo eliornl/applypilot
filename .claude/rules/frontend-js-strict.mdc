@@ -1,0 +1,365 @@
+---
+description: Frontend JS strict-mode checklist — required patterns in every page file
+globs: ui/static/js/**/*.js
+alwaysApply: false
+---
+
+# Frontend JS — Required Patterns per Page File
+
+Every page-level JS file in `ui/static/js/` must include these three local helpers and follow the rules below. Zero TypeScript/JSDoc errors expected.
+
+## 1. `escapeHtml()` — XSS Prevention with Decode-First
+
+**CRITICAL**: The backend's `html.escape()` + `bleach.clean()` combination double-encodes entities: `'` → `&#x27;` (html.escape) → `&amp;#x27;` (bleach escapes the `&`). To prevent rendering `&#x27;` literally, `escapeHtml()` must decode `&amp;` FIRST, then the named entities, then re-encode.
+
+```javascript
+/**
+ * @param {string|null|undefined} str
+ * @returns {string}
+ */
+function escapeHtml(str) {
+    if (str == null) return '';
+    // Decode &amp; first so &amp;#x27; → &#x27; → '
+    // (bleach double-encodes & in entities from Python's html.escape output)
+    const decoded = String(str)
+        .replace(/&amp;/g, '&')
+        .replace(/&#x27;/g, "'")
+        .replace(/&#039;/g, "'")
+        .replace(/&quot;/g, '"')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>');
+    return decoded
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+```
+
+Apply to **every dynamic value** in template literals: `` `<span>${escapeHtml(value)}</span>` ``
+
+**Never decode in a different order** — always `&amp;` first, then named entities (`&#x27;`, `&#039;`, etc.), then `&amp;` last. Reversing the order leaves `&amp;#x27;` unresolved and renders the entity literally as text.
+
+## 1b. `decodeEntities()` — For `.textContent` Assignments
+
+When setting `.textContent` (not `.innerHTML`), the browser does not interpret HTML entities — `&#039;` will display literally. Use a separate decode-only helper for any server-rendered string assigned via `.textContent`:
+
+```javascript
+/** Decode HTML entities for use with .textContent (no re-encoding step) */
+function decodeEntities(str) {
+    if (str == null) return '';
+    return String(str)
+        .replace(/&amp;/g, '&')
+        .replace(/&#x27;/g, "'")
+        .replace(/&#039;/g, "'")
+        .replace(/&quot;/g, '"')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>');
+}
+
+// Usage:
+el.textContent = decodeEntities(job.job_title || 'Job Application');  // ✅
+el.textContent = job.job_title;                                        // ❌ shows &amp; literally
+el.innerHTML   = escapeHtml(job.job_title);                            // ✅ (innerHTML path)
+```
+
+## 2. `getAuthToken()` — Token Retrieval
+
+```javascript
+/**
+ * @returns {string|null}
+ */
+function getAuthToken() {
+    // @ts-ignore
+    return (window.app && typeof window.app.getAuthToken === 'function')
+        ? window.app.getAuthToken()
+        : (localStorage.getItem('access_token') || localStorage.getItem('authToken'));
+}
+```
+
+## 3. `notify()` — Notifications
+
+```javascript
+/**
+ * @param {string} msg
+ * @param {'success'|'error'|'warning'|'info'} [type]
+ */
+function notify(msg, type = 'info') {
+    // @ts-ignore
+    if (window.app && window.app.showNotification) { window.app.showNotification(msg, type); return; }
+    const c = document.getElementById('alertContainer');
+    if (!c) return;
+    const d = document.createElement('div');
+    d.className = `alert alert-${type === 'error' ? 'danger' : type} alert-dismissible fade show`;
+    d.innerHTML = `${escapeHtml(msg)}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+    c.appendChild(d); setTimeout(() => d.remove(), 5000);
+}
+```
+
+## Key Rules
+
+### API Calls
+- JSON calls → `window.app.apiCall('/api/v1/...')` (handles 401 refresh automatically)
+- Binary/blob downloads → raw `fetch()` with `getAuthToken()`
+- **Parse FastAPI errors with `errData.message || errData.detail`** — the custom `APIError` system returns `message`; standard FastAPI validation errors return `detail`; always check both:
+
+```javascript
+const errData = await response.json().catch(() => ({}));
+throw new Error(errData.message || errData.detail || 'Fallback error message');
+```
+
+### `localStorage.clear()` — Always Preserve `cookie_consent`
+Only account deletion uses `localStorage.clear()`. All other logouts use targeted `removeItem`. When `clear()` is needed, save and restore `cookie_consent`:
+
+```javascript
+// ✅ Correct — preserves cookie consent banner state
+const cc = localStorage.getItem('cookie_consent');
+localStorage.clear();
+if (cc) localStorage.setItem('cookie_consent', cc);
+window.location.href = '/auth/login?account_deleted=1';
+
+// ❌ Wrong — wipes cookie consent, banner reappears on every page
+localStorage.clear();
+window.location.href = '/';
+```
+
+### `btn-primary` Uses the App Gradient — Not Bootstrap Blue
+`btn-primary` is globally overridden in `app.css` to use `var(--accent-gradient)` (cyan→purple). Do not re-define it per-page. The same applies to `btn-outline-primary` (uses `var(--accent-primary)` for border/text).
+
+### Confirmation Dialogs — Never Use Native `confirm()` / `prompt()`
+All destructive/confirmation flows must use `window.showConfirm()` from `ui/static/js/confirm-modal.js`, which is loaded globally via `base.html` on every page.
+
+```javascript
+// ✅ Correct — custom modal, consistent design, works in e2e tests
+const confirmed = await window.showConfirm({
+    title: 'Delete Application',
+    message: 'This action cannot be undone.',
+    confirmText: 'Delete',
+    type: 'danger',            // 'danger' | 'warning' | 'primary'
+});
+if (!confirmed) return;
+
+// With text input (e.g. type "DELETE" to confirm, or password entry)
+const value = await window.showConfirm({
+    title: 'Confirm',
+    message: 'Type DELETE to confirm.',
+    confirmText: 'Confirm',
+    type: 'danger',
+    inputPlaceholder: 'Type DELETE to confirm',
+    inputType: 'text',         // or 'password'
+});
+if (value !== 'DELETE') return;
+
+// ❌ Wrong — native browser dialog, unstyled, blocks e2e automation
+if (!confirm('Are you sure?')) return;
+const pw = prompt('Enter password:');
+```
+
+`showConfirm()` returns:
+- `null` — user cancelled
+- `true` — confirmed (no input field)
+- `string` — input field value (may be empty string)
+
+CSS lives in `app.css` (`.confirm-modal`, `.confirm-modal-input`). The modal uses `var(--bg-card)`, `var(--border-color)`, `var(--text-primary)` — consistent with the dark theme.
+
+### Event Handling
+- No `onclick=` in static HTML or dynamic strings
+- Use event delegation on stable parent + `data-action` / `data-id` attributes
+
+### Timers
+- Module-level timer IDs: `let _myTimer = /** @type {number|null} */ (null);`
+- Clear before setting: `if (_myTimer !== null) clearTimeout(_myTimer);`
+- Clean up in `beforeunload` listener
+
+### In-Flight Guards
+```javascript
+let _submitting = false;
+async function handleSubmit() {
+    if (_submitting) return;  // ← before any await
+    _submitting = true;
+    try { /* ... */ } finally { _submitting = false; }
+}
+```
+
+### Null Safety
+```javascript
+const el = /** @type {HTMLInputElement|null} */ (document.getElementById('myInput'));
+if (!el) return;
+el.value = 'hello';
+```
+
+### Catch Blocks (strict mode)
+```javascript
+} catch (error) {
+    const err = /** @type {Error} */ (error);
+    notify(err.message || 'Failed', 'error');
+}
+```
+
+### Event Bus Constants
+Always use `window.BusEvents.EVENT_NAME`, never raw strings like `'application:created'`.
+
+### Date Arithmetic
+```javascript
+const diff = new Date().getTime() - new Date(dateStr).getTime(); // ✅
+// NOT: new Date() - new Date(dateStr) // ❌ TS error
+```
+
+### Open Redirect Prevention
+Before assigning any URL from `urlParams.get(...)` or an API response to `window.location.href`, validate it is a relative path:
+
+```javascript
+const raw = urlParams.get('redirect') || response['redirect'];
+// ✅ Only allow: starts with / but NOT //
+const safeRedirect = (raw && /^\/(?!\/)/.test(raw)) ? raw : null;
+window.location.href = safeRedirect || '/dashboard';
+```
+
+Never redirect to an absolute URL derived from user input — it enables open-redirect attacks.
+
+### URL Parameter Encoding
+Always `encodeURIComponent()` dynamic values in URLs, including in `href` attributes and WebSocket query strings:
+
+```javascript
+// ✅ Correct
+`/application/${encodeURIComponent(sessionId)}/download`
+`?token=${encodeURIComponent(token)}`
+
+// ❌ Wrong — unescaped value could break URL or allow injection
+`/application/${sessionId}/download`
+```
+
+### Never Use `style=` HTML Attributes
+All inline `style="..."` HTML attributes are blocked by the CSP `style-src` policy. Instead:
+
+- **Visibility toggling**: use `.is-hidden` class (from `app.css`). JS shows elements with `element.style.display = 'block'` (fine — JS inline styles are not governed by `style-src` CSP).
+- **Layout helpers**: use `.flex-1`, `.cursor-pointer` from `app.css`.
+- **Color helpers**: use `.text-accent`, `.text-secondary`, `.text-muted`, `.font-mono-inline` from `app.css`.
+- **Page-specific styles**: add a CSS class to the page's `<style nonce="...">` block.
+- **Truly dynamic values** (e.g. `element.style.width = percent + '%'`): set via JS — this is allowed.
+
+When JS sets `element.style.display = 'block'` it overrides `.is-hidden { display: none; }` because the class has no `!important`. This is the intended behaviour.
+
+### `target="_blank"` Links — Require `rel`
+Every link that opens in a new tab must include `rel="noopener noreferrer"`:
+
+```html
+<!-- ✅ Correct -->
+<a href="https://external.com" target="_blank" rel="noopener noreferrer">Link</a>
+```
+
+Without `rel="noopener"`, the opened page can access `window.opener` and redirect the parent tab.
+
+### Password Field Clearing
+Always clear the password input field immediately after a login attempt (success or failure):
+
+```javascript
+DOM.passwordField.value = '';  // in both success path and catch block
+```
+
+This prevents the value remaining in the DOM where it could be read by XSS or exposed if the back button is used.
+
+### `app.js` Is NOT Loaded on Dashboard Pages
+`app.js` (the `JobApplicationAssistant` class) is only loaded on `ui/index.html` (the landing page). It is **not** in `base.html`, so `window.app` is `undefined` on all dashboard pages.
+
+Dashboard page scripts (`dashboard-home.js`, etc.) already check `window.app` and delegate to it when present. But they must **not rely on `app.js` for global navbar events** — they must set up their own document-level listeners.
+
+The most important case is the **logout button**. The navbar renders `<button data-action="logout">` on every dashboard page. Each dashboard JS file must wire this up itself:
+
+```javascript
+// Required in every dashboard page script — wire navbar logout independently of app.js
+document.addEventListener('click', (e) => {
+    const target = /** @type {Element|null} */ (e.target);
+    const actionEl = /** @type {HTMLElement|null} */ (target?.closest('[data-action]'));
+    if (actionEl?.dataset['action'] === 'logout') {
+        e.preventDefault();
+        logout(); // local logout() function in the same file
+    }
+});
+```
+
+The local `logout()` function should delegate to `window.app.logout()` when available, and fall back to clearing localStorage + redirecting:
+
+```javascript
+function logout() {
+    // @ts-ignore
+    if (window.app && typeof window.app.logout === 'function') { window.app.logout(); return; }
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('authToken');
+    window.location.href = (window.APP_CONFIG && window.APP_CONFIG.loginUrl) || '/auth/login';
+}
+```
+
+### Text Sanitization — Allow All Unicode
+
+`sanitizeText()` in `profile-setup.js` strips only ASCII control characters. **Never** restrict to a hardcoded ASCII allowlist — this would silently strip Unicode bullet symbols (`■`, `▪`, `▸`, `–`, `—`, etc.) that the LLM uses in parsed descriptions.
+
+```javascript
+// ✅ Correct — strips control chars only, allows all printable ASCII + Unicode
+return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+
+// ❌ Wrong — strips ■, ▪, –, —, accented chars, and any non-ASCII
+return text.replace(/[^a-zA-Z0-9\s.,;:!?()\[\]\-'"•\n]/g, '');
+```
+
+The same pattern applies to the backend validators (`DESCRIPTION_PATTERN`, `PROFESSIONAL_NAME_PATTERN` in `api/profile.py`).
+
+### Multi-Step Form — Validate All Steps Before Saving
+
+`completeProfile()` must validate **all steps upfront** before making any API calls. Running save → validate → save → validate in sequence means early steps save successfully while later validation errors confuse the user (spinner runs for seconds then fails).
+
+```javascript
+// ✅ Correct — validate everything first, navigate to first failing step
+const stepValidations = [
+    { step: 1, fn: validateBasicInfo },
+    { step: 2, fn: validateWorkExperience },
+    { step: 3, fn: validateSkillsQualifications },
+    { step: 4, fn: validateCareerPreferences },
+];
+for (const { step, fn } of stepValidations) {
+    if (!fn()) {          // fn() shows its own error via showErrorMessage()
+        changeStep(step); // navigate — does NOT clear the error message
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+    }
+}
+// All valid — now safe to setLoading(true) and save
+```
+
+### `changeStep()` Must NOT Clear Error Messages
+
+`changeStep()` navigates between form steps. It must **not** hide the error alert — validation functions show their error first, then `changeStep()` is called to navigate to the failing step, and the error must remain visible after navigation.
+
+```javascript
+// ✅ Correct
+function changeStep(newStep) {
+    if (newStep < 1 || newStep > totalSteps) return;
+    currentStep = newStep;
+    updateStepDisplay();
+    updateStepIndicators();
+    updateProgressBar();
+}
+
+// ❌ Wrong — clears the error shown by the validator
+function changeStep(newStep) {
+    const errorAlert = document.getElementById("error-alert");
+    if (errorAlert) errorAlert.classList.add("d-none"); // ← removes error before user sees it
+    // ...
+}
+```
+
+### WebSocket Reconnection — Exponential Backoff
+WebSocket `onclose` handlers must not simply set `ws = null`. Implement reconnection with exponential backoff:
+
+```javascript
+const WS_MAX_RECONNECT_ATTEMPTS = 8;
+let wsReconnectAttempts = 0;
+
+ws.onclose = (event) => {
+    const noRetry = [1000, 1008, 4001]; // intentional close, policy, auth failure
+    if (!noRetry.includes(event.code) && wsReconnectAttempts < WS_MAX_RECONNECT_ATTEMPTS) {
+        const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempts), 30000);
+        wsReconnectAttempts++;
+        setTimeout(connectWs, delay);
+    }
+};
+ws.onopen = () => { wsReconnectAttempts = 0; };
+```

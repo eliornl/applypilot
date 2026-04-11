@@ -1,0 +1,154 @@
+---
+description: Security headers, CORS, global rate limiting, middleware order
+globs: main.py,api/**/*.py
+alwaysApply: false
+---
+
+# Security Middleware
+
+## Security Headers (Added to Every Response)
+`main.py` adds these via `security_headers_middleware`:
+
+| Header | Value |
+|--------|-------|
+| `X-Content-Type-Options` | `nosniff` |
+| `X-Frame-Options` | `DENY` |
+| `X-XSS-Protection` | `1; mode=block` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` (production only) |
+
+These are applied automatically — do not add them manually in endpoint responses.
+
+## CORS Configuration
+`CORSMiddleware` is configured with explicit allowed headers — **never use `allow_headers=["*"]`**.
+
+```python
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,           # from settings.cors_origins
+    allow_credentials=settings.cors_credentials,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
+)
+```
+
+`allow_origins` comes from `settings.cors_origins`. In production this must be an explicit list of allowed domains — never `["*"]`. There is no `disable_host_validation` escape hatch; configure origins explicitly per environment.
+
+## Global API Rate Limiting (100 req/min)
+`api_rate_limit_middleware` applies a **100 requests/minute** limit per authenticated user (token hash) or per IP. Applied to all `/api/` paths except:
+- `/api/health`
+- `/api/ws/` (WebSocket)
+- `/api/v1/auth/login`
+- `/api/v1/auth/register`
+
+This is in **addition** to per-endpoint rate limits (e.g. 5/hour for sensitive operations). When adding a new high-traffic endpoint that should be exempt, add it to `skip_paths`.
+
+## Client IP for Rate Limiting — Use `request.client.host` Only
+**Never use `X-Forwarded-For` for rate-limit keys.** Any client can spoof this header, trivially bypassing per-IP rate limits.
+
+```python
+# ✅ Correct — TCP-level address set by the proxy/uvicorn, not spoofable
+client_ip = request.client.host if request.client else "unknown"
+
+# ❌ Wrong — spoofable by the client
+client_ip = request.headers.get("X-Forwarded-For", "unknown").split(",")[0].strip()
+```
+
+## Request Body Size Limit
+`request_size_limit_middleware` in `main.py` enforces a **10 MB** limit on `Content-Length` for all requests. Returns HTTP 413 if exceeded. This protects bcrypt (DoS via oversized passwords) and all JSON parsing from memory exhaustion.
+
+## Production Startup Guards
+`main.py` `lifespan()` raises `RuntimeError` at startup (killing the process) if:
+1. `settings.is_production and settings.debug` — `DEBUG=true` in production enables insecure code paths
+2. `settings.is_production and not settings.redis_url` — missing Redis disables JWT revocation, rate limiting, and caching silently
+3. `settings.is_production and not settings.redis_url.startswith("rediss://")` — plain `redis://` in production means all Redis traffic (JWT blocklists, rate counters) is unencrypted
+
+Never disable or work around these guards.
+
+## Middleware Execution Order
+Middleware wraps requests in stack order (last added = outermost). Current order:
+1. `RequestLoggingMiddleware` (first — logs all requests)
+2. `SlowRequestMiddleware` (>5s warning)
+3. `security_headers_middleware` (adds headers)
+4. `api_rate_limit_middleware` (global 100/min)
+5. `maintenance_mode_middleware` (503 if enabled)
+6. `CORSMiddleware`
+7. `TrustedHostMiddleware`
+
+When adding a new middleware, consider where in the stack it should execute.
+
+## Maintenance Mode Bypass Paths
+These paths skip maintenance mode:
+- `/api/health`
+- `/api/v1/admin/`
+- `/maintenance`
+- `/api/v1/internal/workflow/execute` — internal task execution must never be blocked
+- `/api/v1/internal/workflow/continue` — internal task execution must never be blocked
+- `/api/v1/admin/internal/cleanup` — session cleanup must run during maintenance
+
+When adding new internal callback endpoints or critical monitoring endpoints, add them to `MAINTENANCE_BYPASS_PATHS` in `utils/maintenance.py`.
+
+---
+
+## Content Security Policy — Nonce-Based (Both Scripts and Styles)
+
+`security_headers_middleware` generates a **per-request cryptographic nonce** stored in `request.state.csp_nonce`. Both `script-src` and `style-src` use this nonce — **neither uses `'unsafe-inline'`**.
+
+```python
+nonce = _secrets.token_urlsafe(16)
+request.state.csp_nonce = nonce
+
+csp_directives = [
+    f"script-src 'self' 'nonce-{nonce}' ...",
+    f"style-src  'self' 'nonce-{nonce}' https://fonts.googleapis.com ...",
+    # NO 'unsafe-inline' in either directive
+]
+```
+
+### Rules for new templates
+
+1. **Every `<script>` block** must carry `nonce="{{ request.state.csp_nonce | default('') }}"`.
+2. **Every `<style>` block** must carry `nonce="{{ request.state.csp_nonce | default('') }}"`.
+3. **Never add `style="..."` HTML attributes.** Use CSS classes instead (see `app.css` utilities below). Inline `style=` attributes are blocked by CSP and violate rule #32 in `.cursorrules`.
+4. **Dynamic CSS values** (e.g. widths set from data) must be set via JavaScript (`element.style.width = ...`) — JS-applied inline styles are not governed by `style-src` CSP.
+
+### Global CSS utility classes (`ui/static/css/app.css`)
+
+These replace the patterns that previously required inline `style=` attributes:
+
+| Class | CSS | Replaces |
+|-------|-----|---------|
+| `.is-hidden` | `display: none` | `style="display: none"` |
+| `.flex-1` | `flex: 1` | `style="flex: 1"` |
+| `.cursor-pointer` | `cursor: pointer` | `style="cursor: pointer"` |
+| `.text-accent` | `color: var(--accent-primary)` | `style="color: var(--accent-primary)"` |
+| `.text-secondary` | `color: var(--text-secondary) !important` | `style="color: var(--text-secondary)"` |
+| `.font-mono-inline` | `font-family: var(--font-mono)` | `style="font-family: var(--font-mono)"` |
+
+**Important:** `.is-hidden` does **not** use `!important` — this is intentional. JavaScript can show hidden elements via `element.style.display = 'block'` (inline style overrides a non-`!important` class). Never change `.is-hidden` to add `!important`, and never use Bootstrap's `d-none` for elements that JS shows/hides via `.style.display`.
+
+### CSS Specificity Conflict — Page `<style>` vs `.is-hidden`
+
+When a page `<style>` block defines `display` on a single class (e.g. `.job-badge { display: inline-flex }`), it has **identical specificity** (one class = 0,1,0) to `.is-hidden { display: none }` in `app.css`. Because the page `<style>` is parsed after the linked stylesheet, it wins — `.is-hidden` is silently ignored for those elements and they are always visible.
+
+**Fix:** Add a two-class rule in the **same page `<style>` block** to override at higher specificity (0,2,0):
+
+```css
+/* In the page <style> block, alongside the display-setting rule */
+.job-badge { display: inline-flex; ... }
+.job-badge.is-hidden { display: none; }  /* ← two classes; wins over both */
+```
+
+Apply this pattern whenever a page-level style sets `display` on a class that also needs to respect `.is-hidden` toggling.
+
+### Settings page account icon color variants (`ui/dashboard/settings.html` `<style>` block)
+
+| Class | Background | Icon color |
+|-------|-----------|-----------|
+| `.account-icon--cyan` | `rgba(0,212,255,0.12)` | `var(--accent-primary)` |
+| `.account-icon--green` | `rgba(16,185,129,0.15)` | `#10b981` |
+| `.account-icon--purple` | `rgba(124,58,237,0.15)` | `#a78bfa` |
+| `.account-icon--amber` | `rgba(245,158,11,0.15)` | `#f59e0b` |
+| `.account-icon--red` | `rgba(239,68,68,0.15)` | `#ef4444` |
+| `.account-icon--google` | `rgba(66,133,244,0.15)` | (svg inline) |

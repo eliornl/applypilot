@@ -1,0 +1,354 @@
+---
+description: Playwright E2E testing patterns — tier system, mocked auth, API interception, multi-step forms, SPA state, data shape pitfalls, onboarding/journey/rate-limit patterns
+globs: e2e/**/*.ts
+alwaysApply: false
+---
+
+# E2E Testing Patterns (Playwright)
+
+## Test Suite Overview
+
+Tests are split into two tiers based on whether they require a live server.
+
+### Tier 1 — Mocked, CI-safe (no server needed)
+
+| File | Covers |
+|------|--------|
+| `dashboard-pages.spec.ts` | All dashboard tabs, navbar, settings, career tools, sub-tabs |
+| `landing.spec.ts` | All landing sections, navbar, CTAs, footer, a11y, cookie consent |
+| `auth-pages.spec.ts` | Login/register/forgot/reset/verify form structure + validation |
+| `interview-prep.spec.ts` | All states, 4 question sub-tabs, generate/complete/mobile |
+| `profile-setup.spec.ts` | 5-step wizard, field validation, step navigation |
+| `application-detail.spec.ts` | 7 tabs, sub-tabs, cover letter, company, mobile layout |
+| `onboarding.spec.ts` | Auto-show/suppress, step nav, skip, complete, `window.Onboarding` API, a11y |
+| `complete-coverage.spec.ts` | Authenticated page coverage: dashboard, settings, career tools, history |
+| `security.spec.ts` | XSS, JWT format, API headers, content security (all mocked) |
+| `extension.spec.ts` | Manifest V3, content script, service worker, popup JS |
+| `error-handling.spec.ts` | 401/403/429/500 + mocked network errors, form validation |
+| `smoke.spec.ts` | Critical path in ~3 min — use as first CI gate |
+| `workflow-mocked.spec.ts` | Workflow processing/complete/error states (mocked) |
+| `api-validation.spec.ts` | API response shapes: full/partial/null fields, error bodies, auth tokens |
+| `form-edge-cases.spec.ts` | Unicode, boundary values, special characters, XSS |
+| `auth-complete.spec.ts` | Google OAuth (mocked), email verification, account lockout |
+| `dashboard.spec.ts` | Dashboard nav, mocked settings, tools, history navigation |
+| `journey.spec.ts` | Multi-step user journeys: new app → results, career tools flow, auth redirect |
+| `keyboard-nav.spec.ts` | Tab/Enter/Space/Escape/Backspace/ArrowDown across all pages |
+| `visual-regression.spec.ts` | Page structure verification at desktop/tablet/mobile viewports |
+| `performance.spec.ts` | Page load assertions (mocked) |
+| `accessibility.spec.ts` | ARIA, landmarks, heading hierarchy |
+| `rate-limit.spec.ts` | 429 + Retry-After handling: login, registration, career tools, workflow |
+| `file-upload.spec.ts` | Resume/job upload, fixture files, API mock responses, error handling |
+| `websocket.spec.ts` | Workflow processing/failed states, progress polling, network resilience |
+
+### Tier 2 — Live server required
+
+These register real users, call real endpoints, and may invoke real LLM agents.
+**Do not run in CI without a running server and credentials.**
+
+| File | Needs |
+|------|-------|
+| `auth.spec.ts` | Real register/login → real DB writes |
+| `tools.spec.ts` | Career tool form submissions (requires real session) |
+| `workflow.spec.ts` | Full workflow: submit job → poll → results |
+| `profile.spec.ts` | Profile CRUD + API key management |
+
+## Running Tests
+
+```bash
+cd e2e
+npm install && npx playwright install chromium
+
+# CI — all Tier 1 mocked tests (no server needed)
+npx playwright test \
+  landing auth-pages auth-complete dashboard dashboard-pages \
+  profile-setup application-detail interview-prep onboarding \
+  workflow-mocked smoke security error-handling complete-coverage \
+  visual-regression extension api-validation keyboard-nav rate-limit \
+  journey form-edge-cases performance accessibility websocket file-upload \
+  --project=chromium --workers=4
+
+# Smoke tests only (~3 min)
+SMOKE=1 npx playwright test --project=chromium
+
+# Single suite
+npx playwright test tests/onboarding.spec.ts --project=chromium
+
+# Filter by section (A–P letter prefix system)
+npx playwright test tests/interview-prep.spec.ts --grep "L\. Content Validation"
+npx playwright test tests/onboarding.spec.ts --grep "H\. window\.Onboarding"
+
+# Live-server tests (requires backend running)
+uvicorn main:app --host 0.0.0.0 --port 8000 &
+npx playwright test tests/auth.spec.ts tests/tools.spec.ts --project=chromium
+```
+
+## Standard Auth + Cookie Setup (use in every mocked test)
+
+Import from `../utils/api-mocks` — never recreate locally:
+
+```typescript
+import { setupAuth, setupAllMocks, MOCK_JWT } from '../utils/api-mocks';
+
+// Inject auth + cookie consent into localStorage before page.goto()
+await setupAuth(page);
+
+// Also mock profile + applications API endpoints
+await setupAllMocks(page);
+```
+
+**CRITICAL**: `MOCK_JWT` is a valid 3-part JWT (`header.payload.sig`). Many client scripts check `token.split('.').length === 3` and redirect to `/auth/login` on failure. Never use a bare string.
+
+**CRITICAL**: Cookie consent MUST include `version: '1.0'`. The banner overlays the page and blocks all pointer events if missing.
+
+## Route Type Annotations — Always Use `(route: any)`
+
+TypeScript `strict: true` requires explicit types on route callbacks:
+
+```typescript
+// ✅ Correct — always annotate route as any
+await page.route('**/api/v1/profile', (route: any) => route.fulfill({
+  status: 200, contentType: 'application/json',
+  body: JSON.stringify({ name: 'Test User' }),
+}));
+
+// ❌ Breaks TypeScript compilation (implicit any)
+await page.route('**/api/v1/profile', route => route.fulfill({ ... }));
+```
+
+## API Mocking — beforeEach Pattern
+
+Register routes with `page.route()` **before** `page.goto()`:
+
+```typescript
+test.describe('C. Main Content', () => {
+  test.beforeEach(async ({ page }) => {
+    await setupAuth(page);        // addInitScript first
+    await mockExistingData(page); // then route stubs
+  });
+
+  test('header renders job title', async ({ page }) => {
+    await page.goto(PAGE_URL);
+    await waitForMainContent(page);
+    await expect(page.locator('#jobTitle')).toContainText('Engineer');
+  });
+});
+```
+
+Route patterns use `**` prefix to match any origin:
+```typescript
+await page.route(`**/api/v1/workflow/results/${SESSION_ID}`, (route: any) =>
+  route.fulfill({ status: 200, contentType: 'application/json',
+    body: JSON.stringify(MOCK_RESULTS) })
+);
+```
+
+## Data Shape Pitfalls — Arrays vs Strings
+
+Client render functions call `.map()` on API fields. Providing a string where an array is expected throws `s.map is not a function` inside `try/catch`, calling `showError()` and hiding content permanently.
+
+```typescript
+// ❌ Breaks renderLogistics()
+logistics: { what_to_bring: 'Resume' }
+
+// ✅ Correct
+logistics: { what_to_bring: ['Resume'] }
+```
+
+**Rule**: These fields MUST be arrays in mock data:
+`what_to_bring`, `pre_interview_checklist`, `confidence_boosters`,
+`virtual_interview_tips`, `three_key_selling_points`, `required_skills`,
+`nice_to_have_skills`, `bullet_points`, `strengths`, `gaps`, `recent_news`
+
+## Waiting for Dynamic Content (SPA State Machines)
+
+Pages with loading → content state transitions need explicit waits:
+
+```typescript
+async function waitForMainContent(page: any) {
+  await page.locator('#mainContent').waitFor({ state: 'visible', timeout: 10000 });
+}
+```
+
+**Do NOT** assert visibility immediately after `page.goto()` for data-fetching pages. Always call `waitForMainContent(page)` first.
+
+## Onboarding Tests — window.Onboarding API
+
+`onboarding.js` exposes `window.Onboarding` globally. Key DOM IDs/selectors:
+
+| Element | Selector |
+|---------|----------|
+| Overlay | `#onboarding-overlay` |
+| Modal | `#onboarding-modal` |
+| Title | `#onboarding-title` |
+| Body | `#onboarding-body` |
+| Progress dots | `#onboarding-progress .progress-dot` |
+| Next button | `[data-action="onboarding-next"]` |
+| Back button | `[data-action="onboarding-prev"]` |
+| Skip button | `[data-action="onboarding-skip"]` |
+
+```typescript
+// Programmatic control via JS
+await page.evaluate(() => (window as any).Onboarding.start());
+await page.evaluate(() => (window as any).Onboarding.next());
+await page.evaluate(() => (window as any).Onboarding.skip());
+await page.evaluate(async () => await (window as any).Onboarding.reset());
+```
+
+The tour auto-shows when `localStorage.onboarding_completed` is absent on `/dashboard`.
+Suppress it in non-onboarding tests by setting the key in `addInitScript`:
+
+```typescript
+localStorage.setItem('onboarding_completed', JSON.stringify({ version: '2.0', completedAt: new Date().toISOString() }));
+```
+
+The `api-key` step is conditionally shown — mock `/api/v1/profile/api-key/status` to control it:
+
+```typescript
+// Show api-key step
+await page.route('**/api/v1/profile/api-key/status', (route: any) => route.fulfill({
+  status: 200, body: JSON.stringify({ has_user_key: false, server_has_key: false }),
+}));
+
+// Hide api-key step
+await page.route('**/api/v1/profile/api-key/status', (route: any) => route.fulfill({
+  status: 200, body: JSON.stringify({ has_user_key: true, server_has_key: false }),
+}));
+```
+
+## Journey Tests — Multi-Step Flow Pattern
+
+`journey.spec.ts` covers realistic user flows. Structure each journey as:
+
+```typescript
+test.describe('Journey N — Feature Name', () => {
+  test.beforeEach(async ({ page }) => {
+    await setupAuth(page);
+    // Mock ALL APIs the page touches — don't rely on setupAllMocks alone
+    await page.route('**/api/v1/specific-endpoint', (route: any) => route.fulfill({...}));
+  });
+
+  test('step 1 — page loads and shows form', async ({ page }) => { ... });
+  test('step 2 — can fill and submit form', async ({ page }) => { ... });
+  test('step 3 — API is called on submit', async ({ page }) => { ... });
+  test('step 4 — result is rendered', async ({ page }) => { ... });
+});
+```
+
+## Rate Limit Tests — 429 Pattern
+
+Always include `Retry-After` header and an `error_code` in the body:
+
+```typescript
+await page.route('**/api/v1/auth/login', (route: any) => route.fulfill({
+  status: 429,
+  contentType: 'application/json',
+  headers: { 'Retry-After': '60' },
+  body: JSON.stringify({ detail: 'Too many requests', error_code: 'RATE_4001' }),
+}));
+```
+
+Every 429 test MUST verify:
+1. `errors.length === 0` (no JS errors)
+2. Page remains visible
+3. User stays on the same page (not redirected)
+
+## SPA Redirect Chains — Flexible Access Control Tests
+
+A 401 from the API causes JS to do `window.location.href = '/auth/login'`. If a valid token exists in localStorage, the login page immediately bounces back to `/dashboard`. Don't assert a fixed final URL — assert that the page navigated *away* from the protected page:
+
+```typescript
+// ❌ Breaks when login → dashboard redirect chain fires
+await page.waitForURL(/auth\/login/, { timeout: 8000 });
+
+// ✅ Robust
+await page.waitForTimeout(2000);
+const stillOnProtectedPage = page.url().includes('/application/');
+expect(stillOnProtectedPage).toBe(false);
+```
+
+## Keyboard Navigation Tests
+
+All keyboard assertions use `page.evaluate()` to inspect `document.activeElement`:
+
+```typescript
+// Check focused element type
+const tag = await page.evaluate(() => document.activeElement?.tagName);
+expect(['A', 'BUTTON', 'INPUT'].includes(tag || '')).toBeTruthy();
+
+// Check focused element's data-action
+const action = await page.evaluate(() =>
+  document.activeElement?.getAttribute('data-action')
+);
+expect(action).toBe('onboarding-next');
+```
+
+For select elements, use `ArrowDown` (not `Alt+Down`) for cross-browser compatibility.
+
+## Multi-Step Form Navigation (Profile Setup)
+
+Steps have client-side required-field validation. Fill required fields before clicking **Next**:
+
+```typescript
+async function goToStep2(page: any) {
+  await fillStep1Required(page);  // populate required fields first
+  await page.route('**/api/v1/profile/basic-info', (route: any) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{"success":true}' })
+  );
+  await page.locator('#nextBtn').click();
+  await page.locator('#step2').waitFor({ state: 'visible' });
+}
+```
+
+## waitForURL for Redirect Tests
+
+`window.location.href` redirects can abort the frame. Use `Promise.all` with a silent catch:
+
+```typescript
+await Promise.all([
+  page.waitForURL(/dashboard/, { timeout: 8000 }).catch(() => {}),
+  page.locator('#loginBtn').click(),
+]);
+```
+
+## Locator Safety — Avoid `isAttached()`
+
+`Locator.isAttached()` is not available in Playwright 1.40. Use `count() > 0` instead:
+
+```typescript
+// ❌ TS2339: Property 'isAttached' does not exist on type 'Locator'
+if (await select.isAttached()) { ... }
+
+// ✅ Correct
+if (await select.count() > 0) { ... }
+```
+
+## Test Section Organisation (A–P lettered describes)
+
+Large page suites use single-letter prefixes so `--grep` can isolate sections:
+
+```
+A. Page Structure & Loading State
+B. Generate State / Error State
+C. First Step Content (e.g. welcome)
+D–G. Navigation (Next, Back, Skip, Complete)
+H. Global API (window.Onboarding, window.app)
+I. Conditional Logic
+J–L. Content Validation, Mobile Layout, Additional Structure
+M–P. Extended scenarios
+```
+
+## Common Issues
+
+| Issue | Fix |
+|-------|-----|
+| `mainContent` never visible | Check render functions for `.map()` on a non-array mock field |
+| Cookie banner blocks clicks | Add `cookie_consent` with `version:'1.0'` in `addInitScript` |
+| Page redirects to `/dashboard` during access control test | Assert URL moved *away* from protected path, not to a specific destination |
+| `browserType.launch: Executable doesn't exist` | Run `npx playwright install chromium` (must use `required_permissions: ["all"]` in Cursor sandbox) |
+| Multi-step wizard won't advance past step N | Fill all required fields for step N before clicking Next |
+| `token.split('.').length !== 3` bounces to login | Use `MOCK_JWT` from `../utils/api-mocks` — it is a real 3-part JWT |
+| Profile setup redirects to dashboard | Mock `/api/v1/profile/**` to return incomplete profile data |
+| `waitForURL` throws `net::ERR_ABORTED` | Wrap in `Promise.all([waitForURL(...).catch(()=>{}),...])` |
+| TS7006 `route` implicit any | Always write `(route: any) => route.fulfill(...)` |
+| `isAttached` TS error | Replace with `count() > 0` check |
+| Onboarding blocks test interactions | Set `onboarding_completed` in `addInitScript` to suppress the tour |

@@ -1,0 +1,159 @@
+---
+description: Python coding style, FastAPI endpoint template, code organisation sections
+globs: **/*.py
+alwaysApply: false
+---
+
+# Python Conventions
+
+## Style Rules
+- Type hints on **all** function parameters and return values
+- Docstrings with **Args / Returns / Raises** sections on every public function
+- Constants: `UPPERCASE_SNAKE_CASE` at module level
+- `async/await` for all I/O — never mix sync blocking calls in async context
+- Imports: stdlib → third-party → local, blank line between groups
+- Explicit annotations: `List[str]`, `Dict[str, Any]`, `Optional[T]`
+
+## File Section Template
+```python
+# =============================================================================
+# CONSTANTS AND CONFIGURATION
+# =============================================================================
+
+# =============================================================================
+# GLOBAL VARIABLES
+# =============================================================================
+
+# =============================================================================
+# CLASSES/FUNCTIONS
+# =============================================================================
+```
+
+## FastAPI Endpoint Template
+```python
+@router.post("/endpoint", response_model=ResponseModel)
+async def endpoint_handler(
+    request_data: RequestModel,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_database),
+) -> ResponseModel:
+    """
+    Short description.
+
+    Args:
+        request_data: Description
+        current_user: Authenticated user from JWT
+        db: PostgreSQL database session
+
+    Returns:
+        ResponseModel with result data
+
+    Raises:
+        APIError: 400/404/422/500 depending on failure type
+    """
+    try:
+        # implementation
+        return ResponseModel(...)
+    except APIError:
+        raise  # re-raise typed errors unchanged
+    except Exception as e:
+        logger.error(f"Operation failed: {e}", exc_info=True)
+        raise internal_error("Operation failed")
+```
+
+**Key rules:**
+- `except APIError: raise` — never catch and re-wrap typed errors
+- Use `raise internal_error(...)` not `raise HTTPException(500, ...)`
+- Always log the exception before re-raising internal errors
+- Check resource ownership before modifying it
+
+## Silent Exception Handlers — Never Use `pass`
+
+`except Exception: pass` silently swallows errors and makes production debugging impossible.
+
+```python
+# ❌ Wrong — error is invisible in logs
+try:
+    await db.rollback()
+except Exception:
+    pass
+
+# ✅ Correct — rollback failures are common (connection already closed); log at DEBUG
+try:
+    await db.rollback()
+except Exception as rb_err:
+    logger.debug("Rollback failed (already closed or rolled back): %s", rb_err)
+```
+
+For genuine parse-or-skip logic in Pydantic validators, use `try/except/else` so the validation
+`ValueError` is never accidentally caught:
+
+```python
+# ❌ Wrong — "End date must be after start date" is silently swallowed
+try:
+    parsed = datetime.strptime(start_date, "%Y-%m")
+    if parsed_end <= parsed:
+        raise ValueError("End date must be after start date")
+except ValueError:
+    pass
+
+# ✅ Correct — only parse failures are suppressed
+try:
+    parsed = datetime.strptime(start_date, "%Y-%m")
+except ValueError:
+    pass  # unparseable start_date validated separately; skip cross-field check
+else:
+    if parsed_end <= parsed:
+        raise ValueError("End date must be after start date")
+```
+
+## Datetime — Always Timezone-Aware When Comparing
+
+`datetime.strptime()` always returns a **timezone-naive** datetime. Comparing it to `datetime.now(timezone.utc)` (timezone-aware) raises `TypeError: can't compare offset-naive and offset-aware datetimes` at runtime.
+
+**Always attach `timezone.utc` to every `strptime` result before any comparison:**
+
+```python
+from datetime import datetime, timezone
+
+# ❌ Wrong — strptime returns naive, now(utc) returns aware → TypeError at runtime
+parsed = datetime.strptime(value, "%Y-%m")
+current = datetime.now(timezone.utc)
+if parsed > current:          # TypeError!
+    raise ValueError("...")
+
+# ✅ Correct — both are aware
+parsed = datetime.strptime(value, "%Y-%m").replace(tzinfo=timezone.utc)
+current = datetime.now(timezone.utc)
+if parsed > current:
+    raise ValueError("...")
+```
+
+This applies to **all** parsed datetimes that participate in a comparison, including cross-field validators:
+
+```python
+# ✅ Cross-field comparison — both must be aware
+parsed_end   = datetime.strptime(end_date,   "%Y-%m").replace(tzinfo=timezone.utc)
+parsed_start = datetime.strptime(start_date, "%Y-%m").replace(tzinfo=timezone.utc)
+if parsed_end <= parsed_start:
+    raise ValueError("End date must be after start date")
+```
+
+Also use `datetime.now(timezone.utc)` everywhere — **never `datetime.utcnow()`**, which is deprecated in Python 3.12+ and also returns a naive datetime.
+
+## Background Task Error Pattern
+
+Background tasks bypass FastAPI's global exception handler, so errors must be explicitly
+reported and logged with full traceback:
+
+```python
+from utils.error_reporting import report_exception
+
+async def _my_background_task(session_id: str, user_id: Optional[str] = None) -> None:
+    try:
+        async with get_session() as db:
+            # ... do work
+    except Exception as e:
+        logger.error("Background task failed for session %s: %s", session_id, e, exc_info=True)
+        await report_exception(e, user_id=user_id)
+```

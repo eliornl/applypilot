@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Page Not Found | {{ app_name or "ApplyPilot" }}{% endblock %}
+{% block description %}The page you're looking for doesn't exist.{% endblock %}
+{% block extra_head %}
+<style nonce="{{ request.state.csp_nonce | default('') }}">
+        .error-page {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+        }
+        .error-content {
+            text-align: center;
+            max-width: 600px;
+        }
+        .error-code {
+            font-size: 8rem;
+            font-weight: 800;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            line-height: 1;
+            margin-bottom: 1rem;
+        }
+        .error-title {
+            font-size: 2rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 1rem;
+        }
+        .error-message {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+        }
+        .error-illustration {
+            font-size: 6rem;
+            margin-bottom: 2rem;
+            opacity: 0.8;
+        }
+        .error-actions {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .error-suggestions {
+            margin-top: 3rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--border-color);
+        }
+        .error-suggestions h4 {
+            color: var(--text-primary);
+            font-size: 1rem;
+            margin-bottom: 1rem;
+        }
+        .error-suggestions ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .error-suggestions li {
+            color: var(--text-muted);
+            padding: 0.5rem 0;
+        }
+        .error-suggestions a {
+            color: var(--accent-primary);
+        }
+        .error-suggestions a:hover {
+            color: var(--text-primary);
+        }
+    </style>
+{% endblock %}
+{% block body_attrs %} class="landing-page"{% endblock %}
+{% block content %}
+<!-- Animated Background -->
+    <div class="error-page">
+        <div class="error-content">
+            <div class="error-illustration">
+                🔍
+            </div>
+            <div class="error-code">404</div>
+            <h1 class="error-title">Page Not Found</h1>
+            <p class="error-message">
+                Oops! The page you're looking for seems to have wandered off. 
+                It might have been moved, deleted, or never existed in the first place.
+            </p>
+            
+            <div class="error-actions">
+                <a href="/" class="btn btn-primary-glow">
+                    <i class="fas fa-home me-2"></i> Go Home
+                </a>
+                <a href="/dashboard" class="btn btn-outline-light">
+                    <i class="fas fa-tachometer-alt me-2"></i> Dashboard
+                </a>
+                <button data-action="go-back" class="btn btn-ghost">
+                    <i class="fas fa-arrow-left me-2"></i> Go Back
+                </button>
+            </div>
+
+            <div class="error-suggestions">
+                <h4>Looking for something specific?</h4>
+                <ul>
+                    <li><a href="/dashboard/new-application">Start a new job application</a></li>
+                    <li><a href="/dashboard">View your applications</a></li>
+                    <li><a href="/dashboard/tools">Use career tools</a></li>
+                    <li><a href="/profile/setup">Complete your profile</a></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+{% block page_scripts %}
+<script nonce="{{ request.state.csp_nonce | default('') }}">
+        document.addEventListener('click', function (e) {
+            var el = e.target.closest('[data-action]');
+            if (el && el.dataset.action === 'go-back') { history.back(); }
+        });
+    </script>
+{% endblock %}

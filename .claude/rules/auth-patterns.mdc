@@ -1,0 +1,315 @@
+---
+description: Authentication flow — JWT, all auth endpoints, token revocation, account lockout, password requirements
+globs: api/auth.py,utils/auth.py
+alwaysApply: false
+---
+
+# Authentication Patterns
+
+## JWT Token Structure
+Every issued token always includes `jti` (unique ID for revocation), `iat` (issued-at), `nbf` (not-before), `type`, and `exp`:
+```python
+{
+  "sub": user_id,
+  "email": user_email,
+  "type": "access",          # always present — prevents password-reset tokens being used as session tokens
+  "exp": expiration_datetime,
+  "iat": issued_at_datetime,
+  "nbf": issued_at_datetime, # reject tokens used before they were issued
+  "jti": "uuid4-string"      # required for revocation
+}
+```
+
+`_validate_jwt_token()` in `utils/auth.py` rejects any token whose `type` is present but is not `"access"`. This prevents one-time tokens (password-reset, email-verify) from being replayed as session credentials.
+
+## Creating Tokens — Use `_make_jwt` in `api/auth.py`
+**Never call `jwt.encode` directly inside `api/auth.py`.** Use the central helper:
+```python
+access_token = _make_jwt(
+    {"sub": str(user.id), "email": user.email},
+    expire_hours=security_settings.jwt_config["expire_hours"],
+)
+```
+`_make_jwt` automatically adds `jti`, `iat`, and `exp`.
+
+For utility code outside `api/auth.py`, use `create_access_token` from `utils/auth.py`:
+```python
+from utils.auth import create_access_token
+token = create_access_token({"sub": user_id, "email": email})
+```
+
+## All Auth Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/auth/register` | POST | Create account → sends verification + welcome email |
+| `/api/v1/auth/login` | POST | Login with account lockout protection |
+| `/api/v1/auth/refresh` | POST | Refresh JWT |
+| `/api/v1/auth/verify` | GET | Verify current token |
+| `/api/v1/auth/logout` | POST | Logout — **revokes the JWT** via Redis blocklist |
+| `/api/v1/auth/forgot-password` | POST | Request password reset email |
+| `/api/v1/auth/reset-password` | POST | Reset password with token |
+| `/api/v1/auth/change-password` | PUT | Change password (authenticated) |
+| `/api/v1/auth/email-status` | GET | Check if SMTP is configured |
+| `/api/v1/auth/verify-email` | GET | Verify email with token |
+| `/api/v1/auth/verify-code` | POST | Verify email with 6-digit code |
+| `/api/v1/auth/resend-verification` | POST | Resend verification email |
+| `/api/v1/auth/verification-status` | GET | Check verification status |
+| `/api/v1/auth/google` | GET | Initiate Google OAuth |
+| `/api/v1/auth/google/callback` | GET | OAuth callback — redirects with `?code=` |
+| `/api/v1/auth/oauth/exchange-code` | POST | Exchange one-time OAuth code for JWT |
+| `/api/v1/auth/extension-status` | GET | Auth status for Chrome extension |
+
+## Auth Dependencies
+```python
+from utils.auth import get_current_user, get_current_user_with_complete_profile
+
+# Standard — validates JWT, returns user dict
+current_user: Dict[str, Any] = Depends(get_current_user)
+
+# Strict — also checks profile_completed
+current_user = Depends(get_current_user_with_complete_profile)
+```
+
+## Token Revocation (Logout Blocklist)
+Tokens are blocklisted by their `jti` claim in Redis on logout.  Every JWT
+validation automatically rejects blocklisted tokens.
+
+```python
+from utils.auth import revoke_token
+
+# Revoke a token (called automatically by logout endpoint)
+await revoke_token(raw_jwt_string)
+```
+
+Redis key: `jwt_blocklist:{jti}`, TTL = remaining token lifetime + 60 s.
+When Redis is unavailable the blocklist check fails-open (token is accepted) —
+monitor Redis availability separately.
+
+## Token Extraction Rules
+`extract_token_from_request` in `utils/auth.py` enforces:
+- **HTTP API paths** — `Authorization: Bearer <token>` header only. Query-param tokens are rejected.
+- **WebSocket paths** (`/api/ws/`) — `?token=` query param accepted (WS protocol has no headers).
+
+**Never pass a JWT in a URL for HTTP endpoints.** For OAuth post-login redirects,
+use the one-time exchange-code flow (see `google-oauth.mdc`).
+
+## Account Lockout (5 failures → 15-min lock)
+```python
+from utils.cache import check_account_lockout, record_failed_login, clear_login_attempts
+
+is_locked, remaining_seconds = await check_account_lockout(email)
+if is_locked:
+    raise account_locked_error(retry_after=remaining_seconds)  # 423 with actual TTL
+
+await record_failed_login(email)
+await clear_login_attempts(email)  # on success
+```
+
+**Always pass `retry_after=remaining_seconds`** — using a hardcoded value like `retry_after=900` is wrong; the Redis TTL may differ from the constant. Call `check_account_lockout()` which returns the actual remaining time.
+
+**`check_account_lockout()` returns a tuple — always unpack it.**
+`if await check_account_lockout(email):` is ALWAYS truthy (non-empty tuple), permanently locking every account:
+
+```python
+# ❌ WRONG — tuple is always truthy; blocks every request unconditionally
+if await check_account_lockout(email):
+    raise account_locked_error()
+
+# ✅ CORRECT — unpack the tuple first
+is_locked, remaining_seconds = await check_account_lockout(email)
+if is_locked:
+    raise account_locked_error(retry_after=remaining_seconds)
+```
+
+Account lockout must be checked in **every** endpoint that validates a password or one-time code:
+- `POST /login`
+- `POST /verify-code`
+- `POST /reset-password`
+
+## Timing Attack Prevention on Login
+When a user is not found, perform a dummy bcrypt comparison to equalise
+response time with the real-user path and prevent timing-based enumeration:
+```python
+# In api/auth.py — _DUMMY_HASH is computed at module load time
+pwd_context.verify(_bcrypt_safe(user_data.password), _DUMMY_HASH)
+```
+Never skip this — removing it re-opens the timing side-channel.
+
+## Rate Limits on Auth Endpoints
+
+| Endpoint | Key | Limit | Window |
+|----------|-----|-------|--------|
+| `POST /register` | IP | 10 | 1 hour |
+| `POST /login` | IP | 20 | 1 hour |
+| `POST /refresh` | user_id | 20 | 1 hour |
+| `POST /forgot-password` | email | 5 | 1 hour |
+| `POST /reset-password` | IP | 10 | 1 hour |
+| `POST /resend-verification` | email | 5 | 1 hour |
+| `POST /verify-code` | IP | 10 | 1 hour |
+| `PUT /change-password` | user_id | 5 | 1 hour |
+| `POST /oauth/exchange-code` | one-time Redis key | 1 | N/A |
+
+## Password Requirements
+- Min 8, max 128 characters
+- Must contain: uppercase, lowercase, digit, special character (`!@#$%^&*()...`)
+- Hashed with bcrypt (12 rounds)
+
+## Token / Code Field max_length
+All Pydantic fields that accept security tokens must have a `max_length`:
+```python
+# Exchange code
+code: str = Field(..., max_length=128, ...)
+
+# Password reset token
+token: str = Field(..., max_length=128, ...)
+```
+Without this limit, oversized payloads reach Redis and can stress memory.
+
+## Session Invalidation — When to Call `invalidate_all_user_tokens()`
+Certain security events must invalidate all existing sessions for the user. Always call after:
+- **Password change** (`PUT /change-password`) — stolen tokens remain valid otherwise
+- **Password reset** (`POST /reset-password`) — the attacker who stole the session token would retain access
+- **Account deletion** (`DELETE /delete-account`) — prevents use of deleted account's tokens
+
+```python
+from utils.auth import invalidate_all_user_tokens
+
+await invalidate_all_user_tokens(str(user.id))
+```
+
+This stores a Redis timestamp; `_validate_jwt_token` rejects tokens with `iat` earlier than this timestamp.
+
+Wrap in try/except and log as warning — a Redis failure should **not** prevent the password reset from completing:
+```python
+try:
+    await invalidate_all_user_tokens(str(user.id))
+except Exception as e:
+    logger.warning(f"Failed to invalidate user tokens after password reset: {mask_email(user.email)}", exc_info=True)
+```
+
+## Registration — Never Store JWT Until Email Is Verified
+
+`POST /auth/register` issues a JWT immediately (so the verify-code endpoint can be used
+without re-login), but the **frontend must not store it**. `auth-register.js` must not
+call `storeAuthData()` on registration success. The `/auth/verify-code` endpoint issues
+its own fresh token upon successful verification, which `auth-verify-email.js` stores:
+
+```javascript
+// ✅ Correct — in auth-register.js
+if (response.ok) {
+    // Do NOT call storeAuthData(result) here — user is not verified yet
+    localStorage.setItem('pendingVerificationEmail', email);
+    showSuccess('Account created! Check your email for the verification code...');
+    setTimeout(() => { window.location.href = `/auth/verify-email?email=...`; }, delay);
+}
+```
+
+Storing the pre-verification token lets users bypass email verification entirely by
+navigating away from `/auth/verify-email`.
+
+## Account Deletion — Frontend Flow
+
+After a successful `DELETE /profile/delete-account`:
+1. Preserve `cookie_consent` before clearing localStorage (see non-negotiable #46).
+2. Redirect to `/auth/login?account_deleted=1` — no `alert()` dialog.
+3. `auth-login.js` `checkUrlMessages()` picks up `account_deleted` and shows an inline info message.
+
+```javascript
+// ✅ Correct — in performAccountDeletion()
+if (response.ok) {
+    const cc = localStorage.getItem('cookie_consent');
+    localStorage.clear();
+    if (cc) localStorage.setItem('cookie_consent', cc);
+    window.location.href = '/auth/login?account_deleted=1';
+}
+```
+
+**Never use `alert()` for post-action messaging** — see non-negotiable #41.
+
+## Login Page — URL-Parameter Messages
+
+`auth-login.js` handles these URL parameters on page load via `checkUrlMessages()`:
+
+| Param | Message |
+|-------|---------|
+| `?verified` | Email verified successfully |
+| `?registered` | Account created, please sign in |
+| `?password_reset` | Password reset successfully |
+| `?account_deleted` | Account deleted confirmation |
+
+These messages are shown via `showAlert(msg, type, true)` — the third argument `persist = true` keeps them visible until the user manually dismisses them (they have a Bootstrap dismiss `×` button). Do not use `persist = false` for URL-param messages — they auto-clear in 5 s and the user will miss them while filling in the login form.
+
+`showAlert` signature:
+```javascript
+// persist = true → stays until dismissed (use for URL-param messages)
+// persist = false (default) → auto-clears after 5 s (use for form errors)
+showAlert(message, type, persist = false)
+```
+
+After displaying, the URL param is removed via `window.history.replaceState()` so it doesn't persist on refresh.
+
+## Account Deletion — Password Confirmation by Account Type
+
+The `deleteAccount()` function in `dashboard-settings.js` tracks whether the user has a
+password via the module-level `userHasPassword` flag (set by `loadGoogleAccountStatus()`):
+
+- **Email-registered users** (`userHasPassword = true`): show a second `showConfirm()` modal
+  asking for the current password before calling the delete endpoint.
+- **Google-only users** (`userHasPassword = false`): skip the password step entirely —
+  they have no password; their identity is verified by the JWT they already hold.
+
+```javascript
+let userHasPassword = true; // module-level, set on account status load
+
+async function deleteAccount() {
+    const confirmed = await showConfirm({ title: 'Delete Account', ... });
+    if (!confirmed) return;
+
+    let password = '';
+    if (userHasPassword) {
+        const result = await showConfirm({
+            title: 'Enter Your Password',
+            inputType: 'password',
+            inputPlaceholder: 'Your password',
+            ...
+        });
+        if (result === null) return;
+        password = result;
+    }
+    performAccountDeletion(password);
+}
+```
+
+## User Enumeration — Always Use Generic Responses
+Endpoints that accept an email address (`/forgot-password`, `/resend-verification`)
+must always return the **same message** regardless of whether the account exists.
+Never include fields like `user_exists`, `is_oauth`, or `email_sent` in the response.
+
+## Secure Codes — Always Use `secrets`
+Any security-sensitive random value (verification codes, reset tokens, state tokens)
+must use the `secrets` module — never `random`:
+```python
+import secrets
+
+# 6-digit verification code
+code = str(secrets.randbelow(900000) + 100000)
+
+# URL-safe token
+token = secrets.token_urlsafe(32)
+```
+
+## Email Verification — Only One Active Code Per Email
+
+Only **one** verification code is valid per email at a time. Generating a new code (on register, login with unverified account, or resend) atomically invalidates the previous code via a secondary pointer key in Redis.
+
+| Key | Value | TTL |
+|-----|-------|-----|
+| `email_verification:{code}` | email address | 15 min |
+| `email_verification_user:{email}` | current valid code | 15 min |
+
+**Generating a new code** (`_store_verification_token`): `GETDEL` the old code pointer, delete the old code key, then pipeline `SETEX` both the new code key and the new pointer — atomically, so no window exists where two codes are valid.
+
+**Consuming a code** (`_consume_verification_token`): `GETDEL email_verification:{token}` — one-time; if email is returned, also delete the pointer key as cleanup.
+
+**Never split consume into `GET` + `DELETE`** — two concurrent requests could both read the key before either deletes it, allowing replay. Always use `GETDEL` (Redis ≥ 6.2).

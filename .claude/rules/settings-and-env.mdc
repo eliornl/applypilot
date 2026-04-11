@@ -1,0 +1,163 @@
+---
+description: Settings, environment variables, and configuration patterns
+globs: config/settings.py,.env*
+alwaysApply: false
+---
+
+# Settings & Environment Variables
+
+## Complete `.env` Reference
+
+```bash
+# App
+APP_NAME=ApplyPilot
+DEBUG=false
+BASE_URL=https://yourdomain.com  # Used in password-reset and verification emails
+ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com
+
+# Security
+JWT_SECRET=<32+ char, 3 char types min>
+# Generate: python -c "import secrets; print(secrets.token_urlsafe(48))"
+JWT_EXPIRATION_HOURS=24
+BCRYPT_ROUNDS=12
+
+# Encryption key for stored BYOK API keys (REQUIRED in production)
+# Must be set BEFORE the first JWT_SECRET rotation to avoid losing stored keys.
+# Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+ENCRYPTION_KEY=<Fernet base64url key>
+
+# Database
+DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/dbname
+
+# Redis
+REDIS_URL=redis://localhost:6379/0
+
+# LLM — Google AI Studio (BYOK default, recommended for self-hosting)
+GEMINI_API_KEY=AIza...
+GEMINI_MODEL=gemini-3-flash-preview
+
+# LLM — Vertex AI (optional, server-admin only)
+# USE_VERTEX_AI=true
+# VERTEX_AI_PROJECT=your-gcp-project
+# IMPORTANT: gemini-3-* models ONLY work with VERTEX_AI_LOCATION=global
+# VERTEX_AI_LOCATION=global
+
+# Google OAuth (optional)
+GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-xxx
+
+# Email (Gmail SMTP)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=you@gmail.com
+SMTP_PASSWORD=<App Password>
+SMTP_FROM_EMAIL=you@gmail.com
+SMTP_FROM_NAME=ApplyPilot
+
+# Analytics (optional — banner is hidden when POSTHOG_ENABLED=false)
+POSTHOG_API_KEY=phc_xxx
+POSTHOG_HOST=https://us.i.posthog.com
+POSTHOG_ENABLED=false
+
+# Security contact for /.well-known/security.txt (RFC 9116)
+# Defaults to security@<BASE_URL domain> when not set.
+# SECURITY_CONTACT_EMAIL=security@yourdomain.com
+
+# Self-hosted flags
+# Skip email verification — users auto-verified on registration.
+# Required when SMTP is not configured. NOT safe for public multi-user deployments.
+# DISABLE_EMAIL_VERIFICATION=true
+
+# Logging
+LOG_LEVEL=INFO
+LOG_FORMAT=json    # always respected — not overridden by DEBUG mode
+LOG_DIR=logs
+LOG_FILE_ENABLED=true
+```
+
+## Settings Access Pattern
+Always use the cached accessor — never instantiate `Settings()` directly:
+
+```python
+from config.settings import get_settings
+settings = get_settings()  # Cached via @lru_cache
+```
+
+For tests that change env vars:
+```python
+from config.settings import clear_settings_cache
+clear_settings_cache()
+```
+
+## BYOK — Google AI Studio Keys Only
+
+**Users can only bring Google AI Studio API keys** (keys starting with `AIza`). There is no user-facing way to use Vertex AI or a Google Cloud service account — `USE_VERTEX_AI` is a server-admin setting only. Do not suggest or document a "use your own Google Cloud project" path for end users.
+
+The `GEMINI_API_KEY` validator in `config/settings.py` enforces this at the server level. The same restriction applies to user-submitted keys stored in `UserApiKey` — the validate endpoint rejects any key that does not start with `AIza`.
+
+## Startup Validators (enforced at settings load)
+`config/settings.py` uses `@field_validator` to enforce these at startup — a bad value raises `ValueError` before the app starts:
+
+| Setting | Validation |
+|---------|-----------|
+| `GEMINI_API_KEY` | Must start with `AIza` |
+| `ENCRYPTION_KEY` | Must be a valid Fernet key (`Fernet(v)` check) |
+| `JWT_SECRET` | Min 32 chars, 3 character types, no weak patterns |
+| `DATABASE_URL` | Must start with `postgresql://` or `postgresql+asyncpg://` |
+| `BASE_URL` | Must be HTTPS for non-localhost URLs in production |
+
+**`BASE_URL` is especially important** — it is used to build password reset links and verification URLs. A non-HTTPS `BASE_URL` would silently serve these over plain HTTP.
+
+## `SMTP_PASSWORD` — Must Use `SecretStr`
+`SMTP_PASSWORD` is stored as `SecretStr` in settings. When passing to `smtplib`, always call `.get_secret_value()`:
+
+```python
+# ✅ Correct
+server.login(self.smtp_username, self.smtp_password.get_secret_value())
+
+# ❌ Wrong — logs as "**********" but fails
+server.login(self.smtp_username, self.smtp_password)
+```
+
+This prevents the SMTP password from appearing in stack traces, debug output, or log lines.
+
+## `ENCRYPTION_KEY` vs `JWT_SECRET`
+- `JWT_SECRET` — signs JWT tokens; rotating it invalidates all active sessions.
+- `ENCRYPTION_KEY` — Fernet key for encrypting stored BYOK API keys; can be rotated independently.
+- If `ENCRYPTION_KEY` is absent, the app falls back to deriving a key from `JWT_SECRET` (backward compat). **This is unsafe for production** — if `JWT_SECRET` is rotated, every stored BYOK key becomes permanently unreadable.
+- **Always set `ENCRYPTION_KEY` before deploying to production** and before any `JWT_SECRET` rotation.
+
+## Redis TLS in Production
+`REDIS_URL` must start with `rediss://` (double `s`) in any shared/production environment. Plain `redis://` transmits JWT blocklist entries, rate-limit counters, and session data in cleartext.
+
+The startup guard in `main.py` raises `RuntimeError` if `is_production and not redis_url.startswith("rediss://")`.
+
+## `.env` File Rules
+- **Never commit `.env` to version control.** `.gitignore` already excludes it.
+- **`.env.local.example`** is the published template — it **should** be committed. It contains only `REPLACE_WITH_*` placeholders and local-friendly defaults. `make start` copies it to `.env` on first run.
+- If `.env` was ever committed to git, treat every secret in it as compromised and rotate immediately.
+- `DEBUG` must be `false` in any shared / production environment. Setting `DEBUG=true` enables debug-only code paths (e.g., token logging) that are security risks.
+- Verify `.gitignore` covers: `*.pem`, `*.key`, `*.p12`, `service_account*.json`, `credentials*.json`, `*.pfx`, `*.crt`, `*.cer`.
+
+## `Settings.is_production` Property
+```python
+settings.is_production  # True when debug=False and testing=False
+```
+Use this (not raw env var checks) for conditional behavior.
+
+## JWT Secret Validation Rules
+- Minimum 32 characters
+- At least 3 character types (lowercase, uppercase, digits, special)
+- Rejected patterns: repeated sequences (e.g. `password` × 4)
+
+## CORS Origins
+Set `CORS_ORIGINS` to an explicit comma-separated list of allowed origins.
+**Never use `*` in production.** There is no `disable_host_validation` escape hatch — configure origins explicitly.
+
+```bash
+# Development
+CORS_ORIGINS=http://localhost:3000,http://localhost:8000
+
+# Production (example)
+CORS_ORIGINS=https://applypilot.yourdomain.com
+```

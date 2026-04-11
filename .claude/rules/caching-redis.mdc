@@ -1,0 +1,169 @@
+---
+description: Redis caching patterns — cache TTLs, cache helpers, rate limiting with headers
+globs: **/*.py
+alwaysApply: false
+---
+
+# Caching & Rate Limiting Patterns
+
+## Cache Schema Version
+All keys are prefixed with `CACHE_VERSION` (currently `v1`). Bump `CACHE_VERSION` in `utils/cache.py` to instantly flush all caches on deploy — old keys expire via TTL.
+
+## Cache TTLs and Key Patterns
+| Cache | TTL | Key pattern |
+|-------|-----|-------------|
+| Job analysis | 24h | `v1:job_analysis:{hash}` |
+| Company research | 7d | `v1:company_research:{hash}:{name}` |
+| User profile | 5min | `v1:user_profile:{uuid}` |
+| Workflow state | 1min | `v1:workflow_state:{session_id}` |
+| LLM response | 1h | `v1:llm_response:{user_id}:{hash}` (user-scoped) or `v1:llm_response:{hash}` (shared) |
+| Interview prep | 7d | `v1:interview_prep:{session_id}` |
+| Tool result | 1h | `v1:tool_result:{tool_name}:{hash}` |
+
+## Auth-Specific Redis Keys (managed by `api/auth.py` and `utils/auth.py`)
+These keys are **not** versioned with `CACHE_VERSION` — do not flush them as part of cache invalidation.
+
+| Purpose | TTL | Key pattern |
+|---------|-----|-------------|
+| JWT revocation blocklist | Remaining token lifetime + 60 s | `jwt_blocklist:{jti}` |
+| OAuth CSRF state | 10 min | `oauth_state:{state_token}` |
+| OAuth one-time exchange code | 30 s | `oauth_code:{code}` |
+| Password reset token | 1 h | `password_reset:{token}` |
+| Email verification code | 15 min | `email_verification:{code}` |
+| Email verification current-code pointer | 15 min | `email_verification_user:{email}` |
+
+The `email_verification_user:{email}` key is the reverse mapping used to invalidate the previously-active verification code when a new one is issued (e.g. on login with unverified email, resend, or re-registration). `_store_verification_token` atomically GETDELs this key, deletes the old `email_verification:{old_code}` key, then writes both the new code key and the new pointer. This ensures only one code is valid at a time per email.
+
+All auth keys are consumed (deleted) on first use where applicable using the atomic `GETDEL` command (Redis ≥ 6.2 required).
+
+**Never split a consume into `GET` then `DELETE`** — two concurrent requests could both read the key before either deletes it, allowing token replay. Always use `redis_client.getdel(key)`.
+
+## Cache Usage Pattern
+```python
+from utils.cache import (
+    get_cached_job_analysis, cache_job_analysis,
+    get_cached_company_research, cache_company_research,
+    get_cached_user_profile, cache_user_profile, invalidate_user_profile,
+    get_cached_workflow_state, cache_workflow_state,
+    acquire_compute_lock, release_compute_lock,
+)
+
+# Always check cache before expensive computation
+cached = await get_cached_job_analysis(job_url=url)
+if cached:
+    return cached
+result = await compute_expensive()
+await cache_job_analysis(result, job_url=url)
+
+# Invalidate on update
+await invalidate_user_profile(user_id)
+```
+
+## Stampede Protection (for slow shared computations)
+Prevents N concurrent cache misses from spawning N LLM calls. Use for job analysis, company research, and any other shared expensive compute:
+```python
+from utils.cache import acquire_compute_lock, release_compute_lock, _get_job_cache_key
+
+cache_key = _get_job_cache_key(job_url, job_content)
+lock_claimed = await acquire_compute_lock(cache_key)
+
+if not lock_claimed:
+    # Poll cache while the lock holder computes
+    for _ in range(6):
+        await asyncio.sleep(0.5)
+        cached = await get_cached_job_analysis(job_url=job_url)
+        if cached:
+            return cached
+    # Fall through and compute independently on timeout
+
+try:
+    result = await compute_expensive()
+    await cache_job_analysis(result, job_url=job_url)
+finally:
+    if lock_claimed:
+        await release_compute_lock(cache_key)
+```
+
+## LLM Cache — User Scoping
+When the prompt contains personal content (resume, cover letter), always pass `user_id` to prevent cross-user cache hits:
+```python
+# Shared prompt (job description only) — safe to share
+response = await gemini_client.generate(prompt=job_prompt, use_cache=True)
+
+# Personal prompt (contains resume) — must be user-scoped
+response = await gemini_client.generate(
+    prompt=personal_prompt,
+    use_cache=True,
+    user_id=str(current_user["id"]),
+)
+```
+
+## Schema Validation on Cache Read
+All `get_cached_*` functions automatically validate the cached payload against `_CACHE_REQUIRED_FIELDS` in `utils/cache.py`. Invalid entries are evicted automatically. Extend `_CACHE_REQUIRED_FIELDS` when required fields are added to a schema.
+
+## Rate Limiting — Simple
+```python
+from utils.cache import check_rate_limit
+
+is_allowed, remaining = await check_rate_limit(
+    identifier=f"{user_id}:workflow_start",
+    limit=10,
+    window_seconds=3600,
+)
+if not is_allowed:
+    raise rate_limit_error(retry_after=3600)
+```
+
+## Rate Limiting — With Headers (preferred for user-facing endpoints)
+```python
+from utils.cache import check_rate_limit_with_headers
+
+result = await check_rate_limit_with_headers(
+    identifier=f"{user_id}:tool_usage",
+    limit=10,
+    window_seconds=3600,
+)
+if not result.allowed:
+    raise rate_limit_error(retry_after=result.reset_seconds)
+
+# Always add headers to the response
+response.headers["X-RateLimit-Limit"]     = str(result.limit)
+response.headers["X-RateLimit-Remaining"] = str(result.remaining)
+response.headers["X-RateLimit-Reset"]     = str(result.reset_seconds)
+```
+
+**Redis down?** Both `check_rate_limit` and `check_rate_limit_with_headers` automatically fall back to an in-memory per-process limiter (`_fallback_limiter`). Not distributed, but prevents a Redis outage from disabling all limits.
+
+## Standard Rate Limits by Feature
+| Feature | Endpoint | Limit | Key |
+|---------|----------|-------|-----|
+| Workflow start | `POST /workflow/start` | 10/hour | user_id |
+| Workflow continue (gate override) | `POST /workflow/continue/{id}` | 20/hour | user_id |
+| Workflow generate documents | `POST /workflow/generate-documents/{id}` | 10/hour | user_id |
+| Regenerate cover letter | `POST /workflow/regenerate-cover-letter/{id}` | 5/hour | user_id |
+| Regenerate resume | `POST /workflow/regenerate-resume/{id}` | 5/hour | user_id |
+| Career tools (most) | `POST /tools/…` | 10/hour | user_id |
+| Salary coach | `POST /tools/salary-coach` | 5/hour | user_id |
+| Interview prep generate | `POST /interview-prep/{id}/generate` | 5/hour | user_id |
+| BYOK API key validate | `POST /profile/api-key/validate` | 10/hour | user_id |
+| Delete account | `DELETE /profile/delete-account` | 3/hour | user_id |
+| Clear data | `DELETE /profile/clear-data` | 5/hour | user_id |
+| Global API (all `/api/` paths) | middleware | 100/min | user_id or IP |
+
+## Cache Observability
+`GET /api/v1/cache/stats` now returns:
+- `hit_miss_metrics` — per-type hit rate, avg latency, error count (in-process, resets on restart)
+- `redis_keyspace_hit_rate` — Redis-level hit rate since last restart
+- `redis_evicted_keys` — non-zero means memory pressure; check Redis memory sizing
+- `cache_version` — current schema version
+- `fallback_rate_limiter` — `"standby"` when Redis is healthy, `"active"` when Redis is down
+
+## Maintenance Mode
+```python
+from utils.maintenance import is_maintenance_mode, enable_maintenance_mode, disable_maintenance_mode
+
+if await is_maintenance_mode():
+    # handled automatically by middleware
+    pass
+# Bypass paths: /api/health, /api/v1/admin/, /maintenance
+```

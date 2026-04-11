@@ -1,0 +1,223 @@
+---
+description: LangGraph agent patterns — workflow agents vs standalone agents, BYOK, timeouts
+globs: agents/**/*.py,workflows/**/*.py
+alwaysApply: false
+---
+
+# Agent Patterns
+
+## Two Types of Agents
+
+| Type | Examples | Invocation |
+|------|----------|-----------|
+| **Workflow agents** | `job_analyzer`, `profile_matching`, `company_research`, `cover_letter_writer`, `resume_advisor` | Orchestrated by LangGraph in `job_application_workflow.py` |
+| **Standalone agents** | `interview_prep`, all 6 career tools | Called directly from API endpoint or background task |
+
+Never add a standalone agent to the LangGraph graph — they run independently.
+
+## Workflow Execution Order (5 agents)
+
+```
+Step 1 (sequential): Job Analyzer
+         ↓
+Step 2 (sequential): Profile Matcher  ← GATE DECISION
+         │  score >= threshold → continue automatically
+         └  score < threshold  → AWAITING_CONFIRMATION (user must confirm)
+         ↓
+Step 3 (sequential): Company Research
+         ↓
+Step 4 (PARALLEL):   Cover Letter Writer  +  Resume Advisor
+```
+
+**Profile Matcher produces the Strategy tab content** — it outputs `competitive_positioning` and `application_strategy` fields in addition to the match score and fit breakdown. There is no separate "Strategy Advisor" agent.
+
+**Cover Letter Writer and Resume Advisor run in parallel** — they do not depend on each other; do not introduce a sequential dependency between them.
+
+The default gate threshold is **50%** (`workflow_gate_threshold: 0.5` in `DEFAULT_WORKFLOW_PREFERENCES`). Users can configure it in **Settings → Preferences**.
+
+## Standard Agent Structure
+
+```python
+class MyAgent:
+    def __init__(self):
+        self.gemini_client = None
+        self._current_user_api_key: Optional[str] = None
+
+    async def generate(self, required_field: str, user_api_key: Optional[str] = None) -> Dict[str, Any]:
+        self._current_user_api_key = user_api_key
+        self.gemini_client = await get_gemini_client()
+
+        response = await self.gemini_client.generate(
+            prompt=prompt,
+            system=SYSTEM_CONTEXT,
+            temperature=0.7,
+            max_tokens=4000,
+            user_api_key=self._current_user_api_key,  # BYOK
+        )
+
+        if response.get("filtered"):
+            return self._create_filtered_result(response.get("response", ""))
+
+        parsed = parse_json_from_llm_response(response.get("response", ""))
+        if not parsed:
+            return self._create_parse_error_result(response.get("response", ""))
+
+        return {**parsed, "generated_at": datetime.now(timezone.utc).isoformat()}
+```
+
+## LLM Call Timeout — Mandatory
+All `run_in_executor` calls for synchronous SDK methods **must** use `asyncio.wait_for()`:
+
+```python
+response = await asyncio.wait_for(
+    asyncio.get_event_loop().run_in_executor(
+        None, lambda: client.models.generate_content(...)
+    ),
+    timeout=self.timeout,  # DEFAULT_TIMEOUT = 180s
+)
+```
+
+Never call `run_in_executor` without `wait_for` — it will hang indefinitely on a slow API.
+
+## Total Workflow Timeout
+In addition to per-call timeouts, the entire `workflow.ainvoke()` call must be wrapped in an outer `asyncio.wait_for()`:
+
+```python
+final_state = await asyncio.wait_for(
+    self.workflow.ainvoke(initial_state),
+    timeout=_WORKFLOW_TOTAL_TIMEOUT_SECONDS,  # 600 s
+)
+```
+
+This prevents LangGraph from hanging in a retry loop or a slow node transition indefinitely.
+
+## Error Handling — `asyncio.TimeoutError` and `exc_info=True`
+Every agent's `except` block must:
+1. Catch `asyncio.TimeoutError` **before** the generic `except Exception` — otherwise it is swallowed by the generic handler
+2. Include `exc_info=True` on **all** error log calls so the full stack trace is captured
+
+```python
+try:
+    result = await asyncio.wait_for(run_in_executor(...), timeout=self.timeout)
+except asyncio.TimeoutError:
+    logger.error(f"Agent timed out after {self.timeout}s", exc_info=True)
+    return self._create_timeout_result()
+except Exception as e:
+    logger.error(f"Agent failed: {e}", exc_info=True)
+    return self._create_error_result(str(e))
+```
+
+## Safe Error Messages — `_safe_error_msg()`
+Never store or return raw `str(e)` from exception objects to clients or to `workflow_session.error_messages`. Raw exception strings can expose SQL error messages, file paths, and internal stack info.
+
+```python
+from api.workflow import _safe_error_msg  # or define locally
+
+# ✅ Correct — generic in production, detailed in debug
+error_msg = _safe_error_msg(exc, debug=settings.debug)
+
+# ❌ Wrong — exposes internals
+error_msg = str(exc)
+```
+
+`_safe_error_msg(exc, debug)` returns a generic message (e.g. `"An internal error occurred"`) in production and the raw exception string only when `settings.debug = True`.
+
+## BYOK Pattern
+```python
+# In workflow agents (state-based)
+self._current_user_api_key = state.get("user_api_key")
+
+# Pass to every generate() call
+response = await self.gemini_client.generate(
+    prompt=prompt,
+    user_api_key=self._current_user_api_key,
+)
+```
+
+## User Workflow Preferences in Agents
+Workflow agents can read per-user preferences from `state["workflow_preferences"]` (a `Dict[str, Any]` injected at workflow start from `UserWorkflowPreferences.to_dict()`). Always use `.get()` with a safe default — the dict may be empty or missing.
+
+```python
+prefs: Dict[str, Any] = state.get("workflow_preferences") or {}
+
+# Cover letter tone: 'professional' | 'conversational' | 'enthusiastic'
+user_tone: str = prefs.get("cover_letter_tone", "professional")
+
+# Resume advice verbosity: 'concise' | 'detailed'
+resume_length: str = prefs.get("resume_length", "concise")
+
+# BYOK model override — only use when user has their own key
+user_model: Optional[str] = prefs.get("preferred_model") if self._current_user_api_key else None
+```
+
+Pass `model=user_model` to `generate()` so BYOK users can choose their Gemini model:
+
+```python
+response = await self.gemini_client.generate(
+    prompt=prompt,
+    system=SYSTEM_CONTEXT,
+    temperature=LLM_TEMPERATURE,
+    max_tokens=LLM_MAX_TOKENS,
+    user_api_key=self._current_user_api_key,
+    model=user_model,  # None = use system default
+)
+```
+
+**`model` is silently ignored when `user_api_key` is None** (Vertex AI mode always uses the server-configured model). Never override `model` in server-key or Vertex AI mode.
+
+## Agent Duration Tracking
+Workflow agents store their duration in `state["agent_durations"]` (Dict[str, float] in milliseconds). Use `flag_modified(workflow_session, "agent_durations")` when persisting.
+
+## Years of Experience Rule — Applies to All Content Agents
+The `years_experience` field on the user profile is **total career years**, not domain-specific tenure. All six content-generating agents have this rule in their `SYSTEM_CONTEXT`:
+
+> *"The `Years of Experience` field is TOTAL career years — NEVER use it as domain-specific experience. When claiming 'X years of [skill/domain]', derive that number only from the relevant work history entries where that skill was actually used. If you cannot calculate it, say 'experience with [skill]' without stating a specific year count."*
+
+**Affected agents (all must carry this rule in `SYSTEM_CONTEXT`):**
+- `profile_matching.py`
+- `resume_advisor.py`
+- `cover_letter_writer.py`
+- `interview_prep.py`
+- `job_comparison.py`
+- `salary_coach.py`
+
+When adding a new agent that uses profile data, copy the same rule verbatim into its `SYSTEM_CONTEXT`. Never let any agent claim "X years of [domain] experience" without explicitly deriving that number from the work history entries, not from `years_experience`.
+
+## `WorkflowState.user_api_key` — Never Log, Never Persist
+The `user_api_key` field is intentionally excluded from database serialization. It lives only in memory during workflow execution.
+
+## `CompanyResearchAgent` — Output Schema
+The agent does **not** have a dedicated `funding_stage` field. Do not reference "funding stage" in any UI copy or agent description. The fields it reliably outputs are:
+- `overview`: `mission_vision`, `key_products_services`, `business_model`, `notable_facts`
+- `culture_and_values`: `core_values`, `work_environment`, `remote_work_policy`, `employee_satisfaction`
+- `interview_intelligence`: `typical_process`, `timeline`, `interview_format`, `assessment_methods`
+- `market_position`: `competitive_advantages`, `market_challenges`, `growth_opportunities`, `recent_developments`
+- `application_tips`: `key_talking_points`, `culture_fit_signals`
+
+Marketing/UI descriptions of this agent should reference **"recent news"** (maps to `recent_developments`) rather than "funding stage".
+
+## Stampede Protection in Workflow Agents
+Agents that compute shared cached results (job analysis, company research) use a Redis compute lock to prevent N concurrent cache misses from spawning N LLM calls. This is already wired into `JobAnalyzerAgent` and `CompanyResearchAgent`. When adding a new workflow agent that caches shared (non-user-specific) results, follow the same pattern:
+
+```python
+from utils.cache import acquire_compute_lock, release_compute_lock
+
+cache_key = _get_my_cache_key(...)
+lock_claimed = await acquire_compute_lock(cache_key)
+
+if not lock_claimed:
+    for _ in range(6):
+        await asyncio.sleep(0.5)
+        cached = await get_cached_my_result(...)
+        if cached:
+            state["my_result"] = cached
+            return state
+
+try:
+    result = await self._compute_with_llm(...)
+    await cache_my_result(result)
+    state["my_result"] = result
+finally:
+    if lock_claimed:
+        await release_compute_lock(cache_key)
+```

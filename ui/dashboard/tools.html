@@ -1,0 +1,1762 @@
+{% extends "base.html" %}
+{% block title %}Career Tools - ApplyPilot{% endblock %}
+{% block description %}AI-powered career communication tools{% endblock %}
+{% block extra_head %}
+<!-- Page Specific Styles -->
+    <style nonce="{{ request.state.csp_nonce | default('') }}">
+        body {
+            background: var(--bg-primary);
+            min-height: 100vh;
+            font-family: var(--font-primary);
+        }
+
+        .navbar {
+            background: var(--bg-card) !important;
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 0;
+        }
+
+        .navbar-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            text-decoration: none;
+        }
+
+        .brand-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: var(--radius-md);
+            background: var(--accent-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1rem;
+        }
+
+        .brand-text {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .brand-accent {
+            color: var(--accent-primary);
+        }
+
+        .tools-container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .tools-header {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-xl);
+            padding: 2rem;
+            margin-bottom: 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .tools-header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--accent-gradient);
+        }
+
+        .tools-header h2 {
+            color: var(--text-primary);
+        }
+
+        .tools-header p {
+            color: var(--text-secondary);
+        }
+
+        .tools-nav {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-xl);
+            padding: 0.75rem;
+            margin-bottom: 2rem;
+        }
+
+        .tools-nav .nav-link {
+            color: var(--text-secondary);
+            border-radius: 8px;
+            margin: 0 0.25rem;
+            padding: 0.6rem 1rem;
+            transition: all 0.2s ease;
+            border: none !important;
+            outline: none !important;
+            box-shadow: none !important;
+            background: transparent;
+        }
+
+        .tools-nav .nav-link:hover {
+            background: rgba(255,255,255,0.05);
+            color: var(--accent-primary);
+        }
+
+        .tools-nav .nav-link:focus,
+        .tools-nav .nav-link:focus-visible,
+        .tools-nav .nav-link:active {
+            outline: none !important;
+            box-shadow: none !important;
+            border: none !important;
+        }
+
+        .tools-nav .nav-link.active {
+            background: var(--accent-gradient);
+            color: white;
+            border: none !important;
+            outline: none !important;
+            box-shadow: none !important;
+        }
+
+        .tools-nav *:focus {
+            outline: none !important;
+            box-shadow: none !important;
+        }
+
+        .tools-nav .nav-link i {
+            margin-right: 0.5rem;
+        }
+
+        .tools-content {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-xl);
+            padding: 2rem;
+            position: relative;
+        }
+
+        .tool-section {
+            display: none;
+        }
+
+        .tool-section.active {
+            display: block;
+        }
+
+        .section-title {
+            color: var(--text-primary);
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-label {
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .form-control, .form-select {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.75rem 1rem;
+            transition: all var(--transition-base);
+            color: var(--text-primary);
+        }
+
+        .form-control:focus, .form-select:focus {
+            background-color: var(--bg-secondary);
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.15);
+            color: var(--text-primary);
+        }
+
+        .form-control::placeholder {
+            color: var(--text-muted);
+        }
+
+        /* Prevent Chrome autofill from turning inputs white */
+        .form-control:-webkit-autofill,
+        .form-control:-webkit-autofill:hover,
+        .form-control:-webkit-autofill:focus,
+        .form-control:-webkit-autofill:active {
+            -webkit-box-shadow: 0 0 0px 1000px var(--bg-secondary) inset !important;
+            -webkit-text-fill-color: var(--text-primary) !important;
+            caret-color: var(--text-primary);
+            transition: background-color 9999s ease-in-out 0s;
+        }
+
+        .btn-primary {
+            background: var(--accent-gradient);
+            border: none;
+            border-radius: var(--radius-md);
+            padding: 0.75rem 2rem;
+            font-weight: 600;
+            transition: all var(--transition-base);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--glow-accent);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            transform: none;
+        }
+
+        .btn-outline-primary {
+            color: var(--accent-primary);
+            border-color: var(--accent-primary);
+        }
+
+        .btn-outline-primary:hover {
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
+            color: white;
+        }
+
+        .alert {
+            border-radius: var(--radius-md);
+            border: none;
+            padding: 1rem 1.5rem;
+        }
+
+        .alert-success {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+        }
+
+        .alert-danger {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+        }
+
+        .alert-warning {
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--warning);
+        }
+
+        .alert-info {
+            background: rgba(59, 130, 246, 0.1);
+            color: var(--info);
+        }
+
+        .output-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .output-card h5 {
+            color: var(--text-primary);
+            margin-bottom: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .output-content {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+            white-space: pre-wrap;
+            font-family: var(--font-primary);
+            color: var(--text-primary);
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .output-subject {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.75rem 1rem;
+            margin-bottom: 1rem;
+            font-weight: 500;
+            color: var(--accent-primary);
+        }
+
+        .copy-btn {
+            padding: 0.25rem 0.75rem;
+            font-size: 0.85rem;
+        }
+
+        .loading-overlay {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(10, 12, 20, 0.75);
+            backdrop-filter: blur(2px);
+            -webkit-backdrop-filter: blur(2px);
+            z-index: 10;
+            justify-content: center;
+            align-items: center;
+            border-radius: var(--radius-xl);
+        }
+
+        .loading-overlay.show {
+            display: flex;
+        }
+
+        .loading-content {
+            text-align: center;
+            color: var(--text-primary);
+        }
+
+        .loading-content .spinner-border {
+            width: 2.25rem;
+            height: 2.25rem;
+            margin-bottom: 0.75rem;
+            color: var(--accent-primary) !important;
+            border-width: 2.5px;
+        }
+
+        .loading-content p {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin: 0;
+        }
+
+        .suggestions-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .suggestions-list li {
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        .suggestions-list li:last-child {
+            border-bottom: none;
+        }
+
+        .suggestions-list li i {
+            color: var(--accent-primary);
+            margin-right: 0.5rem;
+        }
+
+        .positive-badge {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+            padding: 0.25rem 0.75rem;
+            border-radius: var(--radius-full);
+            font-size: 0.8rem;
+            margin-right: 0.5rem;
+            margin-bottom: 0.5rem;
+            display: inline-block;
+        }
+
+        .encouragement-box {
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.1), rgba(139, 92, 246, 0.1));
+            border: 1px solid var(--border-accent);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            margin-top: 1.5rem;
+        }
+
+        .encouragement-box h6 {
+            color: var(--accent-primary);
+            margin-bottom: 0.5rem;
+        }
+
+        .encouragement-box p {
+            color: var(--text-secondary);
+            margin: 0;
+        }
+
+        /* Rejection Analysis output items */
+        .rejection-summary {
+            background: rgba(0, 212, 255, 0.07);
+            border-left: 3px solid var(--accent-primary);
+            border-radius: 0 var(--radius-md) var(--radius-md) 0;
+            padding: 1rem 1.25rem;
+            color: var(--text-primary);
+            line-height: 1.65;
+            font-size: 0.925rem;
+        }
+
+        .rejection-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            padding: 0.65rem 0;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            line-height: 1.55;
+            font-size: 0.9rem;
+        }
+
+        .rejection-item:last-child { border-bottom: none; }
+
+        .rejection-item-icon {
+            width: 18px;
+            flex-shrink: 0;
+            margin-top: 2px;
+            color: var(--accent-primary);
+            font-size: 0.8rem;
+        }
+
+        .rejection-positive-card {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            border-radius: var(--radius-md);
+            padding: 0.65rem 1rem;
+            color: #6ee7b7;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: flex-start;
+            gap: 0.6rem;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .rejection-positive-card i { flex-shrink: 0; margin-top: 2px; font-size: 0.8rem; }
+
+        .encouragement-header {
+            color: var(--accent-primary);
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            font-size: 0.95rem;
+        }
+
+        .encouragement-box { margin-top: 0; }
+
+        /* Job Comparison output */
+        .comp-recommendation-card {
+            background: linear-gradient(135deg, rgba(0,212,255,0.07), rgba(139,92,246,0.07));
+            border: 1px solid var(--border-accent);
+            border-radius: var(--radius-lg);
+            padding: 1.25rem 1.4rem;
+        }
+        .comp-recommendation-label {
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            margin-bottom: 0.3rem;
+        }
+        .comp-recommendation-value {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: var(--accent-primary);
+            margin-bottom: 0.6rem;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+        }
+        .comp-confidence-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.15rem 0.55rem;
+            border-radius: var(--radius-full);
+            font-size: 0.68rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .comp-confidence-badge--high   { background: rgba(16,185,129,0.15); color: #6ee7b7; }
+        .comp-confidence-badge--medium { background: rgba(245,158,11,0.15);  color: #fcd34d; }
+        .comp-confidence-badge--low    { background: rgba(239,68,68,0.15);   color: #fca5a5; }
+        .comp-recommendation-text { color: var(--text-secondary); font-size: 0.9rem; line-height: 1.65; }
+
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(255px, 1fr));
+            gap: 1rem;
+        }
+        .comp-job-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+        }
+        .comp-job-card--recommended { border-color: var(--accent-primary); box-shadow: 0 0 0 1px rgba(0,212,255,0.15); }
+        .comp-job-score-badge { background: var(--accent-gradient); color: white; font-weight: 700; font-size: 0.78rem; padding: 0.2rem 0.55rem; border-radius: var(--radius-full); white-space: nowrap; }
+        .comp-job-body { padding: 1rem; }
+        .comp-job-title-text { font-size: 0.95rem; font-weight: 600; color: var(--accent-primary); margin-bottom: 0.2rem; line-height: 1.3; }
+        .comp-job-company-text { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.9rem; }
+        .comp-pros-header { color: #34d399; font-size: 0.78rem; font-weight: 700; margin-bottom: 0.35rem; display: flex; align-items: center; gap: 0.35rem; }
+        .comp-cons-header { color: #f87171; font-size: 0.78rem; font-weight: 700; margin-bottom: 0.35rem; margin-top: 0.65rem; display: flex; align-items: center; gap: 0.35rem; }
+        .comp-job-list { list-style: none; padding: 0; margin: 0; }
+        .comp-job-list li { color: var(--text-secondary); font-size: 0.83rem; padding: 0.18rem 0 0.18rem 1rem; position: relative; line-height: 1.45; }
+        .comp-job-list li::before { content: '•'; position: absolute; left: 0; color: var(--text-muted); }
+        .comp-ideal-for { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); font-size: 0.78rem; color: var(--text-muted); font-style: italic; line-height: 1.4; }
+
+        .decision-factor-row { display: flex; align-items: flex-start; gap: 0.85rem; padding: 0.6rem 0; border-bottom: 1px solid var(--border-color); }
+        .decision-factor-row:last-child { border-bottom: none; }
+        .decision-factor-left { display: flex; flex-direction: column; gap: 0.3rem; min-width: 140px; flex-shrink: 0; }
+        .decision-factor-name { font-size: 0.85rem; font-weight: 600; color: var(--text-primary); }
+        .decision-factor-winner { font-size: 0.78rem; color: var(--accent-primary); font-weight: 600; }
+        .decision-factor-importance { font-size: 0.68rem; padding: 0.1rem 0.45rem; border-radius: var(--radius-full); font-weight: 700; text-transform: uppercase; align-self: flex-start; }
+        .decision-factor-importance--high   { background: rgba(239,68,68,0.15);   color: #fca5a5; }
+        .decision-factor-importance--medium { background: rgba(245,158,11,0.15);  color: #fcd34d; }
+        .decision-factor-importance--low    { background: rgba(107,114,128,0.2);  color: var(--text-muted); }
+        .decision-factor-explanation { font-size: 0.85rem; color: var(--text-secondary); line-height: 1.55; }
+
+        /* Character counter for textareas */
+        .char-counter {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            text-align: right;
+            margin-top: 4px;
+            transition: color 0.2s;
+        }
+        .char-counter.char-near-limit { color: #f59e0b; }
+        .char-counter.char-at-limit   { color: #ef4444; font-weight: 600; }
+
+        /* ── Salary Coach — Enhanced Output ──────────────────────────── */
+        .salary-output-card {
+            padding: 0;
+            overflow: hidden;
+        }
+
+        .salary-output-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .salary-output-title {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .salary-output-title i {
+            color: var(--accent-primary);
+        }
+
+        .salary-content-section {
+            padding: 1.25rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .salary-content-section:last-child {
+            border-bottom: none;
+        }
+
+        .salary-section-title {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 1rem;
+            padding-bottom: 0.6rem;
+            border-bottom: 1px solid var(--border-color);
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+        }
+
+        .salary-section-title i {
+            color: var(--accent-primary);
+            font-size: 0.8rem;
+        }
+
+        .salary-section-title.dos-title i { color: #10b981; }
+        .salary-section-title.donts-title i { color: #ef4444; }
+
+        /* Market Analysis 2×2 grid */
+        .salary-market-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+        }
+
+        .salary-stat-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.875rem 1rem;
+        }
+
+        .salary-stat-card--highlight {
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.07), rgba(124, 58, 237, 0.07));
+            border-color: rgba(0, 212, 255, 0.3);
+        }
+
+        .salary-stat-label {
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 0.4rem;
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+        }
+
+        .salary-stat-label i {
+            color: var(--accent-primary);
+            font-size: 0.62rem;
+        }
+
+        .salary-stat-value {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        .salary-stat-target {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: var(--accent-primary);
+        }
+
+        /* Strategy card */
+        .salary-strategy-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.25rem;
+        }
+
+        .salary-strategy-text {
+            font-size: 0.88rem;
+            color: var(--text-secondary);
+            line-height: 1.65;
+            margin: 0 0 1rem 0;
+        }
+
+        .salary-confidence-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.3rem 0.85rem;
+            border-radius: var(--radius-full);
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+        }
+
+        .salary-confidence-badge--high {
+            background: rgba(16, 185, 129, 0.15);
+            color: #10b981;
+        }
+
+        .salary-confidence-badge--medium {
+            background: rgba(245, 158, 11, 0.15);
+            color: #f59e0b;
+        }
+
+        .salary-confidence-badge--low {
+            background: rgba(239, 68, 68, 0.15);
+            color: #ef4444;
+        }
+
+        /* Negotiation script sections */
+        .salary-script-section {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.25rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .salary-script-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .salary-script-label {
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: var(--accent-primary);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 0.6rem;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .salary-script-text {
+            font-size: 0.88rem;
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+
+        /* Pushback cards */
+        .pushback-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-left: 3px solid #f59e0b;
+            border-radius: var(--radius-md);
+            padding: 1rem 1.25rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .pushback-card:last-child {
+            margin-bottom: 0;
+        }
+
+        .pushback-scenario {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #f59e0b;
+            margin-bottom: 0.5rem;
+            font-style: italic;
+        }
+
+        .pushback-response {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        /* Alternative asks */
+        .alt-ask-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.875rem 1.25rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .alt-ask-card:last-child {
+            margin-bottom: 0;
+        }
+
+        .alt-ask-left {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .alt-ask-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: var(--radius-md);
+            background: rgba(0, 212, 255, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            color: var(--accent-primary);
+            font-size: 0.8rem;
+        }
+
+        .alt-ask-info { min-width: 0; }
+
+        .alt-ask-name {
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .alt-ask-value {
+            font-size: 0.76rem;
+            color: var(--text-muted);
+            margin-top: 0.1rem;
+        }
+
+        .alt-ask-likelihood {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.65rem;
+            border-radius: var(--radius-full);
+            font-size: 0.7rem;
+            font-weight: 600;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .alt-ask-likelihood--high  { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+        .alt-ask-likelihood--medium { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+        .alt-ask-likelihood--low   { background: rgba(239, 68, 68, 0.15);  color: #ef4444; }
+
+        /* Dos and Don'ts */
+        .dos-donts-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+
+        .dos-item, .dont-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.65rem;
+            padding: 0.6rem 0;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        .dos-item:last-child, .dont-item:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+
+        .dos-item i  { color: #10b981; margin-top: 0.2rem; flex-shrink: 0; }
+        .dont-item i { color: #ef4444; margin-top: 0.2rem; flex-shrink: 0; }
+
+        /* Walk Away card */
+        .walk-away-card {
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(239, 68, 68, 0.05));
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-left: 4px solid #f59e0b;
+            border-radius: var(--radius-md);
+            padding: 1.25rem 1.5rem;
+        }
+
+        .walk-away-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 600;
+            color: #f59e0b;
+            font-size: 0.9rem;
+            margin-bottom: 0.6rem;
+        }
+
+        .walk-away-text {
+            font-size: 0.88rem;
+            color: var(--text-secondary);
+            line-height: 1.65;
+        }
+
+        /* ── Follow-up Email — Enhanced Output ──────────────────────────── */
+        .followup-output-card {
+            padding: 0;
+            overflow: hidden;
+        }
+
+        .followup-subject {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-left: 3px solid var(--accent-primary);
+            border-radius: var(--radius-md);
+            padding: 0.875rem 1.25rem;
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--accent-primary);
+        }
+
+        .followup-body {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+            white-space: pre-wrap;
+            font-size: 0.88rem;
+            line-height: 1.85;
+            color: var(--text-secondary);
+        }
+
+        .followup-meta-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+        }
+
+        .followup-meta-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.25rem;
+        }
+
+        .followup-meta-card--steps {
+            border-left: 3px solid var(--accent-primary);
+        }
+
+        .followup-meta-label {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.68rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 0.6rem;
+        }
+
+        .followup-meta-label i {
+            color: var(--accent-primary);
+            font-size: 0.62rem;
+        }
+
+        .followup-meta-text {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        @media (max-width: 600px) {
+            .salary-market-grid  { grid-template-columns: 1fr; }
+            .dos-donts-grid      { grid-template-columns: 1fr; }
+            .followup-meta-grid  { grid-template-columns: 1fr; }
+        }
+
+        @media (max-width: 768px) {
+            .tools-container {
+                margin: 1rem auto;
+                padding: 0 0.5rem;
+            }
+
+            .tools-header {
+                padding: 1.25rem;
+            }
+
+            .tools-nav {
+                overflow-x: auto;
+                flex-wrap: nowrap;
+                padding-bottom: 0.25rem;
+                scrollbar-width: none;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .tools-nav::-webkit-scrollbar {
+                display: none;
+            }
+
+            .tools-nav .nav-link {
+                white-space: nowrap;
+                margin: 0 0.2rem;
+                padding: 0.5rem 0.65rem;
+                font-size: 0.8rem;
+            }
+
+            .tools-nav .nav-link span {
+                display: none;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .tools-nav .nav-link {
+                padding: 0.45rem 0.55rem;
+                font-size: 0.75rem;
+            }
+        }
+
+        /* ── CSP-safe utility classes (replaces inline style= attributes) ── */
+        .salary-output-header--borderless {
+            border: none;
+            padding-bottom: 0;
+            margin-bottom: 0;
+        }
+        .salary-section-title--borderless {
+            border: none;
+            padding-bottom: 0;
+            margin-bottom: 0;
+        }
+        .followup-meta-card--highlight {
+            background: rgba(0, 212, 255, 0.07);
+            border: 1px solid var(--border-accent);
+            border-radius: var(--radius-md);
+            padding: 0.85rem 1rem;
+        }
+        .tool-input-card {
+            background: var(--bg-secondary);
+            border-color: var(--border-color);
+        }
+        .tool-input-card-header {
+            background: var(--bg-tertiary);
+            border-color: var(--border-color);
+        }
+    </style>
+{% endblock %}
+{% block navbar %}
+{% include "partials/navbar_subpage.html" %}
+{% endblock %}
+{% block content %}
+    <!-- Main Content -->
+    <div class="tools-container">
+        <!-- Header -->
+        <div class="tools-header">
+            <h2><i class="fas fa-tools me-2"></i>Career Tools</h2>
+            <p class="mb-0">AI-powered tools to help you communicate professionally throughout your job search</p>
+        </div>
+
+        <!-- Tools Navigation -->
+        <div class="tools-nav">
+            <ul class="nav nav-pills nav-fill flex-wrap">
+                <li class="nav-item">
+                    <a class="nav-link active" href="#" data-tool="thankYou">
+                        <i class="fas fa-heart"></i><span>Thank You</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#" data-tool="rejection">
+                        <i class="fas fa-lightbulb"></i><span>Rejection</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#" data-tool="reference">
+                        <i class="fas fa-user-friends"></i><span>Reference</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#" data-tool="comparison">
+                        <i class="fas fa-balance-scale"></i><span>Compare Jobs</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#" data-tool="followup">
+                        <i class="fas fa-reply-all"></i><span>Follow-up</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#" data-tool="salary">
+                        <i class="fas fa-dollar-sign"></i><span>Salary Coach</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
+
+        <!-- Tools Content -->
+        <div class="tools-content">
+            <!-- Loading Overlay — scoped to this card -->
+            <div class="loading-overlay" id="loadingOverlay">
+                <div class="loading-content">
+                    <div class="spinner-border" role="status" aria-hidden="true"></div>
+                    <p id="loadingText">Generating...</p>
+                </div>
+            </div>
+            <!-- Alert Container -->
+            <div id="alertContainer"></div>
+
+            <!-- Thank You Note Section -->
+            <div id="thankYouSection" class="tool-section active">
+                <h4 class="section-title"><i class="fas fa-heart me-2"></i>Thank You Note Generator</h4>
+                <p class="text-muted mb-4">Generate a personalized thank you email after your interview</p>
+
+                <form id="thankYouForm">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="interviewerName" class="form-label">Interviewer Name *</label>
+                                <input type="text" class="form-control" id="interviewerName" placeholder="e.g., John Smith" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="interviewerRole" class="form-label">Interviewer Role</label>
+                                <input type="text" class="form-control" id="interviewerRole" placeholder="e.g., Engineering Manager">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="companyName" class="form-label">Company Name *</label>
+                                <input type="text" class="form-control" id="companyName" placeholder="e.g., Acme Corp" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="jobTitle" class="form-label">Job Title *</label>
+                                <input type="text" class="form-control" id="jobTitle" placeholder="e.g., Senior Software Engineer" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="interviewType" class="form-label">Interview Type *</label>
+                        <select class="form-select" id="interviewType" required>
+                            <option value="">Select interview type...</option>
+                            <option value="phone">Phone Screen</option>
+                            <option value="video">Video Interview</option>
+                            <option value="onsite">On-site Interview</option>
+                            <option value="technical">Technical Interview</option>
+                            <option value="behavioral">Behavioral Interview</option>
+                            <option value="panel">Panel Interview</option>
+                            <option value="final">Final Round</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="discussionPoints" class="form-label">Key Discussion Points</label>
+                        <textarea class="form-control" id="discussionPoints" rows="3" placeholder="What topics did you discuss? (separate with commas)&#10;e.g., Team structure, Technical challenges, Remote work policy"></textarea>
+                        <small class="text-muted">These will be referenced in your thank you note</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="additionalNotes" class="form-label">Additional Notes</label>
+                        <textarea class="form-control" id="additionalNotes" rows="2" placeholder="Any other context you want to include..."></textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" id="thankYouSubmit">
+                        <i class="fas fa-magic me-2"></i>Generate Thank You Note
+                    </button>
+                </form>
+
+                <!-- Output -->
+                <div class="output-card followup-output-card is-hidden" id="thankYouOutput">
+                    <!-- Header -->
+                    <div class="salary-output-header">
+                        <div class="salary-output-title">
+                            <i class="fas fa-envelope"></i>
+                            <span>Generated Email</span>
+                        </div>
+                        <button class="btn btn-outline-primary btn-sm copy-btn" data-action="copyThankYouNote" aria-label="Copy subject and email to clipboard">
+                            <i class="fas fa-copy me-1"></i>Copy
+                        </button>
+                    </div>
+
+                    <!-- Subject Line -->
+                    <div class="salary-content-section">
+                        <div class="salary-section-title">
+                            <i class="fas fa-tag"></i>Subject Line
+                        </div>
+                        <div id="thankYouSubject"></div>
+                    </div>
+
+                    <!-- Email Body -->
+                    <div class="salary-content-section">
+                        <div class="salary-section-title">
+                            <i class="fas fa-align-left"></i>Email Body
+                        </div>
+                        <div id="thankYouEmailBody"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Rejection Analysis Section -->
+            <div id="rejectionSection" class="tool-section">
+                <h4 class="section-title"><i class="fas fa-lightbulb me-2"></i>Rejection Analysis</h4>
+                <p class="text-muted mb-4">Get constructive feedback and improvement suggestions from rejection emails</p>
+
+                <form id="rejectionForm">
+                    <div class="form-group">
+                        <label for="rejectionEmail" class="form-label">Rejection Email *</label>
+                        <textarea class="form-control" id="rejectionEmail" rows="6" placeholder="Paste the rejection email here..." required></textarea>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="rejectionCompany" class="form-label">Company Name</label>
+                                <input type="text" class="form-control" id="rejectionCompany" placeholder="e.g., Tech Corp">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="rejectionJobTitle" class="form-label">Job Title</label>
+                                <input type="text" class="form-control" id="rejectionJobTitle" placeholder="e.g., Software Engineer">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="interviewStage" class="form-label">Interview Stage</label>
+                        <select class="form-select" id="interviewStage">
+                            <option value="">Select stage...</option>
+                            <option value="application">Application Stage</option>
+                            <option value="phone_screen">Phone Screen</option>
+                            <option value="technical">Technical Interview</option>
+                            <option value="onsite">On-site Interview</option>
+                            <option value="final">Final Round</option>
+                        </select>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" id="rejectionSubmit">
+                        <i class="fas fa-search me-2"></i>Analyze Rejection
+                    </button>
+                </form>
+
+                <!-- Output -->
+                <div class="output-card followup-output-card is-hidden" id="rejectionOutput">
+                    <!-- Header -->
+                    <div class="salary-output-header">
+                        <div class="salary-output-title">
+                            <i class="fas fa-chart-line"></i>
+                            <span>Analysis Results</span>
+                        </div>
+                    </div>
+
+                    <!-- Summary -->
+                    <div class="salary-content-section">
+                        <div id="rejectionSummary"></div>
+                    </div>
+
+                    <!-- Likely Reasons -->
+                    <div class="salary-content-section">
+                        <div class="salary-section-title">
+                            <i class="fas fa-exclamation-circle"></i>Likely Reasons
+                        </div>
+                        <div id="likelyReasons"></div>
+                    </div>
+
+                    <!-- Improvement Suggestions -->
+                    <div class="salary-content-section">
+                        <div class="salary-section-title">
+                            <i class="fas fa-rocket"></i>Improvement Suggestions
+                        </div>
+                        <div id="improvementSuggestions"></div>
+                    </div>
+
+                    <!-- Positive Signals -->
+                    <div class="salary-content-section">
+                        <div class="salary-section-title">
+                            <i class="fas fa-thumbs-up"></i>Positive Signals
+                        </div>
+                        <div id="positiveSignals"></div>
+                    </div>
+
+                    <!-- Follow-up Email Template (shown only when recommended) -->
+                    <div id="followUpSection" class="is-hidden">
+                        <div class="salary-content-section">
+                            <div class="salary-output-header salary-output-header--borderless">
+                                <div class="salary-section-title salary-section-title--borderless">
+                                    <i class="fas fa-reply"></i>Follow-up Email Template
+                                </div>
+                                <button class="btn btn-outline-primary btn-sm copy-btn" data-action="copyFollowUpTemplate" aria-label="Copy follow-up email to clipboard">
+                                    <i class="fas fa-copy me-1"></i>Copy
+                                </button>
+                            </div>
+                        </div>
+                        <div class="salary-content-section">
+                            <div class="salary-section-title">
+                                <i class="fas fa-tag"></i>Subject Line
+                            </div>
+                            <div id="followUpSubject"></div>
+                        </div>
+                        <div class="salary-content-section">
+                            <div class="salary-section-title">
+                                <i class="fas fa-align-left"></i>Email Body
+                            </div>
+                            <div id="followUpTemplate"></div>
+                        </div>
+                    </div>
+
+                    <!-- Encouragement -->
+                    <div class="salary-content-section">
+                        <div class="encouragement-box" id="encouragementBox">
+                            <div class="encouragement-header"><i class="fas fa-star me-2"></i>Keep Going!</div>
+                            <p id="encouragementText"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Reference Request Section -->
+            <div id="referenceSection" class="tool-section">
+                <h4 class="section-title"><i class="fas fa-user-friends me-2"></i>Reference Request Generator</h4>
+                <p class="text-muted mb-4">Generate a professional email asking someone to be your reference</p>
+
+                <form id="referenceForm">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="referenceName" class="form-label">Reference Name *</label>
+                                <input type="text" class="form-control" id="referenceName" placeholder="e.g., Sarah Johnson" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="referenceRelationship" class="form-label">Relationship *</label>
+                                <select class="form-select" id="referenceRelationship" required>
+                                    <option value="">Select relationship...</option>
+                                    <option value="Former Manager">Former Manager</option>
+                                    <option value="Direct Supervisor">Direct Supervisor</option>
+                                    <option value="Colleague">Colleague</option>
+                                    <option value="Mentor">Mentor</option>
+                                    <option value="Professor">Professor</option>
+                                    <option value="Client">Client</option>
+                                    <option value="Other">Other</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="targetCompany" class="form-label">Company Name</label>
+                                <input type="text" class="form-control" id="targetCompany" placeholder="e.g., Dream Company Inc">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="targetJobTitle" class="form-label">Job Title</label>
+                                <input type="text" class="form-control" id="targetJobTitle" placeholder="e.g., Senior Engineer">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="keyAccomplishments" class="form-label">Key Accomplishments</label>
+                        <textarea class="form-control" id="keyAccomplishments" rows="3" placeholder="What did you accomplish together? (separate with commas)&#10;e.g., Led cloud migration, Mentored team members, Shipped major feature"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="timeSinceContact" class="form-label">Time Since Last Contact</label>
+                        <select class="form-select" id="timeSinceContact">
+                            <option value="">Select...</option>
+                            <option value="Recently">Recently (within a month)</option>
+                            <option value="A few months">A few months</option>
+                            <option value="6 months">About 6 months</option>
+                            <option value="1 year">About 1 year</option>
+                            <option value="2+ years">2+ years</option>
+                        </select>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" id="referenceSubmit">
+                        <i class="fas fa-magic me-2"></i>Generate Reference Request
+                    </button>
+                </form>
+
+                <!-- Output -->
+                <div class="output-card followup-output-card is-hidden" id="referenceOutput">
+                    <!-- Header -->
+                    <div class="salary-output-header">
+                        <div class="salary-output-title">
+                            <i class="fas fa-envelope"></i>
+                            <span>Generated Email</span>
+                        </div>
+                        <button class="btn btn-outline-primary btn-sm copy-btn" data-action="copyReferenceEmail" aria-label="Copy subject and email body to clipboard">
+                            <i class="fas fa-copy me-1"></i>Copy
+                        </button>
+                    </div>
+
+                    <!-- Subject Line -->
+                    <div class="salary-content-section">
+                        <div class="salary-section-title">
+                            <i class="fas fa-tag"></i>Subject Line
+                        </div>
+                        <div id="referenceSubject"></div>
+                    </div>
+
+                    <!-- Email Body -->
+                    <div class="salary-content-section">
+                        <div class="salary-section-title">
+                            <i class="fas fa-align-left"></i>Email Body
+                        </div>
+                        <div id="referenceEmailBody"></div>
+                    </div>
+
+                    <!-- Talking Points -->
+                    <div class="salary-content-section">
+                        <div class="salary-section-title">
+                            <i class="fas fa-comments"></i>Talking Points for Your Reference
+                        </div>
+                        <div id="talkingPoints"></div>
+                    </div>
+
+                    <!-- Tips -->
+                    <div class="salary-content-section">
+                        <div class="salary-section-title">
+                            <i class="fas fa-lightbulb"></i>Tips
+                        </div>
+                        <div id="referenceTips"></div>
+                    </div>
+
+                    <!-- Follow-up Timeline -->
+                    <div class="salary-content-section">
+                        <div class="followup-meta-card followup-meta-card--highlight">
+                            <div class="followup-meta-label"><i class="fas fa-clock"></i>Follow-up Timeline</div>
+                            <div class="followup-meta-text" id="followUpTimeline"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Job Comparison Section -->
+            <div id="comparisonSection" class="tool-section">
+                <h4 class="section-title"><i class="fas fa-balance-scale me-2"></i>Job Comparison Tool</h4>
+                <p class="text-muted mb-4">Compare 2-3 job opportunities side-by-side to make informed decisions</p>
+
+                <form id="comparisonForm">
+                    <!-- Job 1 -->
+                    <div class="card mb-3 tool-input-card">
+                        <div class="card-header tool-input-card-header">
+                            <strong class="text-accent">Job 1 *</strong>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label class="form-label">Company Name *</label>
+                                        <input type="text" class="form-control" id="job1Company" placeholder="e.g., Tech Corp" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label class="form-label">Job Title *</label>
+                                        <input type="text" class="form-control" id="job1Title" placeholder="e.g., Software Engineer" required>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Job Details</label>
+                                <textarea class="form-control" id="job1Description" rows="4" maxlength="5000" placeholder="Paste or type job details: salary, location, remote policy, requirements, perks..."></textarea>
+                                <div class="char-counter"><span id="job1DescCount">0</span> / 5,000 characters</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Job 2 -->
+                    <div class="card mb-3 tool-input-card">
+                        <div class="card-header tool-input-card-header">
+                            <strong class="text-accent">Job 2 *</strong>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label class="form-label">Company Name *</label>
+                                        <input type="text" class="form-control" id="job2Company" placeholder="e.g., Startup Inc" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label class="form-label">Job Title *</label>
+                                        <input type="text" class="form-control" id="job2Title" placeholder="e.g., Senior Developer" required>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Job Details</label>
+                                <textarea class="form-control" id="job2Description" rows="4" maxlength="5000" placeholder="Paste or type job details: salary, location, remote policy, requirements, perks..."></textarea>
+                                <div class="char-counter"><span id="job2DescCount">0</span> / 5,000 characters</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Job 3 (Optional) -->
+                    <div class="card mb-3 tool-input-card">
+                        <div class="card-header tool-input-card-header d-flex justify-content-between align-items-center">
+                            <strong class="text-muted">Job 3 (Optional)</strong>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-action="toggleJob3" aria-label="Add or remove third job">
+                                <i class="fas fa-plus me-1" id="job3ToggleIcon"></i><span id="job3ToggleText">Add</span>
+                            </button>
+                        </div>
+                        <div class="card-body is-hidden" id="job3Body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label class="form-label">Company Name</label>
+                                        <input type="text" class="form-control" id="job3Company" placeholder="e.g., Big Company">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label class="form-label">Job Title</label>
+                                        <input type="text" class="form-control" id="job3Title" placeholder="e.g., Lead Engineer">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Job Details</label>
+                                <textarea class="form-control" id="job3Description" rows="4" maxlength="5000" placeholder="Paste or type job details: salary, location, remote policy, requirements, perks..."></textarea>
+                                <div class="char-counter"><span id="job3DescCount">0</span> / 5,000 characters</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- User Context -->
+                    <div class="form-group">
+                        <label class="form-label">Your Priorities (Optional)</label>
+                        <textarea class="form-control" id="userPriorities" rows="2" placeholder="e.g., Looking for work-life balance, career growth, remote work, higher salary..."></textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-balance-scale me-2"></i>Compare Jobs
+                    </button>
+                </form>
+
+                <!-- Output -->
+                <div class="output-card followup-output-card is-hidden" id="comparisonOutput">
+                    <!-- Header -->
+                    <div class="salary-output-header">
+                        <div class="salary-output-title">
+                            <i class="fas fa-trophy"></i>
+                            <span>Comparison Results</span>
+                        </div>
+                    </div>
+
+                    <!-- Recommendation Summary -->
+                    <div class="salary-content-section">
+                        <div id="comparisonSummary"></div>
+                    </div>
+
+                    <!-- Job Cards -->
+                    <div class="salary-content-section">
+                        <div class="salary-section-title">
+                            <i class="fas fa-briefcase"></i>Job Breakdown
+                        </div>
+                        <div class="comparison-grid" id="jobCards"></div>
+                    </div>
+
+                    <!-- Decision Factors -->
+                    <div class="salary-content-section">
+                        <div class="salary-section-title">
+                            <i class="fas fa-balance-scale"></i>Decision Factors
+                        </div>
+                        <div id="decisionFactors"></div>
+                    </div>
+
+                    <!-- Questions to Ask -->
+                    <div class="salary-content-section">
+                        <div class="salary-section-title">
+                            <i class="fas fa-question-circle"></i>Questions to Ask
+                        </div>
+                        <div id="questionsToAsk"></div>
+                    </div>
+
+                    <!-- Final Advice -->
+                    <div class="salary-content-section">
+                        <div class="encouragement-box">
+                            <div class="encouragement-header"><i class="fas fa-lightbulb me-2"></i>Final Advice</div>
+                            <p id="comparisonAdvice"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Follow-up Generator Section -->
+            <div id="followupSection" class="tool-section">
+                <h4 class="section-title"><i class="fas fa-reply-all me-2"></i>Follow-up Email Generator</h4>
+                <p class="text-muted mb-4">Generate professional follow-up emails for any stage of your job search</p>
+
+                <form id="followupForm">
+                    <div class="form-group">
+                        <label for="followupStage" class="form-label">Follow-up Stage *</label>
+                        <select class="form-select" id="followupStage" required>
+                            <option value="">Select stage...</option>
+                            <option value="after_application">After Submitting Application</option>
+                            <option value="after_phone_screen">After Phone Screen</option>
+                            <option value="after_interview">After Interview</option>
+                            <option value="after_final_round">After Final Round</option>
+                            <option value="no_response">No Response (Check-in)</option>
+                            <option value="after_rejection">After Rejection (Gracious Response)</option>
+                            <option value="after_offer">After Receiving Offer</option>
+                        </select>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="followupCompany" class="form-label">Company Name *</label>
+                                <input type="text" class="form-control" id="followupCompany" placeholder="e.g., Tech Corp" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="followupJobTitle" class="form-label">Job Title *</label>
+                                <input type="text" class="form-control" id="followupJobTitle" placeholder="e.g., Software Engineer" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="followupContactName" class="form-label">Contact Name</label>
+                                <input type="text" class="form-control" id="followupContactName" placeholder="e.g., Jane Doe">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="followupDays" class="form-label">Days Since Last Contact</label>
+                                <input type="number" class="form-control" id="followupDays" min="0" max="365" placeholder="e.g., 7">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="followupKeyPoints" class="form-label">Key Points to Mention</label>
+                        <textarea class="form-control" id="followupKeyPoints" rows="2" placeholder="Topics you discussed, your qualifications (separate with commas)"></textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-magic me-2"></i>Generate Follow-up Email
+                    </button>
+                </form>
+
+                <!-- Output -->
+                <div class="output-card followup-output-card is-hidden" id="followupOutput">
+                    <!-- Header -->
+                    <div class="salary-output-header">
+                        <div class="salary-output-title">
+                            <i class="fas fa-envelope"></i>
+                            <span>Generated Email</span>
+                        </div>
+                        <button class="btn btn-outline-primary btn-sm copy-btn" data-action="copyFollowupEmail" aria-label="Copy subject and email body to clipboard">
+                            <i class="fas fa-copy me-1"></i>Copy
+                        </button>
+                    </div>
+
+                    <!-- Subject Line -->
+                    <div class="salary-content-section">
+                        <div class="salary-section-title">
+                            <i class="fas fa-tag"></i>Subject Line
+                        </div>
+                        <div id="followupSubject"></div>
+                    </div>
+
+                    <!-- Email Body -->
+                    <div class="salary-content-section">
+                        <div class="salary-section-title">
+                            <i class="fas fa-align-left"></i>Email Body
+                        </div>
+                        <div id="followupEmailBody"></div>
+                    </div>
+
+                    <!-- Timing Advice & Next Steps -->
+                    <div class="salary-content-section">
+                        <div class="followup-meta-grid">
+                            <div class="followup-meta-card">
+                                <div class="followup-meta-label"><i class="fas fa-clock"></i>Timing Advice</div>
+                                <div class="followup-meta-text" id="followupTimingAdvice"></div>
+                            </div>
+                            <div class="followup-meta-card followup-meta-card--steps">
+                                <div class="followup-meta-label"><i class="fas fa-forward"></i>Next Steps</div>
+                                <div class="followup-meta-text" id="followupNextSteps"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Salary Coach Section -->
+            <div id="salarySection" class="tool-section">
+                <h4 class="section-title"><i class="fas fa-dollar-sign me-2"></i>Salary Negotiation Coach</h4>
+                <p class="text-muted mb-4">Get personalized negotiation strategies and scripts for your job offer</p>
+
+                <form id="salaryForm">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label class="form-label">Company Name *</label>
+                                <input type="text" class="form-control" id="salaryCompany" placeholder="e.g., Tech Corp" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label class="form-label">Job Title *</label>
+                                <input type="text" class="form-control" id="salaryJobTitle" placeholder="e.g., Software Engineer" required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Offered Salary *</label>
+                        <input type="text" class="form-control" id="offeredSalary" placeholder="e.g., $120,000" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Additional Details</label>
+                        <textarea class="form-control" id="salaryDetails" rows="4" placeholder="e.g., Target salary $150k, have competing offer at $140k, 7 years experience, led team of 5..."></textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary mt-3">
+                        <i class="fas fa-comments-dollar me-2"></i>Generate Negotiation Strategy
+                    </button>
+                </form>
+
+                <!-- Output -->
+                <div class="output-card salary-output-card is-hidden" id="salaryOutput">
+                    <!-- Header -->
+                    <div class="salary-output-header">
+                        <div class="salary-output-title">
+                            <i class="fas fa-chart-line"></i>
+                            <span>Negotiation Strategy</span>
+                        </div>
+                    </div>
+
+                    <!-- Market Analysis -->
+                    <div class="salary-content-section">
+                        <div class="salary-section-title">
+                            <i class="fas fa-search-dollar"></i>Market Analysis
+                        </div>
+                        <div id="marketAnalysis"></div>
+                    </div>
+
+                    <!-- Strategy Overview -->
+                    <div class="salary-content-section">
+                        <div class="salary-section-title">
+                            <i class="fas fa-chess"></i>Strategy Overview
+                        </div>
+                        <div class="salary-strategy-card" id="strategyCard"></div>
+                    </div>
+
+                    <!-- Negotiation Script -->
+                    <div class="salary-content-section">
+                        <div class="salary-section-title">
+                            <i class="fas fa-scroll"></i>Negotiation Script
+                        </div>
+                        <div id="mainScript"></div>
+                    </div>
+
+                    <!-- Pushback Responses -->
+                    <div class="salary-content-section">
+                        <div class="salary-section-title">
+                            <i class="fas fa-shield-alt"></i>If They Push Back...
+                        </div>
+                        <div id="pushbackResponses"></div>
+                    </div>
+
+                    <!-- Alternative Things to Negotiate -->
+                    <div class="salary-content-section">
+                        <div class="salary-section-title">
+                            <i class="fas fa-exchange-alt"></i>Alternative Things to Negotiate
+                        </div>
+                        <div id="alternativeAsks"></div>
+                    </div>
+
+                    <!-- Dos and Don'ts -->
+                    <div class="salary-content-section">
+                        <div class="dos-donts-grid">
+                            <div>
+                                <div class="salary-section-title dos-title">
+                                    <i class="fas fa-check-circle"></i>Do
+                                </div>
+                                <div id="dosList"></div>
+                            </div>
+                            <div>
+                                <div class="salary-section-title donts-title">
+                                    <i class="fas fa-times-circle"></i>Don't
+                                </div>
+                                <div id="dontsList"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Walk Away Point -->
+                    <div class="salary-content-section">
+                        <div id="walkAwayPoint"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Application JavaScript -->
+{% endblock %}
+{% block page_scripts %}
+<script src="{{ asset_url('js/dashboard-tools.js') }}"></script>
+
+{% endblock %}

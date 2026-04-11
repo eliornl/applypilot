@@ -1,0 +1,157 @@
+---
+description: Python integration and unit testing — pytest patterns, test classes, workflow test tips
+globs: tests/**/*.py
+alwaysApply: false
+---
+
+# Python Testing
+
+## Test Suites
+
+### Unit Tests (`tests/test_agents/`)
+Pure pytest, fully mocked LLM clients, no network required.
+```bash
+pytest tests/test_agents/ -v
+```
+
+### API Integration Tests (`tests/test_api/`)
+Uses `ASGITransport` (no running server). Real test DB, mocked rate limits + LLM agents.
+```bash
+# Strip the coverage addopts that require the pytest-cov plugin:
+pytest tests/test_api/ -v --override-ini="addopts="
+pytest tests/test_api/test_auth.py -v           # auth endpoints
+pytest tests/test_api/test_career_tools.py -v   # 6 career tools
+pytest tests/test_api/test_interview_prep.py     # interview prep
+pytest tests/test_api/test_workflow.py           # workflow trigger/status
+pytest tests/test_api/test_profile.py            # profile/settings
+pytest tests/test_api/test_applications.py       # applications list (search/sort/filter/pagination)
+```
+
+### Live Server Tests (`tests/test_tools.py`, `tests/test_auth.py`, etc.)
+Old-style tests that hit `http://localhost:8000`. Require the server to be running AND real Redis.
+**Do not run in CI** — they will fail due to rate limiting without a live server.
+
+---
+
+## API Integration Test Pattern (`tests/test_api/`)
+
+```python
+# tests/test_api/conftest.py provides:
+#   api_client          — unauthenticated AsyncClient (base_url="http://localhost")
+#   authed_client       — bypasses get_current_user via dependency_overrides; no real DB user
+#   authed_client_with_user — creates a real User row in the test DB; use for profile/workflow
+
+@pytest.mark.asyncio
+async def test_endpoint(authed_client):
+    resp = await authed_client.post("/api/v1/tools/thank-you", json={...})
+    assert resp.status_code == 200
+```
+
+### Critical: Use `authed_client_with_user` for DB-dependent endpoints
+Endpoints that INSERT into `user_profiles`, `user_workflow_preferences`, etc. require a real
+FK-satisfying user row. Use `authed_client_with_user` for these tests:
+```python
+async def test_get_profile(authed_client_with_user):
+    resp = await authed_client_with_user.get("/api/v1/profile/")
+    assert resp.status_code == 200
+```
+
+### Mocking LLM Agents in Integration Tests
+Always patch at both the agent method level and disable the cache:
+```python
+with patch("api.tools._check_api_key_available", AsyncMock(return_value=True)), \
+     patch("api.tools.get_cached_tool_result", AsyncMock(return_value=None)), \
+     patch("api.tools.cache_tool_result", AsyncMock(return_value=None)), \
+     patch("agents.thank_you_writer.ThankYouWriterAgent.generate",
+           AsyncMock(return_value=MOCK_RESULT)):
+    resp = await authed_client.post(...)
+```
+
+### Rate-limit testing (force 429)
+The `no_rate_limit` autouse fixture keeps every endpoint unthrottled by default.
+To test the 429 path, patch the specific check directly:
+```python
+from utils.cache import RateLimitResult
+blocked = RateLimitResult(allowed=False, limit=10, remaining=0, reset_seconds=3600)
+with patch("api.tools.check_rate_limit_with_headers", AsyncMock(return_value=blocked)):
+    resp = await authed_client.post(...)
+assert resp.status_code == 429
+```
+
+---
+
+## Known Status Code Quirks
+| Scenario | Actual code | Note |
+|----------|-------------|-------|
+| Duplicate email on `/register` | 422 | `validation_error()` returns 422, not 400 |
+| No API key on tools | 422 | `no_api_key_error()` returns 422 with `CFG_6001` |
+| Login with unverified email | 403 | Triggers verification resend |
+| Logout without token | 200 | Auth is intentionally optional on logout |
+| `BasicInfoRequest` | all fields required | `city`, `state`, `country`, `professional_title`, `years_experience`, `summary` |
+| `JobInput` in job comparison | `title` field, not `job_title` | |
+| `followup-stages` GET | requires auth | Uses `Depends(get_current_user)` |
+| Preferences endpoints | 500 if DB schema mismatch | `UserWorkflowPreferences` must be migrated before these pass |
+
+---
+
+## NullPool Engine (event loop isolation)
+`tests/test_api/conftest.py` overrides `get_database` with a `NullPool` engine.  
+This is **required** because `asyncio_default_fixture_loop_scope=session` and the shared
+pool engine use asyncpg connections bound to a specific event loop — reusing them across
+test functions causes "Future attached to a different loop" errors.
+
+---
+
+## Unit Test Pattern (`tests/test_agents/`)
+
+```python
+@pytest.fixture
+def mock_gemini():
+    with patch("agents.thank_you_writer.genai.Client") as mock:
+        mock.return_value.models.generate_content = MagicMock(return_value=MockResponse(...))
+        yield mock
+
+class TestThankYouWriterAgent:
+    @pytest.mark.asyncio
+    async def test_generate_returns_expected_keys(self, mock_gemini):
+        agent = ThankYouWriterAgent()
+        result = await agent.generate(interviewer_name="Sarah", ...)
+        assert "subject_line" in result
+        assert "email_body" in result
+```
+
+---
+
+## Resetting the Local Dev Database
+
+Before a manual testing session, wipe all user data so each run starts clean:
+
+```bash
+make db-reset
+```
+
+This truncates (in FK-safe order):
+`workflow_sessions` → `job_applications` → `user_workflow_preferences` → `user_settings` → `user_profiles` → `users`
+
+The `alembic_version` table is intentionally left untouched — schema migrations are preserved.
+
+> **Never run `db-reset` against a production database.** It reads `DATABASE_URL` from `.env`; verify the URL points to localhost before running.
+
+---
+
+## Workflow Test Tips
+- Append a timestamp to avoid Redis cache hits: `f"Job Reference: JOB-{int(time.time())}"`
+- Include company name in job text so `company_research` agent has something to work with
+
+---
+
+## E2E Browser Tests (Playwright)
+
+The companion E2E suite lives in `e2e/` and is **separate from pytest**. See `e2e-testing.mdc` for the full pattern reference.
+
+```bash
+cd e2e
+npm install && npx playwright install chromium
+npx playwright test --project=chromium --workers=4   # all mocked tests (no server)
+npx tsc --noEmit                                      # TypeScript compile check
+```

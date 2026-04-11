@@ -1,0 +1,612 @@
+{% extends "base.html" %}
+{% block title %}{{ app_name or "ApplyPilot" }} | Your AI-Powered Job Search Companion{% endblock %}
+{% block description %}Your complete AI assistant for job searching. Analyze any job posting, research companies, see if you're a good fit, get resume tips, and generate tailored cover letters — all in 30 seconds.{% endblock %}
+{% block body_attrs %} class="landing-page"{% endblock %}
+{% block bg_effects %}
+    <div class="bg-grid"></div>
+    <div class="bg-glow bg-glow-1"></div>
+    <div class="bg-glow bg-glow-2"></div>
+{% endblock %}
+{% block navbar %}
+{% include "partials/navbar_landing.html" %}
+{% endblock %}
+{% block content %}
+<!-- Animated Background -->
+
+    <!-- Main Content -->
+    <main>
+    <!-- Hero Section - Lead with the Problem/Solution -->
+    <section class="hero-section">
+        <div class="container">
+            <div class="row align-items-center min-vh-100">
+                <div class="col-lg-7 hero-content">
+                    <h1 class="hero-title animate-fade-up">
+                        Your AI-Powered
+                        <span class="text-gradient">Job Search Companion</span>
+                    </h1>
+                    
+                    <p class="hero-subtitle animate-fade-up delay-1">
+                        Paste a job description, upload a file, or use our Chrome extension — and get full AI-powered insights in 30 seconds. Track applications, access career tools for every stage, and keep your data 100% local.
+                    </p>
+
+                </div>
+
+                <div class="col-lg-5 hero-visual">
+                    <div class="hero-steps animate-fade-up delay-2">
+                        <div class="hero-step">
+                            <div class="step-num">1</div>
+                            <div class="step-content">
+                                <h2 class="h4">Add Any Job Posting</h2>
+                                <p>Paste the job description text, upload a file, or use our Chrome extension to extract it from any job site.</p>
+                            </div>
+                        </div>
+                        <div class="hero-step-arrow">
+                            <i class="fas fa-arrow-down"></i>
+                        </div>
+                        <div class="hero-step">
+                            <div class="step-num">2</div>
+                            <div class="step-content">
+                                <h2 class="h4">AI Works in the Background</h2>
+                                <p>No waiting. Specialized AI agents instantly start analyzing the job, researching the company, matching your profile, and writing your documents — while you keep browsing.</p>
+                            </div>
+                        </div>
+                        <div class="hero-step-arrow">
+                            <i class="fas fa-arrow-down"></i>
+                        </div>
+                        <div class="hero-step">
+                            <div class="step-num">3</div>
+                            <div class="step-content">
+                                <h2 class="h4">Review &amp; Apply with Confidence</h2>
+                                <p>Get notified when your analysis is ready. Review your match score, tailored cover letter, resume tips, and predicted interview questions — then apply.</p>
+                            </div>
+                        </div>
+                        <div class="hero-step-arrow">
+                            <i class="fas fa-arrow-down"></i>
+                        </div>
+                        <div class="hero-step">
+                            <div class="step-num">4</div>
+                            <div class="step-content">
+                                <h2 class="h4">Continue Your Journey</h2>
+                                <p>Use 6 career tools for follow-up emails, thank you notes, salary negotiations, job comparisons, and more — throughout your entire job search.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="section-arrow section-arrow--hero" aria-hidden="true"><a href="#section-tech-bar"><i class="fas fa-chevron-down"></i></a></div>
+
+    <!-- Tech Stack Bar -->
+    <section class="section-tech-bar" id="section-tech-bar">
+        <div class="container">
+            <div class="tech-bar-content">
+                <span class="tech-bar-label">Built with</span>
+                <div class="tech-bar-tags">
+                    <span>Python</span>
+                    <span>FastAPI</span>
+                    <span>PostgreSQL</span>
+                    <span>Redis</span>
+                    <span>Google Gemini</span>
+                    <span>LangGraph</span>
+                    <span>Docker</span>
+                </div>
+                <a href="https://github.com" target="_blank" rel="noopener noreferrer" class="tech-bar-link">
+                    <i class="fab fa-github"></i>
+                    View on GitHub
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Problem Section -->
+    <section id="problem" class="section-problem">
+        <div class="container">
+            <div class="problem-content">
+                <h2 class="problem-title animate-fade-up">
+                    Job searching is <span class="text-gradient">exhausting</span>
+                </h2>
+                <div class="problem-stats animate-fade-up delay-1">
+                    <div class="problem-stat highlight">
+                        <span class="stat-number">~150</span>
+                        <span class="stat-desc">Applications needed on average to land one job offer</span>
+                    </div>
+                </div>
+
+                <div class="impact-comparison animate-fade-up delay-2">
+                    <div class="comparison-header">
+                        <span>For each application, you typically spend:</span>
+                    </div>
+                    <div class="comparison-grid">
+                        <div class="comparison-item manual">
+                            <div class="comparison-label">Manual</div>
+                            <div class="comparison-tasks">
+                                <div class="task-row">
+                                    <span class="task-name">Read & analyze job posting</span>
+                                    <span class="task-time">5 min</span>
+                                </div>
+                                <div class="task-row">
+                                    <span class="task-name">Research the company</span>
+                                    <span class="task-time">20 min</span>
+                                </div>
+                                <div class="task-row">
+                                    <span class="task-name">Tailor your resume</span>
+                                    <span class="task-time">20 min</span>
+                                </div>
+                                <div class="task-row">
+                                    <span class="task-name">Write cover letter</span>
+                                    <span class="task-time">20 min</span>
+                                </div>
+                                <div class="task-row">
+                                    <span class="task-name">Interview prep</span>
+                                    <span class="task-time">30 min</span>
+                                </div>
+                            </div>
+                            <div class="comparison-total">
+                                <span>Total:</span>
+                                <span class="total-time bad">~1.5 hours</span>
+                </div>
+                        </div>
+                        <div class="comparison-vs">VS</div>
+                        <div class="comparison-item ai">
+                            <div class="comparison-label">With AI</div>
+                            <div class="comparison-tasks">
+                                <div class="task-row">
+                                    <span class="task-name">Paste job posting</span>
+                                    <span class="task-time">5 sec</span>
+                                </div>
+                                <div class="task-row">
+                                    <span class="task-name">AI does everything</span>
+                                    <span class="task-time">30 sec</span>
+                                </div>
+                                <div class="task-row">
+                                    <span class="task-name">Review & apply</span>
+                                    <span class="task-time">5 min</span>
+                                </div>
+                                <div class="task-row task-row-bonus">
+                                    <span class="task-time bonus">+ AI interview coaching</span>
+                                </div>
+                                <div class="task-row task-row-bonus">
+                                    <span class="task-time bonus">+ 6 career tools included</span>
+                                </div>
+                            </div>
+                            <div class="comparison-total">
+                                <span>Total:</span>
+                                <span class="total-time good">~6 minutes</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <p class="problem-solution animate-fade-up delay-3">
+                    <strong>That's 15x faster.</strong> Focus on what matters: <strong>preparing for interviews</strong>.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <div class="section-arrow" aria-hidden="true"><a href="#features"><i class="fas fa-chevron-down"></i></a></div>
+
+    <!-- Features Section - The 6 AI Agents -->
+    <section id="features" class="section-features">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-label animate-fade-up">What You Get</span>
+                <h2 class="section-title animate-fade-up delay-1">
+                    Six AI Agents Working
+                    <span class="text-gradient">For You</span>
+                </h2>
+                <p class="section-subtitle animate-fade-up delay-2">
+                    Each job analysis runs through our multi-agent pipeline, giving you comprehensive intelligence in seconds.
+                </p>
+            </div>
+
+            <div class="features-grid">
+                <div class="feature-card animate-fade-up delay-1">
+                    <div class="feature-icon-wrap">
+                        <i class="fas fa-search"></i>
+                    </div>
+                    <h3>Job Analyzer</h3>
+                    <p>
+                        Parses every detail from the posting: required vs. nice-to-have skills, 
+                        salary range, seniority level, work arrangement, and ATS keywords — 
+                        from pasted text, an uploaded file, or via the Chrome extension.
+                    </p>
+                </div>
+
+                <div class="feature-card animate-fade-up delay-2">
+                    <div class="feature-icon-wrap">
+                        <i class="fas fa-bullseye"></i>
+                    </div>
+                    <h3>Profile Matcher</h3>
+                    <p>
+                        Deep semantic analysis of your profile against every job requirement. 
+                        Surfaces a match score, deal-breakers, strengths, skill gaps, 
+                        and a clear recommendation on whether to apply.
+                    </p>
+                </div>
+
+                <div class="feature-card animate-fade-up delay-3">
+                    <div class="feature-icon-wrap">
+                        <i class="fas fa-building"></i>
+                    </div>
+                    <h3>Company Researcher</h3>
+                    <p>
+                        Researches culture, values, recent news, business model, products, 
+                        hiring practices, and typical interview process — 
+                        so you walk in knowing more than most candidates.
+                    </p>
+                </div>
+
+                <div class="feature-card animate-fade-up delay-4">
+                    <div class="feature-icon-wrap">
+                        <i class="fas fa-file-alt"></i>
+                    </div>
+                    <h3>Resume Advisor</h3>
+                    <p>
+                        Priority-ranked, ATS-aware tips for this specific role. 
+                        Tells you exactly which sections to rework, which keywords are missing, 
+                        what metrics to add, and how to reframe your experience.
+                    </p>
+                </div>
+
+                <div class="feature-card animate-fade-up delay-5">
+                    <div class="feature-icon-wrap">
+                        <i class="fas fa-envelope-open-text"></i>
+                    </div>
+                    <h3>Cover Letter Writer</h3>
+                    <p>
+                        Writes a fully personalized letter that connects your actual experience 
+                        to the role's specific requirements. Adapts tone and style 
+                        to match the company culture — startup, enterprise, or anything in between.
+                    </p>
+                </div>
+
+                <div class="feature-card animate-fade-up delay-6">
+                    <div class="feature-icon-wrap">
+                        <i class="fas fa-user-tie"></i>
+                    </div>
+                    <h3>Interview Coach</h3>
+                    <p>
+                        Predicts the questions this company will ask, builds STAR-method answers 
+                        from your own experience, maps out the interview process, 
+                        and gives you a ready-to-use prep checklist.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="section-arrow" aria-hidden="true"><a href="#extension"><i class="fas fa-chevron-down"></i></a></div>
+
+    <!-- Chrome Extension Section -->
+    <section id="extension" class="section-extension">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-lg-6 animate-fade-up">
+                    <span class="section-label">Chrome Extension</span>
+                    <h2 class="section-title">
+                        Extract Jobs from
+                        <span class="text-gradient">Any Website</span>
+                    </h2>
+                    <p class="section-subtitle">
+                        Browse jobs naturally. When you find one you like, click the extension 
+                        and it's instantly sent to your dashboard for AI analysis.
+                    </p>
+                    <div class="extension-features">
+                        <div class="ext-feature">
+                            <i class="fas fa-check-circle"></i>
+                            <span>Works on any job site</span>
+                        </div>
+                        <div class="ext-feature">
+                            <i class="fas fa-check-circle"></i>
+                            <span>One-click job extraction</span>
+                        </div>
+                        <div class="ext-feature">
+                            <i class="fas fa-check-circle"></i>
+                            <span>Auto-detects job posting pages</span>
+                        </div>
+                        <div class="ext-feature">
+                            <i class="fas fa-check-circle"></i>
+                            <span>Syncs seamlessly with your account</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-6 animate-fade-up delay-1">
+                    <div class="extension-preview">
+                        <div class="popup-mockup">
+                            <!-- Header -->
+                            <div class="pm-header">
+                                <div class="pm-logo">
+                                    <div class="pm-logo-icon">
+                                        <i class="fas fa-rocket"></i>
+                                    </div>
+                                    <span>Apply<span class="text-gradient">Pilot</span></span>
+                                </div>
+                                <span class="pm-status-dot"></span>
+                            </div>
+                            <!-- User card -->
+                            <div class="pm-user-card">
+                                <div class="pm-avatar">JD</div>
+                                <div class="pm-user-info">
+                                    <span class="pm-user-name">Jane Doe</span>
+                                    <span class="pm-user-email">jane@example.com</span>
+                                </div>
+                            </div>
+                            <!-- Job detection -->
+                            <div class="pm-job-row">
+                                <i class="fas fa-briefcase pm-job-icon"></i>
+                                <span class="pm-job-label">Job detected on</span>
+                                <span class="pm-job-source">this page</span>
+                            </div>
+                            <!-- Button -->
+                            <button class="pm-btn">
+                                <i class="fas fa-bolt"></i>
+                                Analyze This Job
+                            </button>
+                            <p class="pm-hint">Extracts page content and sends it to AI for analysis</p>
+                            <!-- Quick links -->
+                            <div class="pm-links">
+                                <span><i class="fas fa-chart-line"></i> Dashboard</span>
+                                <span><i class="fas fa-gear"></i> Settings</span>
+                                <span><i class="fas fa-circle-question"></i> Help</span>
+                                <span><i class="fas fa-right-from-bracket"></i> Logout</span>
+                            </div>
+                            <!-- Footer -->
+                            <div class="pm-footer">v1.1.0</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="section-arrow" aria-hidden="true"><a href="#tools"><i class="fas fa-chevron-down"></i></a></div>
+
+    <!-- Career Tools Section -->
+    <section id="tools" class="section-tools">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-label animate-fade-up">Beyond Applications</span>
+                <h2 class="section-title animate-fade-up delay-1">
+                    Career Tools for
+                    <span class="text-gradient">Every Stage</span>
+                </h2>
+                <p class="section-subtitle animate-fade-up delay-2">
+                    From your first application to salary negotiation — AI-powered tools for your entire job search journey.
+                </p>
+            </div>
+
+            <div class="tools-grid">
+                <div class="row g-4 mb-4">
+                    <div class="col-md-4">
+                        <div class="tool-card animate-fade-up delay-1">
+                            <div class="tool-icon">
+                                <i class="fas fa-heart"></i>
+                            </div>
+                            <h3>Thank You Notes</h3>
+                            <p>Write personalized post-interview emails that reference what was actually discussed — not a generic template.</p>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="tool-card animate-fade-up delay-2">
+                            <div class="tool-icon">
+                                <i class="fas fa-balance-scale"></i>
+                            </div>
+                            <h3>Job Comparison</h3>
+                            <p>Compare 2–3 opportunities side-by-side with AI scoring across compensation, career growth, work-life balance, culture fit, and more.</p>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="tool-card animate-fade-up delay-3">
+                            <div class="tool-icon">
+                                <i class="fas fa-dollar-sign"></i>
+                            </div>
+                            <h3>Salary Coach</h3>
+                            <p>Get a full negotiation strategy: opening script, counter-offer responses, alternative asks, and tactics to maximize your total package.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="row g-4">
+                    <div class="col-md-4">
+                        <div class="tool-card animate-fade-up delay-4">
+                            <div class="tool-icon">
+                                <i class="fas fa-paper-plane"></i>
+                            </div>
+                            <h3>Follow-up Emails</h3>
+                            <p>Tailored follow-ups for every stage — after applying, after a phone screen, after interviews, after a final round, or when you've been ghosted.</p>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="tool-card animate-fade-up delay-5">
+                            <div class="tool-icon">
+                                <i class="fas fa-user-friends"></i>
+                            </div>
+                            <h3>Reference Requests</h3>
+                            <p>Generate warm, professional emails to ask former colleagues or managers to serve as references — personalized to your relationship with them.</p>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="tool-card animate-fade-up delay-6">
+                            <div class="tool-icon">
+                                <i class="fas fa-lightbulb"></i>
+                            </div>
+                            <h3>Rejection Analysis</h3>
+                            <p>Paste a rejection email and get honest analysis: what likely went wrong, what to improve, and concrete actions to strengthen your next application.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="section-arrow" aria-hidden="true"><a href="#example"><i class="fas fa-chevron-down"></i></a></div>
+
+    <!-- Real Example Section -->
+    <section id="example" class="section-example">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-label animate-fade-up">See It In Action</span>
+                <h2 class="section-title animate-fade-up delay-1">
+                    Real Job. Real Results.
+                    <span class="text-gradient">See What You'll Get.</span>
+                </h2>
+                <p class="section-subtitle animate-fade-up delay-2">
+                    This is the actual output for a real job posting — Applied AI Engineer at Anthropic. Every tab, every insight, generated in 30 seconds.
+                </p>
+            </div>
+
+            <div class="screenshot-showcase animate-fade-up delay-2">
+                <!-- Tab click hint -->
+                <div class="ss-click-hint">
+                    <span><i class="fas fa-hand-pointer"></i> Click a tab to explore</span>
+                    <span><i class="fas fa-arrows-up-down"></i> Scroll to read</span>
+                </div>
+                <!-- Tab bar -->
+                <div class="ss-tabs" role="tablist" aria-label="Application tabs demo">
+                    <button class="ss-tab active" data-ss-tab="job-details" role="tab" aria-selected="true">
+                        <i class="fas fa-briefcase"></i>
+                        <span>Job Details</span>
+                    </button>
+                    <button class="ss-tab" data-ss-tab="your-fit" role="tab" aria-selected="false">
+                        <i class="fas fa-user-check"></i>
+                        <span>Your Fit</span>
+                    </button>
+                    <button class="ss-tab" data-ss-tab="strategy" role="tab" aria-selected="false">
+                        <i class="fas fa-bullseye"></i>
+                        <span>Strategy</span>
+                    </button>
+                    <button class="ss-tab" data-ss-tab="company" role="tab" aria-selected="false">
+                        <i class="fas fa-building"></i>
+                        <span>Company</span>
+                    </button>
+                    <button class="ss-tab" data-ss-tab="cover-letter" role="tab" aria-selected="false">
+                        <i class="fas fa-envelope-open-text"></i>
+                        <span>Cover Letter</span>
+                    </button>
+                    <button class="ss-tab" data-ss-tab="resume" role="tab" aria-selected="false">
+                        <i class="fas fa-file-alt"></i>
+                        <span>Resume</span>
+                    </button>
+                    <button class="ss-tab" data-ss-tab="interview" role="tab" aria-selected="false">
+                        <i class="fas fa-comments"></i>
+                        <span>Interview</span>
+                    </button>
+                </div>
+
+                <!-- Screenshot frame -->
+                <div class="ss-frame">
+                    <!-- Browser chrome -->
+                    <div class="ss-browser-chrome">
+                        <div class="ss-dots">
+                            <span></span><span></span><span></span>
+                        </div>
+                        <div class="ss-url-bar">
+                            <i class="fas fa-lock"></i>
+                            <span>applypilot.app / dashboard / applications / applied-ai-engineer</span>
+                        </div>
+                    </div>
+                    <!-- Screenshot panels -->
+                    <div class="ss-panels">
+                        <div class="ss-panel active" id="ss-panel-job-details">
+                            <img src="/static/img/screenshots/tab-job-details.png"
+                                 alt="Job Details — At a Glance grid, requirements, ATS keywords, skills and benefits"
+                                 loading="lazy">
+                        </div>
+                        <div class="ss-panel" id="ss-panel-your-fit">
+                            <img src="/static/img/screenshots/tab-your-fit.png"
+                                 alt="Your Fit — match scores, qualification breakdown, competitive position and employer concerns"
+                                 loading="lazy">
+                        </div>
+                        <div class="ss-panel" id="ss-panel-strategy">
+                            <img src="/static/img/screenshots/tab-strategy.png"
+                                 alt="Strategy — action plan, talking points, cover letter angle and risk assessment"
+                                 loading="lazy">
+                        </div>
+                        <div class="ss-panel" id="ss-panel-company">
+                            <img src="/static/img/screenshots/tab-company.png"
+                                 alt="Company — mission, values, culture, leadership, benefits and market context"
+                                 loading="lazy">
+                        </div>
+                        <div class="ss-panel" id="ss-panel-cover-letter">
+                            <img src="/static/img/screenshots/tab-cover-letter.png"
+                                 alt="Cover Letter — fully personalized AI-generated cover letter for the Anthropic role"
+                                 loading="lazy">
+                        </div>
+                        <div class="ss-panel" id="ss-panel-resume">
+                            <img src="/static/img/screenshots/tab-resume.png"
+                                 alt="Resume — ATS Pass Rate HIGH, Interview Likelihood HIGH, quick wins and tips"
+                                 loading="lazy">
+                        </div>
+                        <div class="ss-panel" id="ss-panel-interview">
+                            <img src="/static/img/screenshots/tab-interview.png"
+                                 alt="Interview — 5-stage process with timeline, predicted questions and prep checklist"
+                                 loading="lazy">
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <div class="section-arrow" aria-hidden="true"><a href="#pricing"><i class="fas fa-chevron-down"></i></a></div>
+
+    <!-- Pricing/CTA Section -->
+    <section id="pricing" class="section-pricing">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-label animate-fade-up">Always Free</span>
+                <h2 class="section-title animate-fade-up delay-1">
+                    Open Source.
+                    <span class="text-gradient">BYOK. No Catch.</span>
+                </h2>
+                        </div>
+
+            <div class="pricing-card animate-fade-up delay-2">
+                <div class="pricing-description">
+                    This is an open-source project. You bring your own Google Gemini API key and pay 
+                    Google directly for usage (typically <strong>less than $0.01 per job analysis</strong>). 
+                    No subscription fee — you pay Google directly only for what you use.
+                </div>
+                <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="btn btn-primary-glow btn-lg">
+                    <i class="fas fa-key me-2"></i>
+                    Get Your Gemini API Key
+                </a>
+            </div>
+        </div>
+    </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <div class="brand-icon">
+                        <i class="fas fa-rocket"></i>
+                    </div>
+                    <span class="brand-text">Apply<span class="brand-accent">Pilot</span></span>
+                </div>
+                <div class="footer-links">
+                    <a href="/help">Help & FAQ</a>
+                    <a href="/privacy">Privacy</a>
+                    <a href="/terms">Terms</a>
+                </div>
+                <div class="footer-meta">
+                    <a href="https://github.com/yourusername/applypilot" target="_blank" rel="noopener noreferrer" class="footer-github">
+                        <i class="fab fa-github"></i> Open Source on GitHub
+                    </a>
+                    <p>© 2026 ApplyPilot</p>
+                </div>
+            </div>
+        </div>
+    </footer>
+    <!-- Custom JS -->
+{% endblock %}
+{% block page_scripts %}
+<script src="{{ asset_url('js/app.js') }}"></script>
+<script src="{{ asset_url('js/landing.js') }}"></script>
+{% endblock %}
