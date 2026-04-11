@@ -64,11 +64,8 @@ extension/
 # E2E tests (not needed in production)
 e2e/
 
-# Frontend build tooling (only compiled dist output is needed at runtime)
+# Frontend build tooling — node_modules rebuilt inside Docker; source files needed by multi-stage build
 ui/node_modules/
-ui/build.mjs
-ui/package.json
-ui/package-lock.json
 
 # AI tooling / editor rules (no place in a production image)
 .cursor/
