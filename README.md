@@ -330,7 +330,7 @@ make build-frontend    # rebuilds dist/ and updates manifest.json
 
 ## Environment Variables
 
-`.env` is created and populated automatically by `make start-local` or `make start`. You normally don't need to touch it.
+`.env` is created and populated automatically by `make start`, `make start-local`, or `make setup`. You normally don't need to touch it.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -338,8 +338,8 @@ make build-frontend    # rebuilds dist/ and updates manifest.json
 | `ENCRYPTION_KEY` | Auto-generated | Encrypts stored API keys |
 | `DATABASE_URL` | Set automatically | PostgreSQL connection |
 | `REDIS_URL` | Set automatically | Redis connection |
-| `GEMINI_API_KEY` | _(empty)_ | Server-wide AI key — or let users add their own via Settings |
-| `GEMINI_MODEL` | `gemini-3-flash-preview` | AI model to use |
+| `GEMINI_API_KEY` | _(empty)_ | Server-wide AI key — users can add their own during profile setup or via **Settings → AI Setup** |
+| `GEMINI_MODEL` | `gemini-3-flash-preview` | AI model to use — users can change this in **Settings → AI Setup** |
 | `BASE_URL` | `http://localhost:8000` | Used in password-reset and verification email links |
 | `DISABLE_EMAIL_VERIFICATION` | `true` | Set `false` when SMTP is configured |
 | `GOOGLE_CLIENT_ID` | _(empty)_ | Enables "Continue with Google" |
@@ -362,8 +362,8 @@ Browser / Chrome Extension
 │    uvicorn · port 8000       │
 └──────────┬───────────────────┘
            │
-           ├── PostgreSQL   user data, job applications, profiles
-           ├── Redis         sessions, rate limiting, auth state
+           ├── PostgreSQL   users, profiles, job applications, workflow sessions, agent outputs
+           ├── Redis         caching, rate limiting, auth state, background task locks
            │
            └── Five-Agent Pipeline (Google Gemini + LangGraph)
                   Job Analyzer
@@ -394,7 +394,7 @@ applypilot/
 ├── workflows/            # LangGraph pipeline orchestration and state schema
 ├── api/                  # FastAPI route handlers
 ├── config/               # Settings (Pydantic BaseSettings + .env)
-├── models/               # SQLAlchemy engine, session, and base model setup
+├── models/               # SQLAlchemy ORM models and database setup
 ├── utils/                # Auth, email, Redis, encryption, LLM client helpers
 ├── alembic/              # Database migrations
 ├── extension/            # Chrome Extension (Manifest V3)
@@ -402,6 +402,8 @@ applypilot/
 │   ├── index.html        # Landing page
 │   ├── dashboard/        # All dashboard pages
 │   ├── auth/             # Login, register, verify
+│   ├── profile/          # Profile setup
+│   ├── partials/         # Shared template fragments
 │   └── static/           # Compiled assets (esbuild output)
 ├── tests/                # Unit + integration tests (pytest)
 │   ├── test_agents/      # Agent unit tests
@@ -413,6 +415,9 @@ applypilot/
 ├── Makefile              # Dev workflow shortcuts (macOS / Linux)
 ├── Justfile              # Same shortcuts for Windows (just)
 ├── requirements.txt      # Python dependencies
+├── CHANGELOG.md          # Version history
+├── CONTRIBUTING.md       # Contribution guide
+├── USER_GUIDE.md         # End-user documentation
 └── .env.local.example    # Config template (make start copies this to .env)
 ```
 
