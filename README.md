@@ -7,7 +7,6 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-orange.svg)](https://langchain-ai.github.io/langgraph/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192.svg)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-DC382D.svg)](https://redis.io/)
-[![Docker Compose](https://img.shields.io/badge/Docker_Compose-2496ED.svg)](https://docs.docker.com/compose/)
 [![Node.js](https://img.shields.io/badge/Node.js-339933.svg)](https://nodejs.org/)
 [![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-4285F4.svg)](https://developer.chrome.com/docs/extensions/)
 [![Gemini API](https://img.shields.io/badge/Gemini-API-4285F4.svg)](https://ai.google.dev/gemini-api)
