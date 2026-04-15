@@ -15,9 +15,25 @@
 [![Cursor](https://img.shields.io/badge/Cursor-IDE-000000.svg)](https://cursor.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Your AI-powered job application co-pilot — runs entirely on your own machine.**
+150 applications. One offer. Each application took 5+ manual steps.
 
-Paste any job description and five AI agents run automatically: they analyze the role, score your profile fit, research the company, rewrite your resume bullets, write a tailored cover letter, and prepare you for the interview. Track and manage all your applications from a built-in dashboard. Everything runs locally — no subscriptions, no data leaving your machine.
+Separate tools, separate tabs, separate sites — none of them talking to each other. Generic output. Over an hour per application.
+
+Paste a job description — or pull it from any job site with the Chrome extension — and five AI agents run an orchestrated pipeline in under 30 seconds: analyzing the role, scoring your fit, researching the company, writing a targeted cover letter, and tailoring your resume to the role. Sequential where it needs to be, parallel where it can be, each agent's output feeding the next.
+
+Also includes a dashboard to track every application. And tools for everything around it: interview prep with mock sessions, salary negotiation, job comparison, follow-ups, thank you notes, and references.
+
+Runs on your machine. No subscriptions, no data stored on our servers — just your own Gemini API key connecting directly to Google.
+
+*Here's what a completed application looks like:*
+
+![ApplyPilot demo](docs/demo.gif)
+
+---
+
+[Six AI Agents](#six-ai-agents) · [Career Tools](#six-career-tools) · [Quick Start](#quick-start) · [Gemini API Key](#gemini-api-key) · [Chrome Extension](#chrome-extension) · [Highlights](#highlights) · [Optional Features](#optional-features) · [Developer Setup](#developer-setup) · [Environment Variables](#environment-variables) · [How It Works](#how-it-works) · [Project Structure](#project-structure) · [Contributing](#contributing) · [License](#license)
+
+---
 
 ## Six AI agents
 
@@ -44,18 +60,6 @@ Standalone tools you can use any time — no job description needed:
 | **Rejection Analyzer** | Lessons learned and re-application strategy from a rejection email |
 | **Reference Request** | Professional reference request for a specific contact |
 | **Job Comparison** | Side-by-side comparison of 2–3 open roles |
-
-## Chrome Extension
-
-Extract any job posting with one click from any job site or company careers page. Loaded from this repo, no store required.
-
----
-
-*Here's what a completed application looks like:*
-
-![ApplyPilot demo](docs/demo.gif)
-
-[Quick Start](#quick-start) · [Gemini API Key](#gemini-api-key) · [Chrome Extension](#chrome-extension) · [Highlights](#highlights) · [Optional Features](#optional-features) · [Developer Setup](#developer-setup)
 
 ## Quick Start
 
