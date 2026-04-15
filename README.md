@@ -2,13 +2,13 @@
   <img src="docs/logo.svg" width="280" height="64" alt="ApplyPilot">
 </p>
 
-[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)](https://fastapi.tiangolo.com/)
-[![LangGraph](https://img.shields.io/badge/LangGraph-1.0-orange.svg)](https://langchain-ai.github.io/langgraph/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-316192.svg)](https://www.postgresql.org/)
-[![Redis](https://img.shields.io/badge/Redis-7.4-DC382D.svg)](https://redis.io/)
-[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg)](https://docs.docker.com/compose/)
-[![Node.js](https://img.shields.io/badge/Node.js-22-339933.svg)](https://nodejs.org/)
+[![Python](https://img.shields.io/badge/Python-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-green.svg)](https://fastapi.tiangolo.com/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-orange.svg)](https://langchain-ai.github.io/langgraph/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192.svg)](https://www.postgresql.org/)
+[![Redis](https://img.shields.io/badge/Redis-DC382D.svg)](https://redis.io/)
+[![Docker Compose](https://img.shields.io/badge/Docker_Compose-2496ED.svg)](https://docs.docker.com/compose/)
+[![Node.js](https://img.shields.io/badge/Node.js-339933.svg)](https://nodejs.org/)
 [![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-4285F4.svg)](https://developer.chrome.com/docs/extensions/)
 [![Gemini API](https://img.shields.io/badge/Gemini-API-4285F4.svg)](https://ai.google.dev/gemini-api)
 [![Claude Code](https://img.shields.io/badge/Claude-Code-D97757.svg)](https://claude.ai/code)
