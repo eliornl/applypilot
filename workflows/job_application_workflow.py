@@ -83,10 +83,17 @@ from utils.security import (
 )
 from config.settings import get_settings
 from models.database import WorkflowSession as WorkflowSessionModel, JobApplication as JobApplicationModel
+from utils.application_dedupe import find_conflicting_job_application
 
 # =============================================================================
 # CONSTANTS
 # =============================================================================
+
+# Same user-facing text as POST /workflow/start RES_3002 duplicate response
+_DUPLICATE_JOB_USER_MESSAGE = (
+    "You already have an application for this job. Open it from your dashboard, "
+    "or delete the old one first if you want to start over."
+)
 
 # Gate decision threshold for profile matching
 MATCH_SCORE_THRESHOLD: float = 0.5  # 50% - below this triggers gate
@@ -1208,6 +1215,78 @@ class JobApplicationWorkflow:
     # STATE PERSISTENCE (PostgreSQL/SQLAlchemy)
     # =========================================================================
 
+    async def _maybe_fail_duplicate_job_after_analyzer(self, state: WorkflowState) -> None:
+        """
+        After Job Analyzer returns structured title+company, fail this workflow if
+        another non-deleted application already has the same normalized pair.
+
+        Extension / manual submit often skip start-time title+company dedupe; this
+        catches duplicates once the analyzer output is known (first write wins).
+        """
+        if self.db is None:
+            return
+        if state.get("_analyzer_dedupe_checked") is True:
+            return
+        if state.get("agent_status", {}).get(Agent.JOB_ANALYZER.value) != AgentStatus.COMPLETED:
+            return
+        ja = state.get("job_analysis")
+        if not ja:
+            return
+        title = ja.get("job_title")
+        company = ja.get("company_name")
+        if not isinstance(title, str) or not isinstance(company, str):
+            return
+        try:
+            uid = uuid.UUID(str(state["user_id"]))
+        except (ValueError, TypeError):
+            return
+
+        try:
+            conflict = await find_conflicting_job_application(
+                self.db,
+                user_id=uid,
+                session_id=str(state["session_id"]),
+                job_title=title,
+                company_name=company,
+            )
+        except Exception as exc:
+            logger.debug(
+                "Duplicate job check after analyzer failed (non-fatal): %s",
+                exc,
+                exc_info=True,
+            )
+            return
+
+        if conflict is None:
+            state["_analyzer_dedupe_checked"] = True
+            return
+
+        logger.info(
+            "Duplicate job after analyzer: user=%s session=%s conflicts with application id=%s",
+            uid,
+            state.get("session_id"),
+            conflict.id,
+        )
+
+        state["agent_status"][Agent.JOB_ANALYZER.value] = AgentStatus.FAILED
+        state["completed_agents"] = [
+            a for a in state.get("completed_agents", []) if a != Agent.JOB_ANALYZER
+        ]
+        if Agent.JOB_ANALYZER not in state.get("failed_agents", []):
+            state.setdefault("failed_agents", []).append(Agent.JOB_ANALYZER)
+
+        state["workflow_status"] = WorkflowStatus.FAILED
+        state["job_analysis"] = None
+        add_error(state, _DUPLICATE_JOB_USER_MESSAGE, Agent.JOB_ANALYZER.value)
+
+        await broadcast_agent_update(
+            user_id=str(state.get("user_id", "")),
+            session_id=str(state.get("session_id", "")),
+            agent_name=Agent.JOB_ANALYZER.value,
+            status="failed",
+            message=_DUPLICATE_JOB_USER_MESSAGE,
+        )
+
     async def _save_workflow_state(self, state: WorkflowState) -> None:
         """
         Save complete workflow state to PostgreSQL database for persistence and recovery.
@@ -1228,6 +1307,8 @@ class JobApplicationWorkflow:
             workflow_session = result.scalar_one_or_none()
 
             if workflow_session:
+                await self._maybe_fail_duplicate_job_after_analyzer(state)
+
                 # Update existing session
                 wf_status_raw = (
                     state["workflow_status"].value
@@ -1322,31 +1403,6 @@ class JobApplicationWorkflow:
                                         update(JobApplicationModel)
                                         .where(JobApplicationModel.session_id == session_id)
                                         .values(**_early_vals)
-                                    )
-                                try:
-                                    from utils.application_dedupe import (
-                                        soft_delete_older_duplicates_for_same_job,
-                                    )
-
-                                    n_dup = await soft_delete_older_duplicates_for_same_job(
-                                        self.db,
-                                        user_id=uuid.UUID(str(state["user_id"])),
-                                        job_title=_early_title,
-                                        company_name=_early_company,
-                                        keep_session_id=session_id,
-                                    )
-                                    if n_dup:
-                                        structured_logger.info(
-                                            "Removed %s older duplicate application row(s) "
-                                            "after job analyzer title write (session=%s)",
-                                            n_dup,
-                                            session_id,
-                                        )
-                                except Exception as dedupe_err:
-                                    logger.debug(
-                                        "Duplicate application cleanup skipped: %s",
-                                        dedupe_err,
-                                        exc_info=True,
                                     )
                             except Exception as _upd_err:
                                 logger.debug(

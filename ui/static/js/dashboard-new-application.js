@@ -158,10 +158,11 @@
 
     /** @param {File} file */
     function handleFileUpload(file) {
-        const allowedTypes = ['application/pdf', 'text/plain'];
-        const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
-        if (!allowedTypes.includes(file.type) && !(ext === 'txt' && file.type === '')) {
-            showAlert('Please upload a PDF or TXT file.', 'danger'); return;
+        const allowedExtensions = ['.pdf', '.docx', '.txt'];
+        const parts = file.name.split('.');
+        const fileExtension = parts.length >= 2 ? '.' + (parts.pop() || '').toLowerCase() : '';
+        if (!fileExtension || !allowedExtensions.includes(fileExtension)) {
+            showAlert('Please upload a PDF, Word (.docx), or TXT file.', 'danger'); return;
         }
         if (file.size > 5 * 1024 * 1024) {
             showAlert('File size must be less than 5MB.', 'danger'); return;

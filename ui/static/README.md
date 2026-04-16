@@ -347,7 +347,7 @@ window.eventBus.emit('application:create', { id: appId });
 - Delegates notifications via `notify()` → `window.app.showNotification()`
 
 ### `dashboard-new-application.js` — New Application
-- Multi-step job input form (URL / text / file / extension)
+- Job input: paste text or **upload a file** — **`.pdf`**, **`.txt`**, **`.docx`** (max **5 MB**); validates extensions client-side before `POST /api/v1/workflow/start` (`job_file`)
 - Polling interval for workflow progress (`beforeunload` cleanup registered)
 - Delegates notifications via `notify()`
 

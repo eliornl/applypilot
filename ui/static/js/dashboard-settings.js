@@ -343,8 +343,16 @@
         if (!file) return;
 
         const ext = '.' + (file.name.split('.').pop()?.toLowerCase() ?? '');
+        if (ext === '.doc') {
+            showAlert(
+                'Older Word (.doc) files are not supported. Save as .docx or PDF, then upload again.',
+                'danger',
+            );
+            input.value = '';
+            return;
+        }
         if (!['.pdf', '.docx', '.txt'].includes(ext)) {
-            showAlert('Please upload a PDF, DOCX, or TXT file', 'danger');
+            showAlert('Please upload a PDF, Word (.docx), or TXT file.', 'danger');
             input.value = ''; return;
         }
 

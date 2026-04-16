@@ -39,6 +39,29 @@
     }
 
     /**
+     * True when job analysis has no real employer string (empty, N/A, dash placeholders from the LLM).
+     * Mirrors the intent of `_has_usable_company_name` in `agents/company_research.py` (inverse).
+     * @param {unknown} raw
+     * @returns {boolean}
+     */
+    function isPlaceholderCompanyName(raw) {
+        if (raw == null) return true;
+        const s = String(raw).trim();
+        if (!s) return true;
+        const lower = s.toLowerCase();
+        /** @type {Set<string>} */
+        const literals = new Set([
+            '-', '–', '—', '−',
+            'n/a', 'na', 'unknown', 'null', 'none',
+            'not specified', 'not stated', 'tbd', 'confidential', 'undisclosed',
+            '...',
+        ]);
+        if (literals.has(lower)) return true;
+        if (/^[\s\-–—−]+$/u.test(s)) return true;
+        return false;
+    }
+
+    /**
      * Format a raw date string (YYYY-MM-DD or ISO) into "Mon D, YYYY".
      * Returns '' if the input is missing or unparseable — callers must hide the
      * card when an empty string is returned.
@@ -348,7 +371,13 @@
         const cnEl = document.getElementById('companyName');
         const cdEl = document.getElementById('createdDate');
         if (jtEl) jtEl.textContent = decodeEntities(job.job_title || 'Job Application');
-        if (cnEl) cnEl.textContent = decodeEntities(job.company_name || 'Company');
+        if (cnEl) {
+            const companyTrimmed = job.company_name && String(job.company_name).trim();
+            cnEl.textContent =
+                companyTrimmed && !isPlaceholderCompanyName(job.company_name)
+                    ? decodeEntities(companyTrimmed)
+                    : 'Unknown';
+        }
         if (cdEl) cdEl.textContent = new Date().toLocaleDateString();
 
         // Location
@@ -489,6 +518,12 @@
         const toPercent = (/** @type {number} */ val) => val > 1 ? Math.round(val) : Math.round(val * 100);
         const getBarClass = (/** @type {number} */ v) => { const p = v > 1 ? v : v * 100; return p >= 70 ? 'good' : p >= 40 ? 'medium' : 'low'; };
 
+        const companyNameTrimmed = job.company_name && String(job.company_name).trim();
+        const aboutCompanyHeading =
+            companyNameTrimmed && !isPlaceholderCompanyName(job.company_name)
+                ? escapeHtml(companyNameTrimmed)
+                : 'this opportunity';
+
         // ========== SUB-PANE 1: COMPANY INFO ==========
         let companyHtml = '';
         if (company && Object.keys(company).length > 0) {
@@ -498,7 +533,7 @@
             const safeWebsiteLabel  = escapeHtml(_validWebsite ? _validWebsite.replace('https://', '').replace('http://', '') : '');
             companyHtml += `
                 <div class="content-section">
-                    <h2 class="section-title"><i class="fas fa-building"></i> About ${escapeHtml(job.company_name) || 'the Company'}</h2>
+                    <h2 class="section-title"><i class="fas fa-building"></i> About ${aboutCompanyHeading}</h2>
                     <div class="company-card">
                         <div class="company-stats">
                             <div class="company-stat">
@@ -1127,7 +1162,8 @@
 
         const wordCount = letter.trim().split(/\s+/).filter(Boolean).length;
         const jobTitle = job ? (job.job_title || '').replace(/\s*[-–—].*$/, '').trim() : '';
-        const companyName = job ? (job.company_name || '') : '';
+        const companyName =
+            job && !isPlaceholderCompanyName(job.company_name) ? String(job.company_name).trim() : '';
         const headerParts = [jobTitle, companyName].filter(Boolean);
         const headerLabel = headerParts.length ? headerParts.join(' · ') : 'Cover Letter';
 

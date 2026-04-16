@@ -45,7 +45,10 @@
     /** @param {string} sessionId */
     function _isAlreadyNotified(sessionId) {
         try {
-            return JSON.parse(localStorage.getItem(NOTIFIED_KEY) || '[]').includes(sessionId);
+            var list = JSON.parse(localStorage.getItem(NOTIFIED_KEY) || '[]');
+            return list.includes(sessionId)
+                || list.includes('c:' + sessionId)
+                || list.includes('f:' + sessionId);
         } catch (_e) { return false; }
     }
 

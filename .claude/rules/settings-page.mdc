@@ -34,7 +34,7 @@ Three mutually exclusive API key state cards (shown/hidden by `updateApiKeyStatu
 | `userKeyNotice` | `has_user_key` — shows masked key preview + Remove button |
 
 **`userKeyNotice` has two visual states** depending on `use_vertex_ai`:
-- `use_vertex_ai=false`: cyan icon, subtitle `Active: AIza...xyz`, normal card border — key is being used
+- `use_vertex_ai=false`: cyan icon, subtitle `Active: XXXX…xxxx` (first 4 and last 4 of key), normal card border — key is being used
 - `use_vertex_ai=true`: amber icon (`account-icon--amber`), amber card border (`account-card--warning`), subtitle explains key is stored but not used because the server handles AI internally — user can safely remove it
 
 **Backend note:** `server_has_key` in the API response is `True` when either `settings.gemini_api_key` is set **OR** `use_vertex_ai=True`. Both mean the user never needs their own key.
@@ -72,7 +72,7 @@ Three mutually exclusive API key state cards (shown/hidden by `updateApiKeyStatu
   "has_api_key": bool,
   "server_has_key": bool,
   "use_vertex_ai": bool,
-  "key_preview": "AIza...xyz" | null
+  "key_preview": "ABCD...wxyz" | null
 }
 ```
 

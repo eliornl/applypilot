@@ -59,7 +59,7 @@ Session storage key: `'dash_filter_state'` — persists `search`, `status`, `day
 | Function | What it does |
 |---|---|
 | `loadApplications(reset)` | Fetch from API. `reset=true` starts from page 1; `reset=false` appends (Load more). Implements a **single-flight** pattern: overlapping calls while `_isLoading` set `_pendingLoadApplicationsReset` when `reset=true`, then loop `_loadApplicationsSinglePass` until the queue is clear so rapid WS-driven refreshes do not drop a needed reload. |
-| `renderCard(app)` | Returns an HTML string for one application card. All user data passes through `escapeHtml()`. |
+| `renderCard(app)` | Returns an HTML string for one application card. All user data passes through `escapeHtml()`. Company line uses **`isPlaceholderCompanyName()`** so API placeholders (`—`, `-`, `N/A`, …) render as **Unknown**, same as `application-detail.js`. |
 | `renderApplications(reset)` | Renders `_loadedApps` into `#applicationsList`. Always shows the same "No applications yet" empty state when the list is empty — regardless of whether filters are active. |
 | `applyFilters()` | Reads DOM inputs → updates state → calls `loadApplications(true)`. |
 | `clearFilters()` | Resets all state + DOM inputs → calls `loadApplications(true)`. |
@@ -274,7 +274,7 @@ The `#statusFilter` dropdown only exposes **user-tracking stages** — not AI an
 | `agent_update` — session already in `_loadedApps` | Ignore (workflow progress update, no card action needed) |
 | `workflow_complete` / `workflow_error` | Mark notified → reload apps → fire `notifyReady` toast |
 
-**Critical ordering:** Do **not** call `_markAnalysisNotified` before `await loadApplications(true)` here — `notifyReady()` performs the mark internally; pre-marking blocked the completion toast. After reload, resolve title/company from `_loadedApps` (may be empty for failed workflows) and pass **`wsFailureDetail`** from `msg.data.error` when `type === 'workflow_error'`.
+**Critical ordering:** Do **not** call `_markAnalysisNotified` before `await loadApplications(true)` here — `notifyReady()` performs the mark internally; pre-marking blocked the completion toast. After reload, resolve title/company from `_loadedApps` (may be empty for failed workflows) and pass **`wsFailureDetail`** from `msg.data.error` when `type === 'workflow_error'`. **`notifyReady`** stores dedupe keys as **`c:{session_id}`** (completed) vs **`f:{session_id}`** (failed) in `applypilot_notified_analyses` so a failure toast is never suppressed by an unrelated completion for the same session.
 
 ```javascript
 async function handleUserWsMessage(msg) {
@@ -285,7 +285,7 @@ async function handleUserWsMessage(msg) {
     loadStats();
     const appAfter = _loadedApps.find(a => String(a['workflow_session_id'] || a['id']) === sessionId);
     const jobTitle = appAfter ? String(appAfter['job_title'] || 'Job Application') : 'Job Application';
-    const companyName = appAfter ? String(appAfter['company_name'] || 'Company') : 'Company';
+    const companyName = appAfter ? displayCompanyNameOrUnknown(appAfter['company_name']) : 'Unknown';
     let wsFailureDetail = '';
     if (type === 'workflow_error') {
         const d = msg['data'];
@@ -297,16 +297,19 @@ async function handleUserWsMessage(msg) {
 
 ## Toast Deduplication — `notifyReady`
 
-`notifyReady(jobTitle, companyName, detailId, failed, failureDetail)` is guarded at its **entry point** to prevent duplicate toasts regardless of which code path calls it (WS handler, poll fallback, or `syncProcessingApps` "came back" path):
+`notifyReady(jobTitle, companyName, detailId, failed, failureDetail)` is guarded at its **entry point** to prevent duplicate toasts regardless of which code path calls it (WS handler, poll fallback, or `syncProcessingApps` "came back" path). **`_terminalNotifyKey(sessionId, failed)`** returns **`f:${sessionId}`** when `failed` is true and **`c:${sessionId}`** when false; **`_markAnalysisNotified`** / **`_isAnalysisNotified`** take **`(sessionId, failed)`** and use that key. **Legacy:** a bare **`sessionId`** in the JSON array still means “completion already toasted” for backward compatibility.
 
 ```javascript
+function _terminalNotifyKey(sessionId, failed) {
+    return failed ? `f:${sessionId}` : `c:${sessionId}`;
+}
+
 function notifyReady(jobTitle, companyName, detailId, failed, failureDetail) {
-    // Guard: bail immediately if already notified (WS + poll race, or multiple calls)
-    if (detailId && _isAnalysisNotified(detailId)) return;
+    if (detailId && _isAnalysisNotified(detailId, failed)) return;
 
-    _markAnalysisNotified(detailId);  // Mark BEFORE DOM creation so concurrent callers see it
+    _markAnalysisNotified(detailId, failed);  // BEFORE DOM creation
 
-    // ... create and append alert DOM element ...
+    // ... formatWorkflowFailureDetail, duplicate headline, append .alert.alert-warning / .alert-success ...
 }
 ```
 
@@ -316,6 +319,7 @@ function notifyReady(jobTitle, companyName, detailId, failed, failureDetail) {
 
 - **`formatWorkflowFailureDetail(raw)`** — Shortens noisy Gemini quota / rate-limit strings for the toast; strips legacy **`[agent_name]`** prefixes from stored `error_messages`.
 - When **`failed === true`**, the toast has **no** primary/secondary link (failed analyses are not listed; user dismisses with the close control only). Pass **`failureDetail`** from `GET /api/v1/workflow/status/...` `error_messages[0]` or WebSocket `data.error` when available.
+- **Duplicate job (server message contains *already have an application for this job*)** — headline **"Duplicate job — not added"** (instead of **"Analysis failed"**); still **`alert-warning`** like other workflow failures (yellow is not “non-failure,” it is the standard style for terminal workflow errors on the dashboard).
 
 ## Duplicate workflow start — `RES_3002`
 
@@ -325,6 +329,10 @@ When `POST /api/v1/workflow/start` returns **409** with `error_code === 'RES_300
 - **`dashboard.js`** — the job form's `apiCall` path attaches `errorCode` on errors; treat `RES_3002` as a warning, not a red failure banner.
 
 Integration coverage: `tests/test_api/test_workflow.py` (duplicate URL / duplicate manual text).
+
+### Duplicate after analysis starts (not HTTP 409)
+
+If **`POST /workflow/start` did not return `RES_3002`** (e.g. missing URL/title at submit, or fingerprint mismatch), the server can still detect a duplicate **after** the Job Analyzer resolves title+company or when applying the final **`job_applications`** row hits **`uq_user_job_company`**. The run ends as **`workflow_error`** with the same user-facing copy as **`RES_3002`**. The dashboard shows the duplicate headline above; **`applypilot-core.mdc`** documents backend behavior (`utils/application_dedupe.py`, `_update_job_application_with_final_state`).
 
 ## "Application submitted!" — `_submittedToastShownForSession`
 
@@ -341,14 +349,21 @@ const titleHtml = app['job_title']
     : isProcessing
         ? `<div class="skeleton-line skeleton-title" aria-hidden="true"></div>`
         : `<h6 class="application-title">Job Application</h6>`;
-const companyHtml = app['company_name']
+const companyHtml = app['company_name'] && !isPlaceholderCompanyName(app['company_name'])
     ? `<div class="company-name">${escapeHtml(String(app['company_name']))}</div>`
     : isProcessing
         ? `<div class="skeleton-line skeleton-subtitle" aria-hidden="true"></div>`
-        : `<div class="company-name">—</div>`;
+        : `<div class="company-name">Unknown</div>`;
 ```
 
 The skeleton classes (`.skeleton-line`, `.skeleton-title`, `.skeleton-subtitle`) are defined in `app.css` with a shimmer animation. **Never show "Job Application" / "Company" placeholder text for a processing card** — the skeleton communicates loading state without suggesting incorrect data.
+
+## Unknown employer — `isPlaceholderCompanyName()` / `displayCompanyNameOrUnknown()`
+
+`dashboard-home.js` defines **`isPlaceholderCompanyName(raw)`** (keep in sync with the same helper in **`application-detail.js`**) to detect empty values, common text placeholders (`n/a`, `unknown`, …), and **dash-only** strings (ASCII hyphen, en dash, em dash, Unicode minus, optional whitespace).
+
+- **`renderCard`**: show a real `.company-name` line only when `app['company_name']` is present **and** `!isPlaceholderCompanyName(...)`; otherwise use the skeleton (while `processing`) or **`Unknown`**.
+- **`displayCompanyNameOrUnknown(raw)`**: use for **`notifyReady`**, **`syncProcessingApps`** polling maps, and **`handleUserWsMessage`** so completion toasts say `… at Unknown`, not `… at —`, when the API stored a punctuation placeholder.
 
 ---
 
@@ -361,7 +376,7 @@ The skeleton classes (`.skeleton-line`, `.skeleton-title`, `.skeleton-subtitle`)
 |---|---|
 | `applypilot_tracked_sessions` | `[{sessionId}]` — sessions to watch; added by `dashboard-new-application.js` on submit |
 | `applypilot_badge` | `'1'` when a completed analysis hasn't been toasted yet on the dashboard |
-| `applypilot_notified_analyses` | Managed by `dashboard-home.js`; read-only here — sessions already toasted are skipped |
+| `applypilot_notified_analyses` | JSON array of keys: **`c:{sessionId}`** / **`f:{sessionId}`** (plus legacy bare `sessionId` = completion only). Managed by `dashboard-home.js`; **`navbar-notifications.js`** treats bare, `c:`, and `f:` as “already notified” for the badge |
 
 ### Behaviour
 - **On subpages**: opens the same `/api/v1/ws/user` WebSocket as `dashboard-home.js`; on `workflow_complete` / `workflow_error` sets `applypilot_badge = '1'` and shows the dot
@@ -413,8 +428,10 @@ CSS for `.nav-badge-dot` lives in `app.css` (not a page `<style>` block). Always
 15. **Clicking an active tracking button must toggle it off** (reset to `completed`), not re-save the same status — the success toast must say `"Stage cleared."` not `"Status updated to Completed."`
 16. **`window.clearNavBadge()` must be called in `dashboard-home.js` DOMContentLoaded** before showing toasts — it clears the navbar dot that was set on subpages while the user was away from the dashboard
 17. **`handleUserWsMessage` must handle `agent_update` for new sessions** — if `type === 'agent_update'` and the session is NOT in `_loadedApps`, call `loadApplications(true)` immediately so extension-submitted jobs appear on the dashboard without a manual refresh
-18. **`handleUserWsMessage` must not pre-call `_markAnalysisNotified` before `await loadApplications(true)` on `workflow_complete` / `workflow_error`** — that blocked `notifyReady` from ever showing. **`notifyReady()`** performs `_markAnalysisNotified` at the start (after its `_isAnalysisNotified` guard); pass **`failureDetail`** for errors
-19. **`notifyReady` must guard at entry with `if (_isAnalysisNotified(detailId)) return`** — the WS handler and the poll fallback can race; without the guard two identical toasts appear for the same analysis
+18. **`handleUserWsMessage` must not pre-call `_markAnalysisNotified` before `await loadApplications(true)` on `workflow_complete` / `workflow_error`** — that blocked `notifyReady` from ever showing. **`notifyReady()`** performs `_markAnalysisNotified(detailId, failed)` at the start (after its `_isAnalysisNotified(detailId, failed)` guard); pass **`failureDetail`** for errors
+19. **`notifyReady` must guard at entry with `if (_isAnalysisNotified(detailId, failed)) return`** — the WS handler and the poll fallback can race; **`failed`** must participate in the key (`c:` vs `f:`) so a completion never suppresses a failure toast for the same `session_id`
 20. **Processing cards must show skeleton shimmer, not placeholder text** — render `.skeleton-line.skeleton-title` / `.skeleton-line.skeleton-subtitle` when `status === 'processing'` and `job_title` / `company_name` are empty; never show `"Job Application"` / `"Company"` for a card that is still being analyzed
 21. **`RES_3002` from `/workflow/start` must use a warning-style message** — duplicate job is not a server fault; mirror handling in `dashboard-new-application.js` and `dashboard.js`
 22. **`_submittedToastShownForSession` must dedupe "Application submitted!"** — one toast per `session_id` for the `agent_update` + new-card path; do not stack with the sessionStorage redirect toast
+23. **Placeholder `company_name` values must not render as punctuation** — `—` / `-` / `N/A` from the LLM or DB are truthy strings; always normalize through **`isPlaceholderCompanyName()`** + **`displayCompanyNameOrUnknown()`** so users see **Unknown** (see **Unknown employer** section above)
+24. **`syncProcessingApps` must pass `failed` into `_isAnalysisNotified` / `notifyReady`** — polling uses the same `c:` / `f:` keys as the WebSocket path; never call `_isAnalysisNotified(sessionId)` without the second argument on a terminal completion/failure path

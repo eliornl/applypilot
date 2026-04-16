@@ -1,21 +1,16 @@
 """
-Deduplicate job application rows when the same role+company appears more than once
-(e.g. extension submit + dashboard paste with slightly different raw text).
+Detect duplicate job applications by normalized job title + company name.
 """
 
 from __future__ import annotations
 
-import logging
 import uuid
-from datetime import datetime, timezone
 from typing import Optional, Tuple
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.database import JobApplication
-
-logger = logging.getLogger(__name__)
+from models.database import JobApplication, WorkflowSession
 
 
 def normalize_title_company_key(
@@ -31,69 +26,57 @@ def normalize_title_company_key(
     return (t, c)
 
 
-async def soft_delete_older_duplicates_for_same_job(
+def _effective_title_company(
+    application: JobApplication,
+    workflow_session: Optional[WorkflowSession],
+) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Match ``api.applications._format_application_response`` fallbacks: prefer
+    ``job_applications`` columns, then ``workflow_sessions.job_analysis``.
+    """
+    analysis = (workflow_session.job_analysis or {}) if workflow_session else {}
+    title = application.job_title or analysis.get("job_title")
+    company = application.company_name or analysis.get("company_name")
+    if not isinstance(title, str):
+        title = None
+    if not isinstance(company, str):
+        company = None
+    return title, company
+
+
+async def find_conflicting_job_application(
     db: AsyncSession,
     user_id: uuid.UUID,
+    session_id: str,
     job_title: Optional[str],
     company_name: Optional[str],
-    keep_session_id: str,
-) -> int:
+) -> Optional[JobApplication]:
     """
-    Soft-delete older duplicate applications for the same normalized (title, company).
+    Return another non-deleted application for the same user with the same normalized
+    title and company, if one exists (excluding ``session_id``).
 
-    Keeps the row for ``keep_session_id`` (the workflow that just received analyzer
-    output). Removes strictly *older* ``created_at`` rows so the latest submission
-    remains (extension vs paste).
-
-    Returns:
-        Number of rows soft-deleted.
+    Uses the same effective title/company as the dashboard (``job_applications`` first,
+    then ``job_analysis`` on the linked workflow session) so rows that only have
+    structured analyzer output in JSON still dedupe correctly.
     """
     key = normalize_title_company_key(job_title, company_name)
     if key is None:
-        return 0
-
+        return None
     nt, nc = key
 
-    res_cur = await db.execute(
-        select(JobApplication).where(
+    stmt = (
+        select(JobApplication, WorkflowSession)
+        .join(WorkflowSession, WorkflowSession.session_id == JobApplication.session_id)
+        .where(
             JobApplication.user_id == user_id,
             JobApplication.deleted_at.is_(None),
-            JobApplication.session_id == keep_session_id,
+            JobApplication.session_id != session_id,
         )
     )
-    current = res_cur.scalar_one_or_none()
-    if not current or not current.created_at:
-        return 0
-
-    res_others = await db.execute(
-        select(JobApplication).where(
-            JobApplication.user_id == user_id,
-            JobApplication.deleted_at.is_(None),
-            JobApplication.session_id != keep_session_id,
-            func.lower(func.btrim(JobApplication.job_title)) == nt,
-            func.lower(func.btrim(JobApplication.company_name)) == nc,
-        )
-    )
-    others = res_others.scalars().all()
-
-    now = datetime.now(timezone.utc)
-    deleted = 0
-    for row in others:
-        if row.created_at and row.created_at < current.created_at:
-            await db.execute(
-                update(JobApplication)
-                .where(JobApplication.id == row.id)
-                .values(deleted_at=now, updated_at=now)
-            )
-            deleted += 1
-
-    if deleted:
-        logger.info(
-            "Soft-deleted %s older duplicate job application(s) for user %s "
-            "(kept session_id=%s)",
-            deleted,
-            user_id,
-            keep_session_id,
-        )
-
-    return deleted
+    result = await db.execute(stmt)
+    for app, ws in result.all():
+        eff_title, eff_company = _effective_title_company(app, ws)
+        other = normalize_title_company_key(eff_title, eff_company)
+        if other == (nt, nc):
+            return app
+    return None

@@ -130,18 +130,17 @@ function showToast(message, type = 'info') {
 
 If `POST .../workflow/start` returns **409** with `error_code === 'RES_3002'`, the user already has an application for that job. **`popup.js`** / **`service-worker.js`** must show an **info** (or warning-style) message via `showToast` / the same UX path — not a generic network error. Details: `applypilot-core.mdc` (`RES_3002`).
 
-## Content Extraction Priority
-```javascript
-const contentSelectors = [
-    'article.jobs-description__container',  // LinkedIn
-    '.jobs-description__content',
-    '#jobDescriptionText',                  // Indeed
-    '[class*="job-description"]',           // generic
-    '[data-test*="description"]',
-    'main article',
-    'main',                                 // fallback
-];
-```
+## Content extraction (`extractPageContent` in `popup.js`)
+
+The popup injects **`extractPageContent`** via `chrome.scripting.executeScript` (not a static per-site selector list). Philosophy: clone a **single root**, strip chrome (scripts, nav, tracking attrs), then send text to the backend.
+
+- **Default:** clone `document.body` (minus removed nodes), `innerText` → `job_text`.
+- **Split-view job search UIs** (list column + detail pane): if the hostname matches **`\*.linkedin.(com|cn)`** and the path matches **`/jobs`**, prefer a **detail-pane root** so the first list row does not dominate the string:
+  - Try `.jobs-search__job-details-body`, then `.jobs-details__main-content`.
+  - Else prefer the wrapper around the largest `article.jobs-description__container`.
+- If no root passes a minimum text-length check, fall back to **`document.body`**. Class names are **heuristic** — third-party DOMs change; keep fallbacks.
+
+**Context menu** (`service-worker.js`): non-selection extraction uses the **same root-selection logic** as the popup; `h1` for notification title is taken from the **cloned root**, not `document.querySelector('h1')` first globally.
 
 ## Submitting to Backend
 

@@ -197,6 +197,9 @@ client = google_genai.Client(vertexai=True, project=project, location=location)
 # BYOK / Google AI Studio
 client = google_genai.Client(api_key=effective_api_key)
 
+# User-supplied and env keys: loose shape check only — `utils/gemini_api_key_format.py`
+# (Google rotates key formats; do not assume an `AIza` prefix).
+
 # Both use the same generate_content / models.list / models.get API
 response = client.models.generate_content(model=model_to_use, contents=prompt, config=config)
 ```

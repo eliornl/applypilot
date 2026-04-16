@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### New Application — Word (.docx) job file upload
+
+The **Upload File** tab on `/dashboard/new-application` accepts **`.docx`** in addition to **`.pdf`** and **`.txt`** (still **5 MB** max). The API (`POST /api/v1/workflow/start`, `job_file`) validates ZIP magic bytes for DOCX and extracts text with `extract_text_from_docx()` (`docx2txt`), same approach as resume uploads. Legacy binary **`.doc`** (Word 97–2003) is not supported.
+
+### Changed
+
+#### BYOK / `GEMINI_API_KEY` — relaxed format validation
+
+Google rotates Gemini API key shapes (not only the legacy `AIza…` prefix). The app uses `utils/gemini_api_key_format.validate_gemini_api_key()` for optional server `GEMINI_API_KEY`, user keys in Settings, and profile setup no longer enforces an `AIza` prefix in the browser. Documentation: `.claude/rules/settings-and-env.mdc`.
+
+#### Dashboard & application detail — unknown employer display
+
+When the job analyzer omits an employer or returns placeholder text (for example `—`, `-`, `N/A`, or `unknown`), **`dashboard-home.js`** and **`application-detail.js`** treat those values as missing via **`isPlaceholderCompanyName()`** and show the label **Unknown** on cards and in the application header. Completion toasts and polling metadata use **`displayCompanyNameOrUnknown()`** so the same rules apply. The Company tab uses **About this opportunity** when there is no real employer name. **`agents/company_research.py`** — **`_has_usable_company_name()`** — rejects dash-only strings so backend “unnamed posting” research aligns with the UI.
+
 ### Fixed
 
 #### Profile setup — Years of Experience can be zero

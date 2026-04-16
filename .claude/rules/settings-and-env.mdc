@@ -32,8 +32,9 @@ DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/dbname
 # Redis
 REDIS_URL=redis://localhost:6379/0
 
-# LLM — Google AI Studio (BYOK default, recommended for self-hosting)
-GEMINI_API_KEY=AIza...
+# LLM — Google Gemini / AI Studio (BYOK default, recommended for self-hosting)
+# Optional server-side key; Google rotates key formats (not only the legacy AIza… shape).
+GEMINI_API_KEY=<your Gemini API key>
 GEMINI_MODEL=gemini-3-flash-preview
 
 # LLM — Vertex AI (optional, server-admin only)
@@ -89,18 +90,20 @@ from config.settings import clear_settings_cache
 clear_settings_cache()
 ```
 
-## BYOK — Google AI Studio Keys Only
+## BYOK — Google Gemini / AI Studio keys
 
-**Users can only bring Google AI Studio API keys** (keys starting with `AIza`). There is no user-facing way to use Vertex AI or a Google Cloud service account — `USE_VERTEX_AI` is a server-admin setting only. Do not suggest or document a "use your own Google Cloud project" path for end users.
+**Users bring their own Google Gemini / Google AI Studio API keys** for the `google-genai` client. There is no user-facing way to use Vertex AI or a Google Cloud service account — `USE_VERTEX_AI` is a server-admin setting only. Do not suggest or document a "use your own Google Cloud project" path for end users.
 
-The `GEMINI_API_KEY` validator in `config/settings.py` enforces this at the server level. The same restriction applies to user-submitted keys stored in `UserApiKey` — the validate endpoint rejects any key that does not start with `AIza`.
+**Format validation** is intentionally loose: `utils/gemini_api_key_format.validate_gemini_api_key()` (length bounds, single line, no whitespace, URL-safe / base64-style characters). The same helper validates optional `GEMINI_API_KEY` in `config/settings.py` and user keys in `api/profile.py`. Google may issue new key shapes over time; real validity is determined when the API is called.
+
+Do **not** reintroduce an `AIza`-only or overly strict allowlist without a concrete breakage report — it will reject valid keys again.
 
 ## Startup Validators (enforced at settings load)
 `config/settings.py` uses `@field_validator` to enforce these at startup — a bad value raises `ValueError` before the app starts:
 
 | Setting | Validation |
 |---------|-----------|
-| `GEMINI_API_KEY` | Must start with `AIza` |
+| `GEMINI_API_KEY` | If set, must pass `validate_gemini_api_key()` (see `utils/gemini_api_key_format.py`) |
 | `ENCRYPTION_KEY` | Must be a valid Fernet key (`Fernet(v)` check) |
 | `JWT_SECRET` | Min 32 chars, 3 character types, no weak patterns |
 | `DATABASE_URL` | Must start with `postgresql://` or `postgresql+asyncpg://` |

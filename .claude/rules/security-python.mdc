@@ -17,9 +17,21 @@ clean = sanitize_llm_output(llm_response)  # recursive sanitize for LLM dicts
 Always call `sanitize_llm_output()` before returning agent results to the client.
 
 ## File Upload MIME Validation
-Never trust the file extension — always check magic bytes:
+Never trust the file extension — always check magic bytes.
+
+**Two main upload paths** (do not mix limits):
+
+| Path | Where | Max size | Magic / constants |
+|------|--------|----------|-------------------|
+| **Profile resume** | `POST /api/v1/profile/parse-resume`, resume upload in profile setup / settings | **10 MB** | `_RESUME_MAGIC` in `api/profile.py` |
+| **Workflow job description** | `POST /api/v1/workflow/start` (`job_file`), New Application → Upload File | **5 MB** | `_JOB_FILE_MAGIC` in `api/workflow.py` |
+
+Both allow **`.pdf`**, **`.txt`**, **`.docx`** (ZIP signature for DOCX). Workflow job uploads do **not** support legacy binary **`.doc`**.
+
+Use **`APIError` / `validation_error()`** from `utils/error_responses.py` in app code — never bare `HTTPException` (the snippet below illustrates the magic-bytes pattern only):
+
 ```python
-MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB — profile resume; workflow `job_file` uses 5 MB in api/workflow.py
 _FILE_MAGIC = { "pdf": b"%PDF", "docx": b"PK\x03\x04", "txt": None }
 
 content = await upload_file.read()

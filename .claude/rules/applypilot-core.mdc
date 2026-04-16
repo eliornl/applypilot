@@ -51,11 +51,28 @@ The frontend (`dashboard-new-application.js`) checks `error_code === 'CFG_6001'`
 
 1. **Canonical job URL** — compared after normalizing scheme/host/path/query (see `_canonical_job_url` in `api/workflow.py`).
 2. **Normalized title + company** — both must be non-empty on the request and on the existing row; compared case-insensitively after trim/collapse whitespace.
-3. **Content fingerprint** — SHA-256 of normalized job text, stored under `WorkflowSession.job_input_data["content_fingerprint"]`. Only computed when normalized text length is **≥ 80** characters (short paste-ins are not fingerprinted, avoiding hash collisions on tiny strings).
+3. **Content fingerprint** — SHA-256 of normalized job text, stored under `WorkflowSession.job_input_data["content_fingerprint"]`. Normalization in `_fingerprint_job_content` (`api/workflow.py`) uses Unicode **NFKC**, strips zero-width characters, then collapses whitespace so extension-extracted text and manual paste of the same posting hash the same. Only computed when normalized text length is **≥ 80** characters (constant `_MIN_JOB_CONTENT_FINGERPRINT_CHARS`; short paste-ins are not fingerprinted).
 
 `details` includes `application_id` and, when present, `session_id` (`DUPLICATE_APPLICATION`). The handler **releases** the Redis `workflow_creating:{user_id}` lock before raising so the client is not stuck behind a stale lock.
 
 **Frontend:** `dashboard-new-application.js`, `dashboard.js` (apiCall path), `extension/popup/popup.js`, and `extension/background/service-worker.js` should treat `RES_3002` as a **warning-style** user message (not a hard failure).
+
+### Workflow job file upload (`POST /api/v1/workflow/start` — `job_file`)
+
+Multipart uploads for the job description support **`.pdf`**, **`.txt`**, and **`.docx`**. Limits and validation live in `api/workflow.py`:
+
+- **Max size:** **5 MB** (`MAX_FILE_SIZE`) — stricter than profile resume upload (10 MB).
+- **Magic bytes (`_JOB_FILE_MAGIC`):** `.pdf` → `%PDF`; `.docx` → `PK\x03\x04` (Office Open XML / ZIP); `.txt` → no fixed signature (UTF-8 decode validated).
+- **Extraction:** PDF → `extract_text_from_pdf`; TXT → UTF-8 decode; DOCX → `extract_text_from_docx()` (`docx2txt`, from `utils/resume_parser`).
+- **Not supported:** legacy binary **`.doc`** (Word 97–2003) — users should save as `.docx` or PDF, or paste text.
+
+### Duplicate job after start (workflow run — not `RES_3002`)
+
+Start-time dedupe can miss when **`detected_title` / `detected_company` are absent** (e.g. extension sends only `job_text`) or fingerprints differ slightly. Two additional layers enforce the same user-facing copy as `RES_3002` (*You already have an application for this job…*):
+
+1. **After Job Analyzer** — In `workflows/job_application_workflow.py`, `_maybe_fail_duplicate_job_after_analyzer()` runs during `_save_workflow_state` when the analyzer has completed. It calls `find_conflicting_job_application()` in `utils/application_dedupe.py`, which compares **effective** title+company the same way the list API does: `job_applications.job_title` / `company_name` with fallback to `workflow_sessions.job_analysis` when columns are empty. If another non-deleted row matches (excluding the current session), the workflow **fails** at the analyzer step (`job_analyzer` → failed, `broadcast_workflow_error`). Use **`logger.info`**, not `structured_logger.info` — `StructuredLogger` has no `.info` method.
+
+2. **Final `job_applications` update** — Active rows are unique per user on **`(user_id, job_title, company_name)`** (`uq_user_job_company`, partial index where `deleted_at IS NULL`). In `api/workflow.py`, `_update_job_application_with_final_state()` applies the completed title/company after `_update_workflow_session_with_state()` commits. If that `UPDATE` raises **`IntegrityError`** for a **successful** workflow (duplicate triple), **do not** retry without title/company — that left duplicate cards visible via `job_analysis` fallbacks. Instead: **`_revert_workflow_session_after_duplicate_job_constraint()`** (failed + strip JSONB + same message), **`_soft_delete_job_application_for_failed_workflow()`**, **`broadcast_workflow_error`**, return **`True`** so the background task does not log a misleading “completed successfully”.
 
 ## Custom JSON Response
 The app uses a `CustomJSONResponse` (defined in `main.py`) as `default_response_class`. It calls `serialize_object_for_json()` to handle `uuid.UUID` and `datetime` objects automatically. Do not add manual `.isoformat()` or `str(uuid)` calls in response dicts — they will be serialized correctly.

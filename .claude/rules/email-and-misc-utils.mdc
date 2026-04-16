@@ -149,18 +149,23 @@ parsed = await parse_resume_from_file(file_content: bytes, filename: str)
 # Returns: full_name, email, phone, city, state, country, professional_title,
 #          years_experience, summary, work_experience, skills, education, parsing_confidence
 ```
-- PDF extraction: PyPDF2
-- DOCX extraction: python-docx
+- PDF extraction: **PyMuPDF** (`fitz`)
+- DOCX extraction: **docx2txt** (also used when extracting job text from DOCX in `api/workflow.py`)
 - API endpoint: `POST /api/v1/profile/parse-resume` (multipart `resume` field)
 - Profile setup wizard auto-fills form with `autoFillProfile()` JS function
 
+## Workflow job file (New Application)
+
+`POST /api/v1/workflow/start` accepts optional multipart **`job_file`** for the job description. Allowed extensions: **`.pdf`**, **`.txt`**, **`.docx`**; max **5 MB** (`api/workflow.py` — stricter than resume upload). Legacy **`.doc`** is not supported. See **`applypilot-core.mdc`** (`_JOB_FILE_MAGIC`, `_job_text_from_uploaded_file`).
+
 ## BYOK Encryption
 ```python
-from utils.encryption import encrypt_api_key, decrypt_api_key, validate_gemini_api_key
+from utils.encryption import encrypt_api_key, decrypt_api_key
+from utils.gemini_api_key_format import validate_gemini_api_key
 
 encrypted = encrypt_api_key(plaintext_key)    # before DB storage
 plaintext = decrypt_api_key(encrypted_key)    # before use in agents
-is_valid  = validate_gemini_api_key(api_key)  # validate format before saving
+is_valid  = validate_gemini_api_key(api_key)  # loose shape check before saving (see module docstring)
 ```
 Stored in `users.gemini_api_key_encrypted` (TEXT).
 

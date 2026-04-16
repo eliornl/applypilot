@@ -14,6 +14,7 @@ Endpoints:
   GET    /api/v1/profile/preferences
   PATCH  /api/v1/profile/preferences
   GET    /api/v1/profile/export
+  POST   /api/v1/profile/parse-resume (format validation; LLM path not covered here)
 """
 
 import pytest
@@ -284,3 +285,30 @@ class TestProfileExport:
     async def test_returns_200_or_204_when_authenticated(self, authed_client_with_user):
         resp = await authed_client_with_user.get(f"{BASE}/export")
         assert resp.status_code in (200, 204)
+
+
+# ---------------------------------------------------------------------------
+# POST /profile/parse-resume — format validation (no LLM)
+# ---------------------------------------------------------------------------
+
+
+class TestParseResumeFormatValidation:
+    """POST /api/v1/profile/parse-resume rejects legacy .doc before API key check."""
+
+    @pytest.mark.asyncio
+    async def test_legacy_doc_extension_rejected(self, authed_client_with_user):
+        files = {"resume": ("resume.doc", b"\xd0\xcf\x11\xe0fake", "application/msword")}
+        resp = await authed_client_with_user.post(f"{BASE}/parse-resume", files=files)
+        assert resp.status_code in (400, 422)
+        data = resp.json()
+        msg = data.get("message", "").lower()
+        assert "doc" in msg and "not supported" in msg
+
+    @pytest.mark.asyncio
+    async def test_docx_with_ole_body_rejected(self, authed_client_with_user):
+        ole_doc = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"x" * 64
+        files = {"resume": ("resume.docx", ole_doc, "application/vnd...")}
+        resp = await authed_client_with_user.post(f"{BASE}/parse-resume", files=files)
+        assert resp.status_code in (400, 422)
+        msg = resp.json().get("message", "").lower()
+        assert "legacy" in msg and "not supported" in msg

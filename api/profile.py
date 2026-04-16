@@ -112,6 +112,13 @@ _RESUME_MAGIC: Dict[str, Optional[bytes]] = {
     "docx": b"PK\x03\x04",  # DOCX/XLSX/PPTX are ZIP-based
     "txt":  None,            # UTF-8 text has no fixed signature
 }
+# Legacy Word 97–2003 binary (.doc) — OLE compound document; not supported (use .docx or PDF).
+_MS_WORD_DOC_MAGIC_PREFIX: bytes = b"\xd0\xcf\x11\xe0"
+
+_LEGACY_DOC_USER_MSG: str = (
+    "Legacy Word (.doc) is not supported. In Word or Google Docs, use Save As → "
+    "Word (.docx) or PDF, then upload that file."
+)
 
 # Location validation
 LOCATION_PATTERN = r"^[a-zA-Z0-9\s\-\.\,\']+$"
@@ -652,24 +659,13 @@ async def parse_resume_endpoint(
         if not is_allowed:
             raise rate_limit_error("Too many resume parse attempts. Please try again later.", retry_after=3600)
 
-        # Resolve the user's BYOK key (if any) so the LLM call uses it.
-        user_api_key = None
-        user_result = await db.execute(select(User).where(User.id == user_id))
-        user_record = user_result.scalar_one_or_none()
-        if user_record and user_record.gemini_api_key_encrypted:
-            try:
-                user_api_key = decrypt_api_key(user_record.gemini_api_key_encrypted)
-            except Exception as e:
-                logger.warning(f"Failed to decrypt user API key for resume parse: {e}")
-
-        server_has_key = bool(getattr(settings, 'gemini_api_key', None)) or settings.use_vertex_ai
-        if not user_api_key and not server_has_key:
-            raise no_api_key_error()
-
+        # Validate file shape before API key — users should see format errors even when BYOK/server key is missing.
         if not resume.filename:
             raise validation_error("Filename is required")
 
         file_extension = resume.filename.lower().split(".")[-1]
+        if file_extension == "doc":
+            raise validation_error(_LEGACY_DOC_USER_MSG)
         if file_extension not in SUPPORTED_EXTENSIONS:
             raise validation_error(f"Unsupported file format. Supported formats: {', '.join(SUPPORTED_EXTENSIONS)}")
 
@@ -684,12 +680,31 @@ async def parse_resume_endpoint(
         # Validate actual file content matches the declared extension (prevents spoofing)
         expected_magic = _RESUME_MAGIC.get(file_extension)
         if expected_magic is not None and not content.startswith(expected_magic):
-            raise validation_error("File content does not match the declared file type.")
+            if content.startswith(_MS_WORD_DOC_MAGIC_PREFIX):
+                raise validation_error(_LEGACY_DOC_USER_MSG)
+            raise validation_error(
+                "File content does not match the declared type (e.g. renamed file). "
+                "Use a real PDF, Word .docx, or UTF-8 text file."
+            )
         if file_extension == "txt":
             try:
                 content.decode("utf-8")
             except UnicodeDecodeError:
                 raise validation_error("TXT files must be UTF-8 encoded.")
+
+        # Resolve the user's BYOK key (if any) so the LLM call uses it.
+        user_api_key = None
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        user_record = user_result.scalar_one_or_none()
+        if user_record and user_record.gemini_api_key_encrypted:
+            try:
+                user_api_key = decrypt_api_key(user_record.gemini_api_key_encrypted)
+            except Exception as e:
+                logger.warning(f"Failed to decrypt user API key for resume parse: {e}")
+
+        server_has_key = bool(getattr(settings, 'gemini_api_key', None)) or settings.use_vertex_ai
+        if not user_api_key and not server_has_key:
+            raise no_api_key_error()
 
         logger.info(
             f"Parsing resume for user {current_user.get('id')}: "

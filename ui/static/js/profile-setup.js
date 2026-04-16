@@ -735,8 +735,14 @@
         const allowedExtensions = [".pdf", ".docx", ".txt"];
         const fileExtension = "." + file.name.split(".").pop().toLowerCase();
 
+        if (fileExtension === ".doc") {
+            showError(
+                "Older Word (.doc) files are not supported. Save as .docx or PDF, then upload again.",
+            );
+            return;
+        }
         if (!allowedExtensions.includes(fileExtension)) {
-            showError("Please upload a PDF, DOCX, or TXT file.");
+            showError("Please upload a PDF, Word (.docx), or TXT file.");
             return;
         }
 

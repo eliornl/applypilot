@@ -94,7 +94,39 @@
             .replace(/&gt;/g, '>');
         return decoded
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+            .replace(/"/g, '&quot;')            .replace(/'/g, '&#039;');
+    }
+
+    /**
+     * True when the applications list has no real employer string (LLM may store "—" or "-").
+     * Keep in sync with `isPlaceholderCompanyName` in `application-detail.js`.
+     * @param {unknown} raw
+     * @returns {boolean}
+     */
+    function isPlaceholderCompanyName(raw) {
+        if (raw == null) return true;
+        const s = String(raw).trim();
+        if (!s) return true;
+        const lower = s.toLowerCase();
+        /** @type {Set<string>} */
+        const literals = new Set([
+            '-', '–', '—', '−',
+            'n/a', 'na', 'unknown', 'null', 'none',
+            'not specified', 'not stated', 'tbd', 'confidential', 'undisclosed',
+            '...',
+        ]);
+        if (literals.has(lower)) return true;
+        if (/^[\s\-–—−]+$/u.test(s)) return true;
+        return false;
+    }
+
+    /**
+     * @param {unknown} raw
+     * @returns {string}
+     */
+    function displayCompanyNameOrUnknown(raw) {
+        if (isPlaceholderCompanyName(raw)) return 'Unknown';
+        return String(raw).trim();
     }
 
     /**
@@ -376,11 +408,11 @@
             : isProcessing
                 ? `<div class="skeleton-line skeleton-title" aria-hidden="true"></div>`
                 : `<h6 class="application-title">Job Application</h6>`;
-        const companyHtml = app['company_name']
+        const companyHtml = app['company_name'] && !isPlaceholderCompanyName(app['company_name'])
             ? `<div class="company-name">${escapeHtml(String(app['company_name']))}</div>`
             : isProcessing
                 ? `<div class="skeleton-line skeleton-subtitle" aria-hidden="true"></div>`
-                : `<div class="company-name">—</div>`;
+                : `<div class="company-name">Unknown</div>`;
 
         return `
 <div class="application-card border-status-${escapeHtml(status)} cursor-pointer" data-card-id="${safeDetail}" role="listitem">
@@ -624,14 +656,14 @@
                     _processingApps.set(id, {
                         detailId:    sessionId,
                         jobTitle:    String(app['job_title']    || 'Job Application'),
-                        companyName: String(app['company_name'] || 'Company'),
+                        companyName: displayCompanyNameOrUnknown(app['company_name']),
                     });
                 }
-            } else if (doneStatuses.includes(status) && sessionId && !_isAnalysisNotified(sessionId)) {
+            } else if (doneStatuses.includes(status) && sessionId && !_isAnalysisNotified(sessionId, false)) {
                 // User came back after navigating away — analysis finished without them seeing a notification
                 notifyReady(
                     String(app['job_title']    || 'Job Application'),
-                    String(app['company_name'] || 'Company'),
+                    displayCompanyNameOrUnknown(app['company_name']),
                     sessionId,
                     false
                 );
@@ -677,7 +709,7 @@
 
         for (const app of finished) {
             // Skip if the WebSocket handler already fired this notification.
-            if (!_isAnalysisNotified(app.detailId)) {
+            if (!_isAnalysisNotified(app.detailId, app.failed)) {
                 notifyReady(app.jobTitle, app.companyName, app.detailId, app.failed, app.failureDetail);
             }
         }
@@ -694,6 +726,17 @@
     }
 
     /**
+     * Dedupe WS vs poll for the *same* outcome. Legacy entries used bare `sessionId`
+     * for completion only — failures use `f:${sessionId}` so a duplicate-job error
+     * is never swallowed by an unrelated completion key.
+     * @param {string} sessionId
+     * @param {boolean} failed
+     */
+    function _terminalNotifyKey(sessionId, failed) {
+        return failed ? `f:${sessionId}` : `c:${sessionId}`;
+    }
+
+    /**
      * Shows a persistent completion toast. Success includes "View Results"; failures are message + close only (no link).
      * @param {string} jobTitle
      * @param {string} companyName
@@ -702,15 +745,15 @@
      * @param {string} [failureDetail] — server error (WS data.error or status error_messages[0])
      */
     function notifyReady(jobTitle, companyName, detailId, failed, failureDetail) {
-        // Guard: if already notified (e.g. WS + poll race), bail out immediately.
-        if (detailId && _isAnalysisNotified(detailId)) return;
+        // Guard: if already notified for this outcome (e.g. WS + poll race), bail out.
+        if (detailId && _isAnalysisNotified(detailId, failed)) return;
 
         const container = document.getElementById('alertContainer');
         if (!container) return;
 
         // Mark BEFORE creating the DOM element so any concurrent call that
         // checks _isAnalysisNotified sees it as already handled.
-        _markAnalysisNotified(detailId);
+        _markAnalysisNotified(detailId, failed);
 
         // Dismiss any lingering "Application submitted" toast
         container.querySelectorAll('.alert').forEach(el => {
@@ -725,18 +768,27 @@
         );
         const shortDetail = detail.length > 220 ? `${detail.slice(0, 217)}…` : detail;
 
+        const isDuplicateJob =
+            failed && /already have an application for this job/i.test(shortDetail);
+
         let subline = '';
         if (!failed) {
             subline = `${escapeHtml(jobTitle)} at ${escapeHtml(companyName)}`;
         } else if (shortDetail) {
             subline = escapeHtml(shortDetail);
-        } else if (jobTitle === 'Job Application' && companyName === 'Company') {
+        } else if (jobTitle === 'Job Application' && (companyName === 'Company' || companyName === 'Unknown')) {
             subline = escapeHtml(
                 'No job title or company was extracted. Try again with more detail, or check AI Setup.'
             );
         } else {
             subline = `${escapeHtml(jobTitle)} at ${escapeHtml(companyName)}`;
         }
+
+        const headline = !failed
+            ? 'Analysis ready!'
+            : isDuplicateJob
+                ? 'Duplicate job — not added'
+                : 'Analysis failed';
 
         // Failed / incomplete: no navigation — analyses that errored are not listed.
         const detailBtn = failed
@@ -750,7 +802,7 @@
             <div class="d-flex align-items-center gap-2 w-100">
                 <i class="fas ${failed ? 'fa-exclamation-circle' : 'fa-check-circle'} flex-shrink-0" aria-hidden="true"></i>
                 <div class="flex-grow-1">
-                    <strong>${failed ? 'Analysis failed' : 'Analysis ready!'}</strong>
+                    <strong>${headline}</strong>
                     <div class="notify-ready-sub">${subline}</div>
                 </div>
                 ${detailBtn}
@@ -759,26 +811,38 @@
         container.appendChild(div);
     }
 
-    /** @param {string} sessionId */
-    function _markAnalysisNotified(sessionId) {
+    /**
+     * @param {string} sessionId
+     * @param {boolean} failed
+     */
+    function _markAnalysisNotified(sessionId, failed) {
         if (!sessionId) return;
         try {
             const raw = localStorage.getItem('applypilot_notified_analyses') || '[]';
             const set = /** @type {string[]} */ (JSON.parse(raw));
-            if (!set.includes(sessionId)) {
-                set.push(sessionId);
-                // Keep only last 50 to avoid unbounded growth
-                if (set.length > 50) set.splice(0, set.length - 50);
+            const key = _terminalNotifyKey(sessionId, failed);
+            if (!set.includes(key)) {
+                set.push(key);
+                // Keep only last 80 entries (c: + f: keys) to avoid unbounded growth
+                if (set.length > 80) set.splice(0, set.length - 80);
                 localStorage.setItem('applypilot_notified_analyses', JSON.stringify(set));
             }
         } catch (_e) {}
     }
 
-    /** @param {string} sessionId */
-    function _isAnalysisNotified(sessionId) {
+    /**
+     * @param {string} sessionId
+     * @param {boolean} failed
+     */
+    function _isAnalysisNotified(sessionId, failed) {
         try {
             const raw = localStorage.getItem('applypilot_notified_analyses') || '[]';
-            return (/** @type {string[]} */ (JSON.parse(raw))).includes(sessionId);
+            const set = /** @type {string[]} */ (JSON.parse(raw));
+            const key = _terminalNotifyKey(sessionId, failed);
+            if (set.includes(key)) return true;
+            // Legacy: bare id meant "completion" toast already shown
+            if (!failed && set.includes(sessionId)) return true;
+            return false;
         } catch (_e) { return false; }
     }
 
@@ -848,7 +912,7 @@
 
         const appAfter    = _loadedApps.find(a => String(a['workflow_session_id'] || a['id']) === sessionId);
         const jobTitle    = appAfter ? String(appAfter['job_title']    || 'Job Application') : 'Job Application';
-        const companyName = appAfter ? String(appAfter['company_name'] || 'Company')         : 'Company';
+        const companyName = appAfter ? displayCompanyNameOrUnknown(appAfter['company_name'])         : 'Unknown';
 
         let wsFailureDetail = '';
         if (type === 'workflow_error') {

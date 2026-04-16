@@ -29,7 +29,7 @@ import { test, expect } from '@playwright/test';
  *    - Switching tabs shows correct content
  *    - Job-description textarea + character counter
  *    - File upload area visible in Upload tab
- *    - Only PDF/TXT accepted (file input accept attribute)
+ *    - PDF, TXT, Word (.docx) accepted (file input accept attribute)
  *    - Cancel button links back to /dashboard
  *    - Analyze & Create button present
  *    - Processing overlay exists in DOM
@@ -546,10 +546,11 @@ test.describe('2. New Application Page', () => {
       await expect(page.locator('#fileUploadArea')).toBeVisible({ timeout: 3000 });
     });
 
-    test('file input accepts only PDF and TXT', async ({ page }) => {
+    test('file input accepts PDF, TXT, and Word (.docx)', async ({ page }) => {
       const accept = await page.locator('#fileInput').getAttribute('accept');
       expect(accept).toContain('.pdf');
       expect(accept).toContain('.txt');
+      expect(accept).toContain('.docx');
     });
 
     test('file info container is present', async ({ page }) => {

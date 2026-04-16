@@ -126,6 +126,8 @@ The dashboard is your central hub for tracking applications and accessing all fe
 
 All your applications are listed here with company name, job title, match score, and status. Click any card to open the full application detail page.
 
+**Unknown employer** — Some postings do not name a company (for example confidential or founding-team roles). If the AI cannot extract a real employer, or it only returns a placeholder such as a dash or “N/A”, the card and the application detail header show **Unknown** instead of punctuation. Analysis and company research still run using the job text and role context.
+
 **Filter bar:**
 - **Search** — filter by job title or company name
 - **Date** — show applications from the last day, week, month, quarter, or year
@@ -158,9 +160,11 @@ All your applications are listed here with company name, job title, match score,
 | Method | How |
 |--------|-----|
 | **Paste Job Description** | Copy and paste the full job description text |
-| **Upload File** | PDF or TXT file up to 5 MB |
+| **Upload File** | PDF, TXT, or Word (.docx) up to 5 MB |
 
-The AI extracts the company name, job title, and all requirements from the text — you don't need to enter them manually.
+The AI extracts the company name, job title, and all requirements from the text — you don't need to enter them manually. If the posting omits the employer, you may see **Unknown** as the company name after analysis; that is expected.
+
+**Duplicate job** — If you already have an application for the same role at the same employer, the app will not add a second copy. You might see this immediately when submitting, or as a dashboard notification (**Duplicate job — not added**) if the overlap is detected after the job title and company are inferred from the description.
 
 > **Tip:** The Chrome Extension lets you extract a job description from any website with one click, without opening this form. See the [Chrome Extension](#chrome-extension) section below.
 
@@ -337,7 +341,7 @@ If the instance is running in BYOK mode (no server-side AI key configured):
 
 1. Go to **Settings → AI Setup**
 2. Get your own key from [Google AI Studio](https://aistudio.google.com/app/apikey)
-3. Paste the key and click **Save**
+3. Paste the key and click **Save** (copy the full string exactly; Google may show different key formats over time)
 
 Your key is encrypted at rest and never logged or exposed.
 

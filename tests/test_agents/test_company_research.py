@@ -204,13 +204,29 @@ class TestCompanyResearchProcessing:
             await agent.process(state)
 
     @pytest.mark.asyncio
-    async def test_process_missing_company_name_raises_error(self, mock_gemini_client):
-        """Test that missing company name raises error."""
+    async def test_process_missing_company_name_uses_unnamed_employer_flow(
+        self, mock_gemini_client
+    ):
+        """When the posting omits the employer (founding/confidential), research still runs on job context."""
         agent = CompanyResearchAgent(gemini_client=mock_gemini_client)
-        state = create_test_workflow_state(job_analysis={"job_title": "Engineer"})
+        state = create_test_workflow_state(
+            job_analysis={
+                "job_title": "AI Engineer (Founding Team)",
+                "company_name": "",
+                "industry": "Technology",
+                "responsibilities": ["Build ML pipelines"],
+            }
+        )
 
-        with pytest.raises(ValueError, match="[Cc]ompany name|not found"):
-            await agent.process(state)
+        with patch("agents.company_research.get_cached_company_research", return_value=None), \
+             patch("agents.company_research.acquire_compute_lock", return_value=True), \
+             patch("agents.company_research.release_compute_lock", return_value=None), \
+             patch("agents.company_research.cache_company_research", return_value=None):
+            result = await agent.process(state)
+
+        assert "company_research" in result
+        assert result["company_research"]["industry"] == "Technology"
+        mock_gemini_client.generate.assert_called()
 
 
 # =============================================================================

@@ -6,6 +6,7 @@ Provides strategic insights for job applicants.
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 from workflows.state_schema import WorkflowState, CompanyResearchResult
@@ -164,6 +165,56 @@ Respond with ONLY valid JSON in this exact structure:
 Be thorough, specific, and focus on information that will help someone succeed in their job application. If the company is not well-known, provide what you can and clearly indicate uncertainty."""
 
 
+def _has_usable_company_name(name: Optional[str]) -> bool:
+    """False for empty, whitespace, or common LLM placeholders when no real employer is named."""
+    if not name or not str(name).strip():
+        return False
+    s = str(name).strip()
+    # Hyphen / en dash / em dash / minus — LLMs sometimes emit these instead of null
+    if re.fullmatch(r"[\s\-–—−]+", s):
+        return False
+    lowered = s.lower()
+    if lowered in (
+        "null",
+        "none",
+        "n/a",
+        "na",
+        "unknown",
+        "not specified",
+        "not stated",
+        "tbd",
+        "confidential",
+        "undisclosed",
+    ):
+        return False
+    return True
+
+
+def _format_job_context_for_unnamed_employer(job_analysis: Dict[str, Any]) -> str:
+    """Build a text block for prompts when the posting omits the company (founding/confidential listings)."""
+    title = (job_analysis.get("job_title") or "").strip() or "Unknown title"
+    city = (job_analysis.get("job_city") or "").strip()
+    state = (job_analysis.get("job_state") or "").strip()
+    country = (job_analysis.get("job_country") or "").strip()
+    loc_parts = [p for p in (city, state, country) if p]
+    location = ", ".join(loc_parts) if loc_parts else "Not specified"
+    industry = (job_analysis.get("industry") or "").strip() or "Not specified"
+    team_info = (job_analysis.get("team_info") or "").strip()
+    responsibilities = job_analysis.get("responsibilities") or []
+    lines: List[str] = [
+        f"Job title: {title}",
+        f"Location: {location}",
+        f"Industry (from posting): {industry}",
+    ]
+    if team_info:
+        lines.append(f"Team / role context: {team_info[:2500]}")
+    if isinstance(responsibilities, list) and responsibilities:
+        lines.append("Responsibilities (excerpt):")
+        for item in responsibilities[:15]:
+            lines.append(f"  • {str(item)[:500]}")
+    return "\n".join(lines)
+
+
 class CompanyResearchAgent:
     """
     Agent for conducting comprehensive company research using Gemini LLM.
@@ -213,9 +264,20 @@ class CompanyResearchAgent:
             if job_analysis is None:
                 raise ValueError("Job analysis is required for company research")
 
-            company_name: Optional[str] = job_analysis.get("company_name")
-            if not company_name:
-                raise ValueError("Company name not found in job analysis")
+            raw_company: Optional[str] = job_analysis.get("company_name")
+            if not _has_usable_company_name(raw_company):
+                logger.info(
+                    "Job analysis has no usable employer name — using unnamed-posting company research "
+                    "(founding/confidential listings)"
+                )
+                research_result = await self._research_company_with_llm(
+                    "Employer not stated in posting",
+                    unnamed_job_analysis=job_analysis,
+                )
+                state["company_research"] = research_result.to_dict()
+                return state
+
+            company_name = str(raw_company).strip()
 
             # Check cache first
             cached_result: Optional[Dict[str, Any]] = await get_cached_company_research(company_name)
@@ -263,23 +325,44 @@ class CompanyResearchAgent:
             raise
 
     async def _research_company_with_llm(
-        self, company_name: str
+        self,
+        company_name: str,
+        *,
+        unnamed_job_analysis: Optional[Dict[str, Any]] = None,
     ) -> CompanyResearchResult:
         """
         Research company using Gemini LLM.
 
         Args:
-            company_name: Name of the company to research
+            company_name: Name of the company to research (or placeholder when unnamed_job_analysis is set)
+            unnamed_job_analysis: When the posting omits the employer, pass full job_analysis for context-only research
 
         Returns:
             Comprehensive company research results
         """
-        logger.info(f"Researching company with Gemini: {company_name}")
+        if unnamed_job_analysis is not None:
+            logger.info("Researching unnamed employer using job-context-only prompt")
+        else:
+            logger.info(f"Researching company with Gemini: {company_name}")
         start_time: datetime = datetime.now(timezone.utc)
 
         try:
-            # Build the prompt
-            prompt = COMPANY_RESEARCH_PROMPT.format(company_name=company_name)
+            if unnamed_job_analysis is not None:
+                ctx = _format_job_context_for_unnamed_employer(unnamed_job_analysis)
+                prefix = (
+                    "### EMPLOYER NOT NAMED IN POSTING\n"
+                    "The listing does not state a company name (common for founding teams, confidential searches, "
+                    "or short descriptions).\n"
+                    "Do NOT invent a company name, website, or leadership that is not implied by the text.\n"
+                    "Fill the JSON with: (1) clear \"employer not disclosed\" language in company_overview; "
+                    "(2) interview and application guidance tailored to THIS role, industry, and stage "
+                    "using the job context only.\n\n"
+                    f"### JOB CONTEXT\n{ctx}\n\n---\n\n"
+                )
+                prompt = prefix + COMPANY_RESEARCH_PROMPT.format(company_name=company_name)
+            else:
+                # Build the prompt
+                prompt = COMPANY_RESEARCH_PROMPT.format(company_name=company_name)
 
             # Call Gemini
             response = await self.gemini_client.generate(

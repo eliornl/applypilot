@@ -59,6 +59,7 @@ from workflows.job_application_workflow import JobApplicationWorkflow
 from api.websocket import (
     broadcast_workflow_resumed,
     broadcast_document_generation_started,
+    broadcast_workflow_error,
 )
 from models.database import (
     ApplicationStatus,
@@ -81,7 +82,7 @@ from utils.error_responses import (
 )
 from utils.security import sanitize_llm_output
 from utils.application_dedupe import normalize_title_company_key as _normalize_title_company_key
-from utils.resume_parser import extract_text_from_pdf
+from utils.resume_parser import extract_text_from_docx, extract_text_from_pdf
 
 # =============================================================================
 # CONSTANTS AND CONFIGURATION
@@ -96,13 +97,18 @@ VALID_URL_PREFIXES: tuple = ("http://", "https://")
 # File processing
 MAX_FILE_SIZE: int = 5 * 1024 * 1024  # 5 MB
 MIN_EXTRACTED_JOB_FILE_TEXT_LEN: int = 50
-ALLOWED_FILE_TYPES: List[str] = ["application/pdf", "text/plain"]
-ALLOWED_FILE_EXTENSIONS: List[str] = [".pdf", ".txt"]
+ALLOWED_FILE_TYPES: List[str] = [
+    "application/pdf",
+    "text/plain",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]
+ALLOWED_FILE_EXTENSIONS: List[str] = [".pdf", ".txt", ".docx"]
 
 # Magic bytes for MIME-type validation (prevents extension spoofing)
 _JOB_FILE_MAGIC: Dict[str, Optional[bytes]] = {
     ".pdf": b"%PDF",
     ".txt": None,  # UTF-8 text has no fixed signature
+    ".docx": b"PK\x03\x04",  # Office Open XML (ZIP) — same signature as resume DOCX
 }
 
 # Processing timeouts
@@ -160,6 +166,21 @@ def _job_text_from_uploaded_file(file_content: bytes, matched_ext: str) -> str:
         if len(text) < MIN_EXTRACTED_JOB_FILE_TEXT_LEN:
             raise validation_error("Job description file is too short.")
         return text
+    if matched_ext == ".docx":
+        try:
+            text = extract_text_from_docx(file_content)
+        except ValueError as e:
+            logger.debug("DOCX text extraction failed for job upload: %s", e, exc_info=True)
+            raise validation_error(
+                "Could not read text from this Word file. Try pasting the job description as text "
+                "or exporting as PDF."
+            ) from e
+        text = text.strip()
+        if len(text) < MIN_EXTRACTED_JOB_FILE_TEXT_LEN:
+            raise validation_error(
+                "Could not extract enough text from this document. Try pasting the full job posting."
+            )
+        return text
     raise validation_error(f"Unsupported job file type: {matched_ext}")
 
 
@@ -215,6 +236,43 @@ def _strip_agent_outputs_on_session_model(workflow_session: WorkflowSession) -> 
     for col in _WORKFLOW_SESSION_AGENT_OUTPUT_COLUMNS:
         setattr(workflow_session, col, None)
         flag_modified(workflow_session, col)
+
+
+# Same user-facing copy as POST /workflow/start RES_3002 and analyzer-time dedupe.
+_DUPLICATE_JOB_CONSTRAINT_MESSAGE = (
+    "You already have an application for this job. Open it from your dashboard, "
+    "or delete the old one first if you want to start over."
+)
+
+
+async def _revert_workflow_session_after_duplicate_job_constraint(
+    db: AsyncSession,
+    session_id: str,
+) -> Optional[str]:
+    """
+    The workflow session row was already committed as COMPLETED with agent outputs, but
+    the follow-up ``job_applications`` update hit ``uq_user_job_company``. Revert the
+    session to failed and strip JSONB so we do not leave a duplicate visible via analysis
+    fallbacks.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+
+    result = await db.execute(
+        select(WorkflowSession).where(WorkflowSession.session_id == session_id)
+    )
+    ws = result.scalar_one_or_none()
+    if not ws:
+        return None
+    ws.workflow_status = WorkflowStatus.FAILED.value
+    ws.current_phase = WorkflowPhase.ERROR.value
+    msgs = list(ws.error_messages or [])
+    if _DUPLICATE_JOB_CONSTRAINT_MESSAGE not in msgs:
+        msgs.append(_DUPLICATE_JOB_CONSTRAINT_MESSAGE)
+    ws.error_messages = msgs
+    flag_modified(ws, "error_messages")
+    ws.processing_end_time = datetime.now(timezone.utc)
+    _strip_agent_outputs_on_session_model(ws)
+    return str(ws.user_id)
 
 
 def get_user_uuid(current_user: Dict[str, Any]) -> uuid.UUID:
@@ -1616,8 +1674,11 @@ async def _execute_workflow_background(
                         logger.debug("Rollback failed (connection already closed or rolled back): %s", rb_err)
 
                 # Update job application (independent of workflow session update)
+                duplicate_constraint_reverted = False
                 try:
-                    await _update_job_application_with_final_state(db, session_id, final_state)
+                    duplicate_constraint_reverted = await _update_job_application_with_final_state(
+                        db, session_id, final_state
+                    )
                 except Exception as app_err:
                     logger.error(f"Workflow {session_id}: Failed to update job application: {app_err}", exc_info=True)
                     try:
@@ -1625,7 +1686,13 @@ async def _execute_workflow_background(
                     except Exception as rb_err:
                         logger.debug("Rollback failed (connection already closed or rolled back): %s", rb_err)
 
-                logger.info(f"Workflow {session_id} completed successfully")
+                if duplicate_constraint_reverted:
+                    logger.warning(
+                        f"Workflow {session_id}: duplicate job (uq_user_job_company) — "
+                        "session reverted and application hidden"
+                    )
+                else:
+                    logger.info(f"Workflow {session_id} completed successfully")
                 # Clear stale in-progress cache so the next poll sees the terminal state immediately
                 await invalidate_workflow_state(session_id)
 
@@ -1758,8 +1825,11 @@ async def _continue_workflow_background(session_id: str, user_id: Optional[str] 
                         logger.debug("Rollback failed (connection already closed or rolled back): %s", rb_err)
 
                 # Update job application (independent of workflow session update)
+                duplicate_constraint_reverted = False
                 try:
-                    await _update_job_application_with_final_state(db, session_id, final_state)
+                    duplicate_constraint_reverted = await _update_job_application_with_final_state(
+                        db, session_id, final_state
+                    )
                 except Exception as app_err:
                     logger.error(f"Workflow {session_id} continuation: Failed to update application: {app_err}")
                     try:
@@ -1767,7 +1837,13 @@ async def _continue_workflow_background(session_id: str, user_id: Optional[str] 
                     except Exception as rb_err:
                         logger.debug("Rollback failed (connection already closed or rolled back): %s", rb_err)
 
-                logger.info(f"Workflow {session_id} continuation completed successfully")
+                if duplicate_constraint_reverted:
+                    logger.warning(
+                        f"Workflow {session_id} continuation: duplicate job (uq_user_job_company) — "
+                        "session reverted and application hidden"
+                    )
+                else:
+                    logger.info(f"Workflow {session_id} continuation completed successfully")
                 await invalidate_workflow_state(session_id)
 
             except Exception as e:
@@ -1881,8 +1957,11 @@ async def _generate_documents_background(
                     except Exception as rb_err:
                         logger.debug("Rollback failed (connection already closed or rolled back): %s", rb_err)
 
+                duplicate_constraint_reverted = False
                 try:
-                    await _update_job_application_with_final_state(db, session_id, final_state)
+                    duplicate_constraint_reverted = await _update_job_application_with_final_state(
+                        db, session_id, final_state
+                    )
                 except Exception as app_err:
                     logger.error(f"Session {session_id}: failed to update application after documents: {app_err}")
                     try:
@@ -1890,7 +1969,13 @@ async def _generate_documents_background(
                     except Exception as rb_err:
                         logger.debug("Rollback failed (connection already closed or rolled back): %s", rb_err)
 
-                logger.info(f"Document generation completed for session {session_id}")
+                if duplicate_constraint_reverted:
+                    logger.warning(
+                        f"Session {session_id}: duplicate job after documents (uq_user_job_company) — "
+                        "session reverted and application hidden"
+                    )
+                else:
+                    logger.info(f"Document generation completed for session {session_id}")
 
             except Exception as e:
                 logger.error(f"Document generation failed for session {session_id}: {e}", exc_info=True)
@@ -2014,8 +2099,15 @@ async def _update_job_application_with_final_state(
     db: AsyncSession,
     session_id: str,
     final_state: Dict[str, Any],
-) -> None:
-    """Update job application based on final workflow state."""
+) -> bool:
+    """
+    Update job application based on final workflow state.
+
+    Returns:
+        True if the run hit ``uq_user_job_company`` after the workflow had already
+        completed in the session row — the session was reverted to failed and the
+        application soft-deleted (duplicate job). Caller should not log success.
+    """
     logger.info(f"Updating job application for session {session_id}")
 
     # Get job analysis for title and company.
@@ -2071,9 +2163,9 @@ async def _update_job_application_with_final_state(
 
     # Update application.
     # Try the full update (status + title + company + match_score) inside a savepoint.
-    # If the unique constraint on (user_id, job_title, company_name) fires (duplicate job),
-    # the savepoint rolls back and we retry with only status + match_score so the card
-    # transitions from "processing" to "completed" even when title/company can't change.
+    # If ``uq_user_job_company`` fires on a completed workflow, we revert the session row
+    # and soft-delete this application (see IntegrityError branch) — we do not drop
+    # title/company and leave a second visible card.
     now_ts = datetime.now(timezone.utc)
     full_values: Dict[str, Any] = {
         "status": app_status,
@@ -2088,6 +2180,8 @@ async def _update_job_application_with_final_state(
     if match_score is not None:
         full_values["match_score"] = match_score
 
+    attempted_title_company = bool(job_title or company_name)
+
     try:
         async with db.begin_nested():
             await db.execute(
@@ -2096,8 +2190,36 @@ async def _update_job_application_with_final_state(
                 .values(**full_values)
             )
     except IntegrityError:
-        # Duplicate title+company — retry without the conflicting fields so that
-        # status and match_score still get persisted.
+        # Unique on (user_id, job_title, company_name) for active rows — do not strip
+        # title/company and "complete" anyway; that leaves two cards with the same
+        # display names (list API falls back to job_analysis). Revert session + hide row.
+        if attempted_title_company and not failed_workflow:
+            logger.warning(
+                f"Workflow {session_id}: duplicate constraint on job_applications "
+                "(uq_user_job_company) — reverting completed session and soft-deleting row"
+            )
+            ws_user_id = await _revert_workflow_session_after_duplicate_job_constraint(
+                db, session_id
+            )
+            await _soft_delete_job_application_for_failed_workflow(db, session_id)
+            await db.commit()
+            if ws_user_id:
+                try:
+                    await broadcast_workflow_error(
+                        user_id=ws_user_id,
+                        session_id=session_id,
+                        error_message=_DUPLICATE_JOB_CONSTRAINT_MESSAGE,
+                        failed_agent=None,
+                    )
+                except Exception as broadcast_err:
+                    logger.debug(
+                        "broadcast_workflow_error after duplicate constraint: %s",
+                        broadcast_err,
+                        exc_info=True,
+                    )
+            return True
+
+        # Failed workflow path: still persist status/deleted_at without title churn.
         logger.warning(
             f"Workflow {session_id}: duplicate constraint on job_applications — "
             "retrying without title/company"
@@ -2117,6 +2239,7 @@ async def _update_job_application_with_final_state(
         )
 
     await db.commit()
+    return False
 
 
 # =============================================================================

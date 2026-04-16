@@ -10,7 +10,7 @@ All detailed coding rules live in `.cursor/rules/`. This file is the index.
 
 | File | Covers |
 |------|--------|
-| `applypilot-core.mdc` | App name, error system (`APIError`/`ErrorCode`, `CFG_6xxx` no-API-key, **`RES_3002` duplicate workflow**), background task DB, **workflow failure (no partial outputs, applications list join)** |
+| `applypilot-core.mdc` | App name, error system (`APIError`/`ErrorCode`, `CFG_6xxx` no-API-key, **`RES_3002` duplicate workflow**, post-start duplicate / `uq_user_job_company`, content fingerprint NFKC + `utils/application_dedupe.py`), **`POST /workflow/start` job file uploads** (`.pdf`/`.txt`/`.docx`, 5 MB, `_JOB_FILE_MAGIC`), background task DB, **workflow failure (no partial outputs, applications list join)** |
 | `python-conventions.mdc` | Python style, file sections, FastAPI endpoint template |
 | `database-patterns.mdc` | SQLAlchemy JSONB, `flag_modified()`, soft delete, **partial indexes**, race conditions, migrations, `UserWorkflowPreferences` upsert |
 | `auth-patterns.mdc` | JWT structure, `_make_jwt`, all auth endpoints, token revocation, lockout, timing attack fix |
@@ -18,7 +18,7 @@ All detailed coding rules live in `.cursor/rules/`. This file is the index.
 | `security-middleware.mdc` | Middleware stack, CORS explicit headers, no wildcard origins, maintenance mode, **CSP nonce-based style-src** (no `'unsafe-inline'`), `.is-hidden` / CSS utility class reference |
 | `settings-and-env.mdc` | All env vars, `get_settings()`, `ENCRYPTION_KEY` requirement, `.env` commit rules |
 | `llm-integration.mdc` | Gemini client, BYOK, `user_facing_message_from_llm_exception()`, `asyncio.wait_for()` timeout, JSON parsing |
-| `agent-patterns.mdc` | 5 workflow agents + 1 standalone interview prep + 6 career tool agents, **any workflow agent failure fails the run**, workflow_preferences injection, BYOK model override |
+| `agent-patterns.mdc` | 5 workflow agents + 1 standalone interview prep + 6 career tool agents, **any workflow agent failure fails the run**, workflow_preferences injection, BYOK model override, **Company Research — `_has_usable_company_name` / unnamed-posting (dash-only placeholders)** |
 | `interview-prep-feature.mdc` | Standalone agent, background task, Redis atomic lock, rate limit |
 | `career-tools.mdc` | 6 tools, endpoints, rate limits, agent implementation pattern, output JSON schemas, copy button pattern, no-placeholder rules, UI CSS classes |
 | `caching-redis.mdc` | Cache TTLs, helpers, rate limiting, auth-specific Redis keys |
@@ -28,11 +28,11 @@ All detailed coding rules live in `.cursor/rules/`. This file is the index.
 | `email-and-misc-utils.mdc` | Gmail SMTP, resume parser, BYOK encryption |
 | `frontend-js-strict.mdc` | JSDoc strict mode, null safety, anti-patterns table, event bus, **no `style=` HTML attributes** |
 | `landing-page.mdc` | Landing page sections, **screenshot showcase** (`.ss-tabs`, `.ss-panel`, `ssActivateTab`), screenshot file locations, update workflow |
-| `dashboard-home.mdc` | Dashboard application list — **list/stats join `workflow_sessions` (hide workflow-failed)**, search/filter/sort, toasts (`notifyReady`, `formatWorkflowFailureDetail`), card CSS, auth guard |
-| `ui-application-detail.mdc` | 8-tab layout, sub-tab patterns (Resume + Interview), cover letter card, render functions, all CSS classes |
+| `dashboard-home.mdc` | Dashboard application list — **list/stats join `workflow_sessions` (hide workflow-failed)**, search/filter/sort, toasts (`notifyReady` **`c:`/`f:`** dedupe keys, `formatWorkflowFailureDetail`, duplicate headline), **`isPlaceholderCompanyName` / `displayCompanyNameOrUnknown` (Unknown employer label)**, card CSS, auth guard |
+| `ui-application-detail.mdc` | 8-tab layout, sub-tab patterns (Resume + Interview), cover letter card, render functions, **`isPlaceholderCompanyName` / Unknown employer / About this opportunity**, all CSS classes |
 | `accessibility.mdc` | WCAG 2.1 AA, heading hierarchy, landmarks, aria-label rules |
 | `analytics-consent-onboarding.mdc` | PostHog, cookie consent API, onboarding tour |
-| `chrome-extension.mdc` | Extension structure, **dev/prod `IS_DEV` URL toggle**, popup design system, icon generation, landing-page mockup sync, extraction strategy, `InputMethod.EXTENSION` |
+| `chrome-extension.mdc` | Extension structure, **dev/prod `IS_DEV` URL toggle**, popup design system, icon generation, landing-page mockup sync, **`extractPageContent` split-view / detail-pane root** (`popup.js` + `service-worker.js`), `InputMethod.EXTENSION` |
 | `adding-new-features.mdc` | Checklists: new endpoint, new agent, new tool, new migration, new static asset, **new preference** |
 | `settings-page.mdc` | Settings tabs, Preferences tab, AI Setup tab, auto-save pattern, custom slider/toggle/dropdown, **account-icon color variants**, self-hosted Font Awesome |
 | `frontend-build-pipeline.mdc` | esbuild pipeline, `asset_url()`, adding new JS/CSS files, manifest, CI/Docker build, `make build-frontend` (macOS quarantine fix) |
@@ -117,4 +117,5 @@ All detailed coding rules live in `.cursor/rules/`. This file is the index.
 70. **All subpage navbars (Help, Terms, Privacy, Settings, application detail) must use `navbar_subpage.html` or identical CSS** — `.navbar` padding `1rem 0`, `.brand-icon` `36×36px / 1rem`, `.brand-text` `1.2rem`; this matches the dashboard exactly. The landing page logo also uses these same values (`landing.css`). Never let any page use a custom floating back-link element.
 71. **The Help page link in the dashboard navbar must be `/help?from=dashboard`** — the Help page reads this parameter and switches the back button to "← Back to Dashboard"; without it the button always returns to the landing page regardless of where the user came from.
 72. **`POST /api/v1/workflow/start` returns `RES_3002` (409) when the user already has a non-deleted application for the same job** — matched by canonical URL, normalized title+company, or content fingerprint (≥80 chars of normalized text); dashboard and extension must show a **warning/info** message, not a generic error; see `applypilot-core.mdc` (`RES_3002`)
-72. **`profile-setup.js` must `PUT` empty `work_experience` when “no relevant experience” is checked** — skipping the API call leaves `user_profiles.work_experience` as SQL `NULL`, so `POST /profile/complete` fails with “Work Experience” incomplete; `[]` in JSONB means the user explicitly completed step 2 with no roles (`_check_work_experience_completion` treats `NULL` as incomplete and non-null `[]` as complete).
+73. **`profile-setup.js` must `PUT` empty `work_experience` when “no relevant experience” is checked** — skipping the API call leaves `user_profiles.work_experience` as SQL `NULL`, so `POST /profile/complete` fails with “Work Experience” incomplete; `[]` in JSONB means the user explicitly completed step 2 with no roles (`_check_work_experience_completion` treats `NULL` as incomplete and non-null `[]` as complete).
+74. **Duplicate job after start (not only `RES_3002`)** — when start-time dedupe misses, the workflow fails after the Job Analyzer if another application already has the same normalized title+company (`utils/application_dedupe.py`, aligned with list API fallbacks); `_update_job_application_with_final_state` must not “succeed” on `uq_user_job_company` by dropping title/company (revert session + soft-delete). Dashboard `notifyReady` dedupes completion vs failure with `c:{session_id}` / `f:{session_id}` in `applypilot_notified_analyses`. See `applypilot-core.mdc` and `dashboard-home.mdc`.

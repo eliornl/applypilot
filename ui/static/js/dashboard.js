@@ -1370,7 +1370,7 @@ class DashboardManager {
           <div class="application-header">
             <div>
               <h5 class="application-title">${this.escapeHtml(a['job_title'] || 'Untitled Position')}</h5>
-              <div class="company-name">${this.escapeHtml(a['company_name'] || 'Unknown Company')}</div>
+              <div class="company-name">${this.escapeHtml(a['company_name'] || 'Unknown')}</div>
             </div>
             <span class="status-badge ${statusClass}">${this.escapeHtml(a['status'])}</span>
           </div>
@@ -1444,7 +1444,7 @@ class DashboardManager {
                         </div>
                         <p class="company-name text-muted mb-2">
                             <i class="fas fa-building me-1"></i>
-                            ${this.escapeHtml(workflow.company_name || 'Unknown Company')}
+                            ${this.escapeHtml(workflow.company_name || 'Unknown')}
                         </p>
                         <p class="card-text job-description">${this.escapeHtml(this.truncateText(workflow.job_description || 'No description', 100))}</p>
 

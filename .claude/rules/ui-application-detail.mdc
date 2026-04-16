@@ -66,12 +66,23 @@ Use it for any LLM-returned enum-like string that should appear in title case: `
 See `frontend-js-strict.mdc` §1 for the canonical implementation.
 
 ## `decodeEntities()` — For `.textContent` Fields
-`renderHeader()` assigns job title and company name via `.textContent`, which does not interpret HTML entities. Always use `decodeEntities(str)` (decode-only, no re-encode) for these assignments, never raw server-rendered strings:
+`renderHeader()` assigns job title and company name via `.textContent`, which does not interpret HTML entities. Always use `decodeEntities(str)` (decode-only, no re-encode) for these assignments, never raw server-rendered strings.
+
+**Unknown employer — `isPlaceholderCompanyName()`**  
+The API may store a **non-empty** placeholder (`—`, `-`, `N/A`, `unknown`, etc.) when no employer is named. Those strings are truthy in JavaScript, so always gate the company line with **`isPlaceholderCompanyName(job.company_name)`** (inverse of backend **`_has_usable_company_name()`** in `agents/company_research.py`). When the name is missing or a placeholder, `#companyName` must show **`Unknown`** — never the literal word “Company”, a bare dash, or raw LLM punctuation.
 
 ```javascript
 if (jtEl) jtEl.textContent = decodeEntities(job.job_title || 'Job Application');
-if (cnEl) cnEl.textContent = decodeEntities(job.company_name || 'Company');
+if (cnEl) {
+  const companyTrimmed = job.company_name && String(job.company_name).trim();
+  cnEl.textContent =
+    companyTrimmed && !isPlaceholderCompanyName(job.company_name)
+      ? decodeEntities(companyTrimmed)
+      : 'Unknown';
+}
 ```
+
+**Company tab heading** — When there is no usable employer name, the first section title is **`About this opportunity`** (not “About the Company”). When a real name exists, use **`About ${escapeHtml(trimmedName)}`**.
 
 ---
 
@@ -217,7 +228,7 @@ Use `<div class="section-title"><i class="fas fa-..."></i> Title</div>` — same
 ---
 
 ## Company Tab — Data Field Mapping
-Source: `company` object from `CompanyResearchResult`
+Source: `company` object from `CompanyResearchResult`. If `job.company_name` is empty or passes **`isPlaceholderCompanyName()`**, the main heading still follows the **About this opportunity** pattern above; the rest of the tab renders normal company research output (unnamed-posting / job-context research from the backend).
 
 | Section | Fields |
 |---------|--------|

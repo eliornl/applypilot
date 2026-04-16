@@ -33,6 +33,10 @@ Step 4 (PARALLEL):   Cover Letter Writer  +  Resume Advisor
 
 **Cover Letter Writer and Resume Advisor run in parallel** — they do not depend on each other; do not introduce a sequential dependency between them.
 
+### Company Research — missing or placeholder employer name
+
+`agents/company_research.py` uses **`_has_usable_company_name(name)`** before treating `company_name` as a real employer. It returns false for empty/whitespace, common LLM text placeholders (`null`, `unknown`, `n/a`, …), and **dash-only** strings (regex: hyphen / en dash / em dash / Unicode minus, with optional whitespace). When false, research runs in **unnamed-posting** mode using **`_format_job_context_for_unnamed_employer()`** and job-context prompts — the workflow does not fail solely for a missing employer. Frontend **`isPlaceholderCompanyName()`** mirrors this intent for display (see **`dashboard-home.mdc`** / **`ui-application-detail.mdc`**).
+
 **Any single agent failure fails the entire workflow** — the session ends `failed`, parallel document generation requires **both** agents to succeed, and partial agent JSON is not left on `workflow_sessions` for API clients (see **`applypilot-core.mdc`** workflow failure section).
 
 The default gate threshold is **50%** (`workflow_gate_threshold: 0.5` in `DEFAULT_WORKFLOW_PREFERENCES`). Users can configure it in **Settings → Preferences**.

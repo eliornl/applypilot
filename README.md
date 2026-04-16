@@ -203,12 +203,12 @@ AI features require a key from Google AI Studio.
 
 1. Go to [aistudio.google.com/api-keys](https://aistudio.google.com/api-keys)
 2. Sign in with your Google account
-3. Click **Create API key** — copy the key (starts with `AIza…`)
+3. Click **Create API key** — copy the entire key string (Google may show different formats over time).
 4. Paste it in ApplyPilot — you'll be prompted during **profile setup**, or add it later via **Settings → AI Setup**
 
 **For personal use** that's all — no `.env` editing needed. Each user stores their own key, encrypted in the database.
 
-**For multi-user hosting:** add `GEMINI_API_KEY=AIza...` to `.env` to set a shared server-side key so users don't need to provide their own.
+**For multi-user hosting:** add `GEMINI_API_KEY=<your key>` to `.env` to set a shared server-side key so users don't need to provide their own.
 
 ---
 

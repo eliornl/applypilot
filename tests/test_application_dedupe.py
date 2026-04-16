@@ -1,18 +1,30 @@
-"""Unit tests for application deduplication helpers."""
+"""Tests for utils/application_dedupe.py."""
 
-from api.workflow import _fingerprint_job_content
+from utils.application_dedupe import (
+    _effective_title_company,
+    normalize_title_company_key,
+)
 
 
-def test_fingerprint_matches_after_zero_width_and_nfc_normalization():
-    """Extension vs browser paste can differ by invisible characters only."""
-    filler = (
-        "We are hiring a Staff Fullstack Engineer to join our payments team. "
-        "You will build APIs, collaborate with product, and improve reliability. "
-        "Requirements: Python, PostgreSQL, distributed systems experience. "
-    )
-    a = filler + "x" * 30
-    b = "\u200b" + filler + "x" * 30
-    fa = _fingerprint_job_content(a)
-    fb = _fingerprint_job_content(b)
-    assert fa is not None and fb is not None
-    assert fa == fb
+def test_normalize_title_company_key_both_required() -> None:
+    assert normalize_title_company_key("", "Co") is None
+    assert normalize_title_company_key("Title", "") is None
+    assert normalize_title_company_key(None, "Co") is None
+
+
+def test_normalize_title_company_key_collapses_whitespace() -> None:
+    key = normalize_title_company_key("  Senior   Engineer  ", "  Acme  Inc  ")
+    assert key is not None
+    assert key == ("senior engineer", "acme inc")
+
+
+def test_effective_title_company_fallback_to_job_analysis() -> None:
+    """Parity with dashboard: use job_analysis when application columns are empty."""
+    class _App:
+        job_title = None
+        company_name = None
+
+    class _Ws:
+        job_analysis = {"job_title": "Engineer", "company_name": "North Island Ventures"}
+
+    assert _effective_title_company(_App(), _Ws()) == ("Engineer", "North Island Ventures")
