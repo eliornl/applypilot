@@ -406,6 +406,7 @@ window.eventBus.emit('application:create', { id: appId });
 - 5-step profile setup (Quick Start → Basic Info → Work Experience → Skills → Preferences)
 - Resume upload with AI auto-fill
 - Internal API helper `makeAuthenticatedApiCall()` (self-contained, intentional)
+- **Years of experience = 0** — required-field and save logic must not use bare truthiness (`if (!years_experience)` / `if (!data[field])` after `parseInt`) — `0` is valid. Populate the numeric input when the saved value is `0` (`!== undefined && !== null`, not `if (years_experience)`). See `.cursor/rules/frontend-js-strict.mdc` (“Required numeric fields”).
 
 ### `cookie-consent.js` — Cookie Consent
 - GDPR-compliant consent banner

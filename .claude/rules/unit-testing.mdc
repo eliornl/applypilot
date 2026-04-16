@@ -22,7 +22,7 @@ pytest tests/test_api/ -v --override-ini="addopts="
 pytest tests/test_api/test_auth.py -v           # auth endpoints
 pytest tests/test_api/test_career_tools.py -v   # 6 career tools
 pytest tests/test_api/test_interview_prep.py     # interview prep
-pytest tests/test_api/test_workflow.py           # workflow trigger/status
+pytest tests/test_api/test_workflow.py           # workflow trigger/status; duplicate start → RES_3002 (409); duplicate start → RES_3002 (409)
 pytest tests/test_api/test_profile.py            # profile/settings
 pytest tests/test_api/test_applications.py       # applications list (search/sort/filter/pagination)
 ```

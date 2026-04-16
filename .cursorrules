@@ -10,15 +10,15 @@ All detailed coding rules live in `.cursor/rules/`. This file is the index.
 
 | File | Covers |
 |------|--------|
-| `applypilot-core.mdc` | App name, error system (`APIError`/`ErrorCode`, `CFG_6xxx` no-API-key), background task DB, workflow state |
+| `applypilot-core.mdc` | App name, error system (`APIError`/`ErrorCode`, `CFG_6xxx` no-API-key, **`RES_3002` duplicate workflow**), background task DB, **workflow failure (no partial outputs, applications list join)** |
 | `python-conventions.mdc` | Python style, file sections, FastAPI endpoint template |
 | `database-patterns.mdc` | SQLAlchemy JSONB, `flag_modified()`, soft delete, **partial indexes**, race conditions, migrations, `UserWorkflowPreferences` upsert |
 | `auth-patterns.mdc` | JWT structure, `_make_jwt`, all auth endpoints, token revocation, lockout, timing attack fix |
 | `security-python.mdc` | XSS, file upload MIME, `secrets` vs `random`, no-JWT-in-URL rule, user enumeration prevention |
 | `security-middleware.mdc` | Middleware stack, CORS explicit headers, no wildcard origins, maintenance mode, **CSP nonce-based style-src** (no `'unsafe-inline'`), `.is-hidden` / CSS utility class reference |
 | `settings-and-env.mdc` | All env vars, `get_settings()`, `ENCRYPTION_KEY` requirement, `.env` commit rules |
-| `llm-integration.mdc` | Gemini client, BYOK in agents, `asyncio.wait_for()` timeout, JSON parsing |
-| `agent-patterns.mdc` | 5 workflow agents + 1 standalone interview prep + 6 career tool agents, workflow_preferences injection, BYOK model override |
+| `llm-integration.mdc` | Gemini client, BYOK, `user_facing_message_from_llm_exception()`, `asyncio.wait_for()` timeout, JSON parsing |
+| `agent-patterns.mdc` | 5 workflow agents + 1 standalone interview prep + 6 career tool agents, **any workflow agent failure fails the run**, workflow_preferences injection, BYOK model override |
 | `interview-prep-feature.mdc` | Standalone agent, background task, Redis atomic lock, rate limit |
 | `career-tools.mdc` | 6 tools, endpoints, rate limits, agent implementation pattern, output JSON schemas, copy button pattern, no-placeholder rules, UI CSS classes |
 | `caching-redis.mdc` | Cache TTLs, helpers, rate limiting, auth-specific Redis keys |
@@ -28,7 +28,7 @@ All detailed coding rules live in `.cursor/rules/`. This file is the index.
 | `email-and-misc-utils.mdc` | Gmail SMTP, resume parser, BYOK encryption |
 | `frontend-js-strict.mdc` | JSDoc strict mode, null safety, anti-patterns table, event bus, **no `style=` HTML attributes** |
 | `landing-page.mdc` | Landing page sections, **screenshot showcase** (`.ss-tabs`, `.ss-panel`, `ssActivateTab`), screenshot file locations, update workflow |
-| `dashboard-home.mdc` | Dashboard application list — search/filter/sort API params, JS state, card CSS classes, event delegation, session storage, auth guard |
+| `dashboard-home.mdc` | Dashboard application list — **list/stats join `workflow_sessions` (hide workflow-failed)**, search/filter/sort, toasts (`notifyReady`, `formatWorkflowFailureDetail`), card CSS, auth guard |
 | `ui-application-detail.mdc` | 8-tab layout, sub-tab patterns (Resume + Interview), cover letter card, render functions, all CSS classes |
 | `accessibility.mdc` | WCAG 2.1 AA, heading hierarchy, landmarks, aria-label rules |
 | `analytics-consent-onboarding.mdc` | PostHog, cookie consent API, onboarding tour |
@@ -116,4 +116,5 @@ All detailed coding rules live in `.cursor/rules/`. This file is the index.
 69. **The `.percentile-marker` position must be set via JavaScript after `innerHTML` — never with `style="left: X%"` inside an HTML string** — set a `data-pct` attribute in the template string, then after assignment do `marker.style.left = marker.dataset['pct'] + '%'`; the inline style approach is unreliable in dynamically injected HTML.
 70. **All subpage navbars (Help, Terms, Privacy, Settings, application detail) must use `navbar_subpage.html` or identical CSS** — `.navbar` padding `1rem 0`, `.brand-icon` `36×36px / 1rem`, `.brand-text` `1.2rem`; this matches the dashboard exactly. The landing page logo also uses these same values (`landing.css`). Never let any page use a custom floating back-link element.
 71. **The Help page link in the dashboard navbar must be `/help?from=dashboard`** — the Help page reads this parameter and switches the back button to "← Back to Dashboard"; without it the button always returns to the landing page regardless of where the user came from.
+72. **`POST /api/v1/workflow/start` returns `RES_3002` (409) when the user already has a non-deleted application for the same job** — matched by canonical URL, normalized title+company, or content fingerprint (≥80 chars of normalized text); dashboard and extension must show a **warning/info** message, not a generic error; see `docs/workflow-duplicate-detection.md` and `applypilot-core.mdc`
 72. **`profile-setup.js` must `PUT` empty `work_experience` when “no relevant experience” is checked** — skipping the API call leaves `user_profiles.work_experience` as SQL `NULL`, so `POST /profile/complete` fails with “Work Experience” incomplete; `[]` in JSONB means the user explicitly completed step 2 with no roles (`_check_work_experience_completion` treats `NULL` as incomplete and non-null `[]` as complete).

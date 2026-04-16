@@ -26,6 +26,12 @@ The dashboard home is the **only** application list page. `/dashboard/history` w
 
 The backend uses `func.lower().contains()` (parameterised — no SQL injection risk). Unknown `sort` values silently fall back to `created_desc`.
 
+### List + stats visibility (`_dashboard_application_visibility_filter`)
+
+`GET /api/v1/applications/` and `GET /api/v1/applications/stats/overview` **outerjoin** `workflow_sessions` on `job_applications.session_id` and exclude rows where `workflow_sessions.workflow_status = 'failed'` (in addition to `deleted_at IS NULL` and `job_applications.status != 'failed'`).
+
+**Why:** `job_applications` can remain `processing` for a short window after the workflow session is already `failed`, while `_format_application_response()` maps that pair to a **failed** badge for the API consumer — which used to show a phantom FAILED card. Filtering on workflow status keeps failed analyses off the list and aligns counts with the empty state. See **`docs/workflow-failure-behavior.md`**.
+
 ---
 
 ## JS State (`dashboard-home.js`)
@@ -37,7 +43,9 @@ All state is module-scoped inside the IIFE:
 | `_loadedApps` | All applications currently rendered (may span multiple pages) |
 | `_totalCount` | Total matching count from last API response |
 | `_nextPage` | Next page to fetch for "Load more" |
-| `_isLoading` | Prevents concurrent fetches |
+| `_isLoading` | True while a load sequence is running |
+| `_pendingLoadApplicationsReset` | If a **reset** refresh was requested while loading, run another full pass when the current run finishes (WebSocket races) |
+| `_loadApplicationsInFlight` | `Promise` for the active `loadApplications` run — concurrent callers **await** this instead of returning early with no refresh |
 | `_selected` | `Set<string>` of selected application IDs |
 | `_search`, `_status`, `_days`, `_sort` | Current active filter values |
 | `_searchTimer` | Debounce timer ID for search input (300 ms) |
@@ -50,7 +58,7 @@ Session storage key: `'dash_filter_state'` — persists `search`, `status`, `day
 
 | Function | What it does |
 |---|---|
-| `loadApplications(reset)` | Fetch from API. `reset=true` starts from page 1; `reset=false` appends (Load more). |
+| `loadApplications(reset)` | Fetch from API. `reset=true` starts from page 1; `reset=false` appends (Load more). Implements a **single-flight** pattern: overlapping calls while `_isLoading` set `_pendingLoadApplicationsReset` when `reset=true`, then loop `_loadApplicationsSinglePass` until the queue is clear so rapid WS-driven refreshes do not drop a needed reload. |
 | `renderCard(app)` | Returns an HTML string for one application card. All user data passes through `escapeHtml()`. |
 | `renderApplications(reset)` | Renders `_loadedApps` into `#applicationsList`. Always shows the same "No applications yet" empty state when the list is empty — regardless of whether filters are active. |
 | `applyFilters()` | Reads DOM inputs → updates state → calls `loadApplications(true)`. |
@@ -266,39 +274,33 @@ The `#statusFilter` dropdown only exposes **user-tracking stages** — not AI an
 | `agent_update` — session already in `_loadedApps` | Ignore (workflow progress update, no card action needed) |
 | `workflow_complete` / `workflow_error` | Mark notified → reload apps → fire `notifyReady` toast |
 
-**Critical ordering for deduplication:**
-1. `_markAnalysisNotified(sessionId)` — mark BEFORE `await loadApplications(true)` so that `syncProcessingApps` inside `renderApplications` sees the session as already handled and skips its own `notifyReady` call.
-2. After `loadApplications` resolves, look up the refreshed `appAfter` from `_loadedApps` to get the AI-extracted title/company for the toast text.
+**Critical ordering:** Do **not** call `_markAnalysisNotified` before `await loadApplications(true)` here — `notifyReady()` performs the mark internally; pre-marking blocked the completion toast. After reload, resolve title/company from `_loadedApps` (may be empty for failed workflows) and pass **`wsFailureDetail`** from `msg.data.error` when `type === 'workflow_error'`.
 
 ```javascript
 async function handleUserWsMessage(msg) {
     const type      = String(msg['type'] || '');
     const sessionId = String(msg['session_id'] || '');
-    if (type !== 'workflow_complete' && type !== 'workflow_error' && type !== 'agent_update') return;
-
-    const appBefore = _loadedApps.find(a => String(a['workflow_session_id'] || a['id']) === sessionId);
-
-    if (type === 'agent_update' && !appBefore) { loadApplications(true); return; }
-    if (type !== 'workflow_complete' && type !== 'workflow_error') return;
-
-    if (appBefore) _processingApps.delete(String(appBefore['id'] ?? ''));
-
-    _markAnalysisNotified(sessionId);            // ← BEFORE await
+    // ... agent_update branch, then workflow_complete / workflow_error only ...
     await loadApplications(true);
-
-    const appAfter    = _loadedApps.find(a => String(a['workflow_session_id'] || a['id']) === sessionId);
-    const jobTitle    = appAfter ? String(appAfter['job_title']    || 'Job Application') : 'Job Application';
-    const companyName = appAfter ? String(appAfter['company_name'] || 'Company')         : 'Company';
-    notifyReady(jobTitle, companyName, sessionId, type === 'workflow_error');
+    loadStats();
+    const appAfter = _loadedApps.find(a => String(a['workflow_session_id'] || a['id']) === sessionId);
+    const jobTitle = appAfter ? String(appAfter['job_title'] || 'Job Application') : 'Job Application';
+    const companyName = appAfter ? String(appAfter['company_name'] || 'Company') : 'Company';
+    let wsFailureDetail = '';
+    if (type === 'workflow_error') {
+        const d = msg['data'];
+        if (d && typeof d === 'object' && d['error'] != null) wsFailureDetail = String(d['error']);
+    }
+    notifyReady(jobTitle, companyName, sessionId, type === 'workflow_error', wsFailureDetail);
 }
 ```
 
 ## Toast Deduplication — `notifyReady`
 
-`notifyReady` is guarded at its **entry point** to prevent duplicate toasts regardless of which code path calls it (WS handler, poll fallback, or `syncProcessingApps` "came back" path):
+`notifyReady(jobTitle, companyName, detailId, failed, failureDetail)` is guarded at its **entry point** to prevent duplicate toasts regardless of which code path calls it (WS handler, poll fallback, or `syncProcessingApps` "came back" path):
 
 ```javascript
-function notifyReady(jobTitle, companyName, detailId, failed) {
+function notifyReady(jobTitle, companyName, detailId, failed, failureDetail) {
     // Guard: bail immediately if already notified (WS + poll race, or multiple calls)
     if (detailId && _isAnalysisNotified(detailId)) return;
 
@@ -309,6 +311,24 @@ function notifyReady(jobTitle, companyName, detailId, failed) {
 ```
 
 **Never remove this guard** — without it, the WebSocket handler and the `pollProcessingApps` fallback can both fire within the same event-loop turn (the poll's HTTP response arrives while `handleUserWsMessage` is awaiting `loadApplications`), producing two identical toasts.
+
+### Failure copy and actions
+
+- **`formatWorkflowFailureDetail(raw)`** — Shortens noisy Gemini quota / rate-limit strings for the toast; strips legacy **`[agent_name]`** prefixes from stored `error_messages`.
+- When **`failed === true`**, the toast has **no** primary/secondary link (failed analyses are not listed; user dismisses with the close control only). Pass **`failureDetail`** from `GET /api/v1/workflow/status/...` `error_messages[0]` or WebSocket `data.error` when available.
+
+## Duplicate workflow start — `RES_3002`
+
+When `POST /api/v1/workflow/start` returns **409** with `error_code === 'RES_3002'`, the user already has a non-deleted application for the same job (URL, title+company, or long-text fingerprint — see `applypilot-core.mdc`).
+
+- **`dashboard-new-application.js`** — show a **warning**-style alert with the API message; optionally set `sessionStorage` keys (`new_application_toast`, `new_application_session_id`) so a post-redirect toast can deep-link to the existing application when `details` include `session_id`.
+- **`dashboard.js`** — the job form's `apiCall` path attaches `errorCode` on errors; treat `RES_3002` as a warning, not a red failure banner.
+
+Integration coverage: `tests/test_api/test_workflow.py` (duplicate URL / duplicate manual text).
+
+## "Application submitted!" — `_submittedToastShownForSession`
+
+For `agent_update` when the session is **not** yet in `_loadedApps`, the user WebSocket can emit many events before the card exists. **`dashboard-home.js`** keeps a **`Set`** (`_submittedToastShownForSession`) so **"Application submitted! …"** fires **once per `session_id`**, combined with the **sessionStorage** toast on redirect from the new-application page. **Never remove** `rememberSubmittedToast` / `hasSubmittedToastForSession` without replacing them with an equivalent guard — users will see stacked duplicate toasts.
 
 ## Processing Cards — Skeleton Shimmer While Analyzing
 
@@ -393,6 +413,8 @@ CSS for `.nav-badge-dot` lives in `app.css` (not a page `<style>` block). Always
 15. **Clicking an active tracking button must toggle it off** (reset to `completed`), not re-save the same status — the success toast must say `"Stage cleared."` not `"Status updated to Completed."`
 16. **`window.clearNavBadge()` must be called in `dashboard-home.js` DOMContentLoaded** before showing toasts — it clears the navbar dot that was set on subpages while the user was away from the dashboard
 17. **`handleUserWsMessage` must handle `agent_update` for new sessions** — if `type === 'agent_update'` and the session is NOT in `_loadedApps`, call `loadApplications(true)` immediately so extension-submitted jobs appear on the dashboard without a manual refresh
-18. **`_markAnalysisNotified` must be called BEFORE `await loadApplications(true)` in `handleUserWsMessage`** — if called after, `syncProcessingApps` inside `renderApplications` may fire a second `notifyReady` for the same session before the mark is set
+18. **`handleUserWsMessage` must not pre-call `_markAnalysisNotified` before `await loadApplications(true)` on `workflow_complete` / `workflow_error`** — that blocked `notifyReady` from ever showing. **`notifyReady()`** performs `_markAnalysisNotified` at the start (after its `_isAnalysisNotified` guard); pass **`failureDetail`** for errors
 19. **`notifyReady` must guard at entry with `if (_isAnalysisNotified(detailId)) return`** — the WS handler and the poll fallback can race; without the guard two identical toasts appear for the same analysis
 20. **Processing cards must show skeleton shimmer, not placeholder text** — render `.skeleton-line.skeleton-title` / `.skeleton-line.skeleton-subtitle` when `status === 'processing'` and `job_title` / `company_name` are empty; never show `"Job Application"` / `"Company"` for a card that is still being analyzed
+21. **`RES_3002` from `/workflow/start` must use a warning-style message** — duplicate job is not a server fault; mirror handling in `dashboard-new-application.js` and `dashboard.js`
+22. **`_submittedToastShownForSession` must dedupe "Application submitted!"** — one toast per `session_id` for the `agent_update` + new-card path; do not stack with the sessionStorage redirect toast

@@ -15,11 +15,20 @@ response = await gemini_client.generate(
     prompt=prompt,
     system=system_message,       # optional
     temperature=0.7,
-    max_tokens=10000,
+    max_tokens=16000,            # default — see Unified output cap below
     user_api_key=user_api_key,   # BYOK — pass from workflow state
 )
 text = response.get("response", "")
 ```
+
+## Unified LLM output token cap (16,000)
+
+`utils/llm_client.py` defines **`DEFAULT_MAX_TOKENS = 16000`**. All workflow agents, career-tool agents, `InterviewPrepAgent`, `utils/resume_parser.py`, and any `gemini_client.generate(...)` that passes an explicit cap use **16,000 max output tokens** so long JSON responses are not truncated by a lower per-agent ceiling.
+
+- Omitting `max_tokens` on `generate()` uses **`DEFAULT_MAX_TOKENS`**.
+- Per-agent modules typically expose **`LLM_MAX_TOKENS`** / **`AI_MAX_TOKENS`** set to **16000** for explicit calls.
+
+Raising this default increases worst-case latency and API cost; change it in one place (`DEFAULT_MAX_TOKENS`) and align agent constants.
 
 ## BYOK in Agents (always pass user key + optional model override)
 ```python
@@ -129,6 +138,13 @@ raise GeminiError(f"Vertex AI generate failed: {e}")
 ```
 
 Callers that catch `GeminiError` should check `status_code` for 429 (rate-limited) vs 5xx (service error) before deciding whether to retry manually.
+
+## User-facing LLM error strings (`user_facing_message_from_llm_exception`)
+
+Use **`user_facing_message_from_llm_exception(exc)`** in `utils/llm_client.py` when converting caught exceptions to strings shown to users or stored in **`workflow_sessions.error_messages`**, WebSocket `workflow_error` payloads, resume parse failures, etc.
+
+- Maps quota / rate-limit / `RESOURCE_EXHAUSTED` to concise, actionable copy (no raw stack traces in production).
+- **`workflows/state_schema.add_error()`** stores the message **without** an `[agent_name]` prefix — which agent failed stays in `failed_agents` and logs only.
 
 ## Retry Logic
 - `tenacity`: 3 attempts, exponential backoff (2s → 4s → 8s)

@@ -81,19 +81,28 @@ The popup (`popup.html` / `popup.css`) mirrors the main app's design system exac
 
 Replaces the old `position: fixed` floating toast. The bar is always inside the popup frame and is never clipped by popup height changes during view transitions.
 
+**Typography (source of truth: `extension/popup/popup.css`):** body text **14px**, **line-height ~1.45**, **max-height ~120px** with vertical scroll for long API messages (e.g. duplicate-job copy), **`align-items: flex-start`** so the icon aligns with wrapped lines; hint under the primary button (`.action-hint`) is **12px**. Do not shrink the bar back to a single-line **48px** clip — long `RES_3002` messages must remain readable.
+
 ```html
 <!-- popup.html — inserted immediately after </header> -->
 <div id="popupNotification" class="popup-notification hidden" role="alert" aria-live="polite"></div>
 ```
 
 ```css
-/* popup.css */
+/* popup.css — illustrative; match the live file */
 .popup-notification {
-  display: flex; align-items: center; gap: 8px;
-  padding: 10px 16px;
-  max-height: 48px; overflow: hidden;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  font-size: 14px;
+  line-height: 1.45;
+  max-height: 120px;
+  overflow-x: hidden;
+  overflow-y: auto;
   transition: max-height 0.25s ease, opacity 0.25s ease, padding 0.25s ease;
 }
+.popup-notification > span { flex: 1; min-width: 0; }
 .popup-notification.hidden { max-height: 0; padding-top: 0; padding-bottom: 0; opacity: 0; }
 .popup-notification.success { background: rgba(16,185,129,.18); border-bottom: 1px solid rgba(16,185,129,.35); color: #34d399; }
 .popup-notification.error   { background: rgba(239,68,68,.18);  border-bottom: 1px solid rgba(239,68,68,.35);  color: #f87171; }
@@ -109,12 +118,17 @@ function showToast(message, type = 'info') {
   const icons = { success: 'fa-circle-check', error: 'fa-circle-xmark', info: 'fa-circle-info' };
   if (_notifTimer) { clearTimeout(_notifTimer); _notifTimer = null; }
   bar.className = `popup-notification ${type}`;
-  bar.innerHTML = `<i class="fas ${icons[type] ?? icons.info} notif-icon"></i><span>${message}</span>`;
+  const icon = icons[type] ?? icons.info;
+  bar.innerHTML = `<i class="fas ${icon} notif-icon"></i><span>${message}</span>`;
   _notifTimer = setTimeout(() => { bar.classList.add('hidden'); _notifTimer = null; }, 3000);
 }
 ```
 
 **Never revert to `position: fixed` toast appended to `document.body`** — it disappears when the popup changes height during view transitions.
+
+### Duplicate workflow start — `RES_3002`
+
+If `POST .../workflow/start` returns **409** with `error_code === 'RES_3002'`, the user already has an application for that job. **`popup.js`** / **`service-worker.js`** must show an **info** (or warning-style) message via `showToast` / the same UX path — not a generic network error. Details: `applypilot-core.mdc` (`RES_3002`) and `docs/workflow-duplicate-detection.md`.
 
 ## Content Extraction Priority
 ```javascript
@@ -180,6 +194,7 @@ if source == "extension":
 1. **Never reference a popup DOM element without a null check** — elements may be absent if the HTML evolves. Example: `if (elements.copyBtn) elements.copyBtn.disabled = true;`. A missing element that is accessed unconditionally in `showExtracting()` or a similar setup function will throw a `TypeError` that silently aborts the entire extraction flow before the `try/catch` block is reached.
 2. **Never send `detected_title` or `detected_company` from the extension** — browser page titles are unreliable (e.g. `"(5) LinkedIn"`, `"Careers | Company"`). Send only `job_text`; the dashboard shows skeleton shimmers while the Job Analyzer extracts the correct title and company.
 3. **Never revert to `position: fixed` toast in the popup** — use the `#popupNotification` inline bar; see above.
+4. **Handle `RES_3002` (409) from `/workflow/start` explicitly** — show the server message (or an equivalent friendly line) in the inline notification bar; do not treat it as an uncaught fetch failure.
 
 ## Development Setup
 ```bash

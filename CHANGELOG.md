@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+#### Profile setup — Years of Experience can be zero
+
+`profile-setup.js` no longer treats **`0`** years of experience as a missing required field (JavaScript falsy bug on `parseInt` results) and correctly pre-fills the field when the saved profile has **0**. Backend validation already allowed `ge=0`; only the client-side checks needed fixing.
+
+### Changed
+
+#### LLM — unified max output tokens (16,000)
+
+All workflow agents, career-tool agents, interview prep, `utils/resume_parser.py`, and `gemini_client.generate()` defaults use **`DEFAULT_MAX_TOKENS = 16000`** in `utils/llm_client.py` so long structured outputs are not capped by mixed per-agent limits.
+
+#### Caching — job analysis Redis key
+
+Job analysis cache keys (`_get_job_cache_key` in `utils/cache.py`) hash normalized URL plus up to **50,000** characters of job text (`_MAX_JOB_CONTENT_FOR_CACHE_KEY`), reducing false cache hits when different roles share the same long page or URL chrome.
+
+#### Dashboard — application list refresh races
+
+`loadApplications` in `dashboard-home.js` uses a **single-flight** pattern (`_pendingLoadApplicationsReset`, `_loadApplicationsInFlight`, `_loadApplicationsSinglePass`) so overlapping WebSocket-driven refreshes do not drop a full reload while a fetch is already in progress.
+
 ### Added
 
 #### Chrome Extension — Instant Job Title & Company on Dashboard

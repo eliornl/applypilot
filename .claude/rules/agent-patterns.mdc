@@ -33,6 +33,8 @@ Step 4 (PARALLEL):   Cover Letter Writer  +  Resume Advisor
 
 **Cover Letter Writer and Resume Advisor run in parallel** — they do not depend on each other; do not introduce a sequential dependency between them.
 
+**Any single agent failure fails the entire workflow** — the session ends `failed`, parallel document generation requires **both** agents to succeed, and partial agent JSON is not left on `workflow_sessions` for API clients (see **`applypilot-core.mdc`** workflow failure section and **`docs/workflow-failure-behavior.md`**).
+
 The default gate threshold is **50%** (`workflow_gate_threshold: 0.5` in `DEFAULT_WORKFLOW_PREFERENCES`). Users can configure it in **Settings → Preferences**.
 
 ## Standard Agent Structure
@@ -51,7 +53,7 @@ class MyAgent:
             prompt=prompt,
             system=SYSTEM_CONTEXT,
             temperature=0.7,
-            max_tokens=4000,
+            max_tokens=16000,  # unified cap — use LLM_MAX_TOKENS in real agents
             user_api_key=self._current_user_api_key,  # BYOK
         )
 

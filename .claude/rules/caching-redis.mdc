@@ -12,7 +12,7 @@ All keys are prefixed with `CACHE_VERSION` (currently `v1`). Bump `CACHE_VERSION
 ## Cache TTLs and Key Patterns
 | Cache | TTL | Key pattern |
 |-------|-----|-------------|
-| Job analysis | 24h | `v1:job_analysis:{hash}` |
+| Job analysis | 24h | `v1:job_analysis:{hash}` — hash includes URL + up to **50,000** chars of normalized job text (`_MAX_JOB_CONTENT_FOR_CACHE_KEY` in `utils/cache.py`) so different listings on the same long page do not share one cache entry |
 | Company research | 7d | `v1:company_research:{hash}:{name}` |
 | User profile | 5min | `v1:user_profile:{uuid}` |
 | Workflow state | 1min | `v1:workflow_state:{session_id}` |
@@ -58,6 +58,9 @@ await cache_job_analysis(result, job_url=url)
 # Invalidate on update
 await invalidate_user_profile(user_id)
 ```
+
+## Job analysis cache key — content length
+`_get_job_cache_key(job_url, job_content)` builds the Redis key from the normalized URL and a **prefix of job text up to 50,000 characters** (not a short fixed prefix). That avoids false cache hits when the same board URL is reused for different roles on one page.
 
 ## Stampede Protection (for slow shared computations)
 Prevents N concurrent cache misses from spawning N LLM calls. Use for job analysis, company research, and any other shared expensive compute:

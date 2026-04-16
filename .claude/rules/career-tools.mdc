@@ -310,7 +310,7 @@ class ExampleToolAgent:
 
         prompt = PROMPT_TEMPLATE.format(required_param=required_param, ...)
         response = await self.gemini_client.generate(
-            prompt=prompt, system=SYSTEM_CONTEXT, temperature=0.7, max_tokens=4000,
+            prompt=prompt, system=SYSTEM_CONTEXT, temperature=0.7, max_tokens=16000,
             user_api_key=self._current_user_api_key,
         )
 

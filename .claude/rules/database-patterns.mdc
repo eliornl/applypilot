@@ -49,7 +49,7 @@ The `UserProfile` model contains exactly these fields. **There is no `education`
 | Field | Type | Notes |
 |---|---|---|
 | `professional_title` | String | Current job title |
-| `years_experience` | Integer | |
+| `years_experience` | Integer | Total career years; **`0` is valid** (`BasicInfo` `ge=0`). Dashboard JS must not treat `0` as “empty” (see `frontend-js-strict.mdc`, “Required numeric fields”). |
 | `summary` | Text | Professional summary, 3–4 sentences |
 | `city` | String(100) | Optional location |
 | `state` | String(100) | Optional |

@@ -19,6 +19,15 @@ alwaysApply: false
 10. Add E2E mocked coverage in `api-validation.spec.ts` — add a test that mocks the endpoint and verifies the frontend renders its response without JS errors
 11. If the endpoint returns 429, add a matching test in `rate-limit.spec.ts`
 
+## Workflow start — duplicate detection (`POST /api/v1/workflow/start`)
+
+Before changing how jobs are keyed or deduplicated:
+
+1. **`api/workflow.py`** — `_find_duplicate_active_application` / `_fingerprint_job_content` / `_canonical_job_url`; duplicate responses use **`RES_3002`** (409) and must **release** `workflow_creating:{user_id}` on that path.
+2. **Fingerprint** — stored on `WorkflowSession.job_input_data["content_fingerprint"]` only when normalized text length **≥ 80** (constant `_MIN_JOB_CONTENT_FINGERPRINT_CHARS`).
+3. **Tests** — extend `tests/test_api/test_workflow.py` for new duplicate cases; **frontend** must handle `RES_3002` in `dashboard-new-application.js`, `dashboard.js`, and the Chrome extension (`popup.js`, `service-worker.js`).
+4. **Docs** — `docs/workflow-duplicate-detection.md` and `applypilot-core.mdc` § `RES_3002`.
+
 ## New Database Column
 
 1. Add mapped column to the SQLAlchemy model in `models/database.py`
@@ -33,7 +42,7 @@ alwaysApply: false
 1. Create agent class in `agents/` following the standard structure
 2. Add `process()` or equivalent async method with BYOK support
 3. Add state fields in `workflows/state_schema.py`
-4. Add node and edges in `workflows/job_application_workflow.py`
+4. Add node and edges in `workflows/job_application_workflow.py` — **any failure in the node must fail the workflow** per `docs/workflow-failure-behavior.md` (route to error handling, no partial outputs on `failed`)
 5. Add `flag_modified()` for the new JSONB result field in `_save_workflow_state`
 6. Add agent timing tracking (`agent_durations`)
 7. If the agent caches shared (non-user-specific) results, add stampede protection via `acquire_compute_lock()` / `release_compute_lock()` (see `agent-patterns.mdc`)
