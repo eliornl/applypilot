@@ -297,7 +297,7 @@
         // Populate professional details
         if (profileData.professional_title)
             document.getElementById("professional-title").value = profileData.professional_title;
-        if (profileData.years_experience)
+        if (profileData.years_experience != null)
             document.getElementById("years-experience").value = profileData.years_experience;
         if (profileData.summary)
             document.getElementById("summary").value = profileData.summary;
@@ -1303,17 +1303,28 @@
             const formData = new FormData(document.getElementById("basic-info-form"));
             const data = Object.fromEntries(formData.entries());
 
-            // Convert years_experience to integer
-            if (data.years_experience) {
-                data.years_experience = parseInt(data.years_experience);
-            }
-
             // Convert is_student checkbox to boolean
             data.is_student = data.is_student === "on";
 
             // Ensure all required fields are present
             const requiredFields = ["city", "state", "country", "professional_title", "years_experience", "summary"];
             for (const field of requiredFields) {
+                if (field === "years_experience") {
+                    const raw = data.years_experience;
+                    if (raw === undefined || raw === null) {
+                        throw new Error(`Missing required field: ${field}`);
+                    }
+                    const trimmed = String(raw).trim();
+                    if (trimmed === "") {
+                        throw new Error(`Missing required field: ${field}`);
+                    }
+                    const parsed = parseInt(trimmed, 10);
+                    if (Number.isNaN(parsed)) {
+                        throw new Error(`Missing required field: ${field}`);
+                    }
+                    data.years_experience = parsed;
+                    continue;
+                }
                 if (!data[field]) {
                     throw new Error(`Missing required field: ${field}`);
                 }
