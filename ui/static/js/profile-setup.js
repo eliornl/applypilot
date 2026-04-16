@@ -304,10 +304,17 @@
 
         // Student status field has been removed
 
-        // Work experience
-        if (profileData.work_experience) {
-            workExperience = profileData.work_experience;
-            renderWorkExperience();
+        // Work experience — empty array is truthy in JS; sync "no experience" checkbox
+        workExperience = Array.isArray(profileData.work_experience)
+            ? profileData.work_experience
+            : [];
+        renderWorkExperience();
+        const noExpOnLoad = /** @type {HTMLInputElement|null} */ (document.getElementById("no-experience"));
+        if (noExpOnLoad) {
+            noExpOnLoad.checked = workExperience.length === 0;
+            if (noExpOnLoad.checked) {
+                noExpOnLoad.dispatchEvent(new Event("change"));
+            }
         }
 
         // Skills
@@ -1329,18 +1336,22 @@
      */
     async function saveWorkExperience() {
         try {
-            // If "no experience" is checked, save an empty array regardless of loaded data
             const noExpCheckbox = /** @type {HTMLInputElement|null} */ (document.getElementById("no-experience"));
+            // If "no experience" is checked, persist [] so the server can mark step 2 complete
             if (noExpCheckbox && noExpCheckbox.checked) {
                 workExperience = [];
+                await makeAuthenticatedApiCall("/profile/work-experience", "PUT", {
+                    work_experience: [],
+                });
+                return true;
             }
 
-            // Verify we have work experience data
             if (!workExperience || !Array.isArray(workExperience) || workExperience.length === 0) {
-                console.warn("No work experience to save, creating empty array");
-                workExperience = [];
-                // Return true since an empty array is valid
-                return true;
+                console.error("saveWorkExperience: empty work experience without no-experience option");
+                showError(
+                    'Please add at least one work experience entry or check "I don\'t have any relevant work experience yet".',
+                );
+                return false;
             }
 
             // Create a deep copy of work experience to avoid modifying the original

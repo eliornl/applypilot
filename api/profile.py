@@ -1435,8 +1435,12 @@ def _check_work_experience_completion(user_profile: Optional[UserProfileModel]) 
     if not user_profile:
         return False
 
-    work_experience = user_profile.work_experience or []
-    return len(work_experience) >= 1
+    work_experience = user_profile.work_experience
+    # NULL = step never saved. Empty JSON list [] = user saved "no relevant experience yet"
+    # (distinct from NULL in PostgreSQL JSONB).
+    if work_experience is None:
+        return False
+    return True
 
 
 def _check_skills_qualifications_completion(user_profile: Optional[UserProfileModel]) -> bool:

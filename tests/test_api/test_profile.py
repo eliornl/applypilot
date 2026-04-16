@@ -110,6 +110,33 @@ class TestUpdateBasicInfo:
 
 
 # ---------------------------------------------------------------------------
+# PUT /profile/work-experience
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateWorkExperience:
+    """PUT /api/v1/profile/work-experience"""
+
+    @pytest.mark.asyncio
+    async def test_no_auth_returns_401_or_403(self, api_client):
+        resp = await api_client.put(f"{BASE}/work-experience", json={"work_experience": []})
+        assert resp.status_code in (401, 403)
+
+    @pytest.mark.asyncio
+    async def test_empty_list_marks_work_experience_step_complete(self, authed_client_with_user):
+        """Explicit [] is stored in JSONB and counts as completing step 2 (no experience yet)."""
+        resp = await authed_client_with_user.put(
+            f"{BASE}/work-experience",
+            json={"work_experience": []},
+        )
+        assert resp.status_code in (200, 201, 204)
+        st = await authed_client_with_user.get(f"{BASE}/status")
+        assert st.status_code == 200
+        data = st.json()
+        assert "work_experience" in data.get("completed_steps", [])
+
+
+# ---------------------------------------------------------------------------
 # PUT /profile/skills-qualifications
 # ---------------------------------------------------------------------------
 
