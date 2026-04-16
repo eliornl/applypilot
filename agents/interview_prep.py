@@ -24,7 +24,7 @@ structured_logger = get_structured_logger(__name__)
 
 # LLM Configuration
 LLM_TEMPERATURE: float = 0.4  # Slightly creative for question generation
-LLM_MAX_TOKENS: int = 16000  # Interview prep needs comprehensive output
+LLM_MAX_TOKENS: int = 16000  # Unified agent output cap
 
 # =============================================================================
 # PROMPTS

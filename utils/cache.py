@@ -304,14 +304,19 @@ async def cache_delete_pattern(pattern: str) -> int:
 # JOB ANALYSIS CACHE
 # =============================================================================
 
+# Must match api/workflow.py MAX_TEXT_LENGTH — hash enough of the posting that
+# cache keys differ when the job body differs after a long shared page chrome
+# (nav, feed shell, etc. on job-board SPAs).
+_MAX_JOB_CONTENT_FOR_CACHE_KEY: int = 50000
+
 
 def _get_job_cache_key(job_url: Optional[str], job_content: Optional[str]) -> str:
     """Generate versioned cache key for job analysis."""
     if job_url:
         content_hash = generate_hash(job_url)
     elif job_content:
-        # Use first 2000 chars for hash to handle variations
-        content_hash = generate_hash(job_content[:2000])
+        normalized = job_content[:_MAX_JOB_CONTENT_FOR_CACHE_KEY]
+        content_hash = generate_hash(normalized)
     else:
         return ""
     return f"{CACHE_VERSION}:{CACHE_PREFIX_JOB_ANALYSIS}:{content_hash}"

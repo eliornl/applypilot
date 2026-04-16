@@ -1063,7 +1063,7 @@ Generate 4-6 interview stages, 8-10 likely questions with personalized suggested
                 prompt=prompt,
                 system="You are an expert interview coach. Return only valid JSON.",
                 temperature=0.7,
-                max_tokens=6000,
+                max_tokens=16000,
                 user_api_key=user_api_key,
             ),
             timeout=180.0,

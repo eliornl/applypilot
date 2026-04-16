@@ -30,7 +30,7 @@ import asyncio
 
 # Default generation parameters
 DEFAULT_TEMPERATURE: float = 0.7
-DEFAULT_MAX_TOKENS: int = 10000
+DEFAULT_MAX_TOKENS: int = 16000
 
 # Timeout and connection constants
 DEFAULT_TIMEOUT: int = 180  # 3 minutes for larger prompts
@@ -173,7 +173,7 @@ class GeminiClient:
             model: Name of the model to use (optional, uses default if not specified)
             system: System message to set context
             temperature: Sampling temperature (0.0-1.0, default: 0.7)
-            max_tokens: Maximum tokens to generate (default: 2048)
+            max_tokens: Maximum tokens to generate (default: 16000)
             use_cache: Whether to use Redis cache for this request (default: False)
                       Enable for deterministic prompts that don't need fresh responses.
             user_api_key: Optional user-provided API key (BYOK mode).

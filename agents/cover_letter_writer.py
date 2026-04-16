@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 LLM_TEMPERATURE: float = 0.5  # Balanced: professional yet engaging
-LLM_MAX_TOKENS: int = 4000  # Cover letters should be concise
+LLM_MAX_TOKENS: int = 16000  # Aligned with unified agent output cap
 LLM_TIMEOUT: int = 60  # seconds
 
 # =============================================================================

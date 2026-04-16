@@ -22,7 +22,7 @@ from utils.llm_parsing import parse_json_from_llm_response
 logger: logging.Logger = logging.getLogger(__name__)
 
 # LLM Configuration
-LLM_MAX_TOKENS: int = 8000
+LLM_MAX_TOKENS: int = 16000  # Unified agent output cap
 LLM_TEMPERATURE: float = 0.2  # Low temperature for accurate extraction
 
 # File processing

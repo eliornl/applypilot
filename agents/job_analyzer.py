@@ -31,7 +31,7 @@ MAX_CONTENT_LENGTH_FOR_AI: int = 10000  # AI input limit for performance
 
 # AI processing parameters
 AI_TEMPERATURE: float = 0.1  # Low temperature for consistent extraction
-AI_MAX_TOKENS: int = 8000  # Job analysis JSON typically needs 3K-5K tokens
+AI_MAX_TOKENS: int = 16000  # Aligned with unified agent output cap
 
 # =============================================================================
 # PROMPTS

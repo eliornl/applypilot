@@ -20,7 +20,7 @@ structured_logger = get_structured_logger(__name__)
 
 # LLM Configuration
 LLM_TEMPERATURE = 0.7
-LLM_MAX_TOKENS = 4000
+LLM_MAX_TOKENS = 16000  # Unified agent output cap
 
 # Follow-up stages
 FOLLOWUP_STAGES = [

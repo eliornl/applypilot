@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 LLM_TEMPERATURE: float = 0.25  # Low for consistent, practical advice
-LLM_MAX_TOKENS: int = 12000  # Comprehensive structured output
+LLM_MAX_TOKENS: int = 16000  # Aligned with unified agent output cap
 LLM_TIMEOUT: float = 90.0  # Longer timeout for detailed analysis
 
 # =============================================================================

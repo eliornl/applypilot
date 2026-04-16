@@ -20,7 +20,7 @@ structured_logger = get_structured_logger(__name__)
 
 # LLM Configuration
 LLM_TEMPERATURE = 0.6
-LLM_MAX_TOKENS = 8000
+LLM_MAX_TOKENS = 16000  # Unified agent output cap
 
 # =============================================================================
 # PROMPT TEMPLATES

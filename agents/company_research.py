@@ -22,7 +22,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 # LLM settings
 LLM_TEMPERATURE: float = 0.3  # Factual but not too rigid
-LLM_MAX_TOKENS: int = 10000  # Comprehensive company report
+LLM_MAX_TOKENS: int = 16000  # Aligned with unified agent output cap
 
 # =============================================================================
 # PROMPTS

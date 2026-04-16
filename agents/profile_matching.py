@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # LLM Configuration
 LLM_TEMPERATURE: float = 0.2  # Low temperature for consistent, analytical responses
-LLM_MAX_TOKENS: int = 16000  # Comprehensive analysis needs ~8K-12K tokens avg, 16K for safety margin
+LLM_MAX_TOKENS: int = 16000  # Unified agent output cap
 
 # =============================================================================
 # PROMPTS

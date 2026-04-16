@@ -25,6 +25,13 @@
     let _nextPage   = 1;
     let _isLoading  = false;
 
+    /** When true, run another full list refresh as soon as the current load finishes (WS races). */
+    let _pendingLoadApplicationsReset = false;
+
+    /** Promise for the in-flight `loadApplications` run — lets concurrent callers await the same refresh. */
+    /** @type {Promise<void>|null} */
+    let _loadApplicationsInFlight = null;
+
     /** @type {Set<string>} */
     let _selected = new Set();
 
@@ -430,11 +437,44 @@
      * @param {boolean} [reset] — true starts from page 1 and replaces the list
      */
     async function loadApplications(reset = true) {
-        if (_isLoading) return;
-        _isLoading = true;
+        if (_isLoading) {
+            if (reset) _pendingLoadApplicationsReset = true;
+            return _loadApplicationsInFlight ?? Promise.resolve();
+        }
 
+        const run = (async () => {
+            let passReset = reset;
+            _isLoading = true;
+            try {
+                for (;;) {
+                    await _loadApplicationsSinglePass(passReset);
+                    if (_pendingLoadApplicationsReset) {
+                        _pendingLoadApplicationsReset = false;
+                        passReset = true;
+                        continue;
+                    }
+                    break;
+                }
+            } finally {
+                _isLoading = false;
+            }
+        })();
+
+        _loadApplicationsInFlight = run;
+        try {
+            await run;
+        } finally {
+            _loadApplicationsInFlight = null;
+        }
+    }
+
+    /**
+     * Single fetch + render pass for the application list.
+     * @param {boolean} reset
+     */
+    async function _loadApplicationsSinglePass(reset) {
         const list = document.getElementById('applicationsList');
-        if (!list) { _isLoading = false; return; }
+        if (!list) return;
 
         if (reset) {
             _nextPage   = 1;
@@ -514,7 +554,6 @@
                 notify('Error loading more applications. Please try again.', 'error');
             }
         } finally {
-            _isLoading = false;
             if (reset) list.classList.remove('list-refreshing');
             if (loadMoreBtn && !reset) {
                 loadMoreBtn.removeAttribute('disabled');
@@ -567,7 +606,7 @@
         const token = getAuthToken();
         if (!token) return;
 
-        /** @type {{id: string, detailId: string, jobTitle: string, companyName: string, failed: boolean}[]} */
+        /** @type {{id: string, detailId: string, jobTitle: string, companyName: string, failed: boolean, failureDetail: string}[]} */
         const finished = [];
 
         for (const [id, info] of _processingApps) {
@@ -580,8 +619,12 @@
                 const wfStatus = String(data.status || '').toLowerCase();
                 const done  = ['completed', 'analysis_complete', 'awaiting_confirmation'].includes(wfStatus);
                 const failed = wfStatus === 'failed';
+                let failureDetail = '';
+                if (failed && Array.isArray(data.error_messages) && data.error_messages.length > 0) {
+                    failureDetail = String(data.error_messages[0] || '');
+                }
                 if (done || failed) {
-                    finished.push({ id, ...info, failed });
+                    finished.push({ id, ...info, failed, failureDetail });
                     _processingApps.delete(id);
                 }
             } catch (_e) { /* network hiccup — retry next tick */ }
@@ -590,7 +633,7 @@
         for (const app of finished) {
             // Skip if the WebSocket handler already fired this notification.
             if (!_isAnalysisNotified(app.detailId)) {
-                notifyReady(app.jobTitle, app.companyName, app.detailId, app.failed);
+                notifyReady(app.jobTitle, app.companyName, app.detailId, app.failed, app.failureDetail);
             }
         }
 
@@ -611,8 +654,9 @@
      * @param {string} companyName
      * @param {string} detailId
      * @param {boolean} failed
+     * @param {string} [failureDetail] — server error (WS data.error or status error_messages[0])
      */
-    function notifyReady(jobTitle, companyName, detailId, failed) {
+    function notifyReady(jobTitle, companyName, detailId, failed, failureDetail) {
         // Guard: if already notified (e.g. WS + poll race), bail out immediately.
         if (detailId && _isAnalysisNotified(detailId)) return;
 
@@ -631,6 +675,26 @@
             }
         });
 
+        const detail = typeof failureDetail === 'string' ? failureDetail.trim() : '';
+        const shortDetail = detail.length > 220 ? `${detail.slice(0, 217)}…` : detail;
+
+        let subline = '';
+        if (!failed) {
+            subline = `${escapeHtml(jobTitle)} at ${escapeHtml(companyName)}`;
+        } else if (shortDetail) {
+            subline = escapeHtml(shortDetail);
+        } else if (jobTitle === 'Job Application' && companyName === 'Company') {
+            subline = escapeHtml(
+                'No job title or company was extracted. Use Open to see what went wrong.'
+            );
+        } else {
+            subline = `${escapeHtml(jobTitle)} at ${escapeHtml(companyName)}`;
+        }
+
+        const detailBtn = failed
+            ? `<a href="/dashboard/application/${encodeURIComponent(detailId)}" class="btn btn-sm btn-outline-primary flex-shrink-0">Open</a>`
+            : `<a href="/dashboard/application/${encodeURIComponent(detailId)}" class="btn btn-sm btn-primary flex-shrink-0">View Results</a>`;
+
         const div = document.createElement('div');
         div.className = `alert alert-${failed ? 'warning' : 'success'} fade show`;
         div.setAttribute('role', 'alert');
@@ -639,9 +703,9 @@
                 <i class="fas ${failed ? 'fa-exclamation-circle' : 'fa-check-circle'} flex-shrink-0" aria-hidden="true"></i>
                 <div class="flex-grow-1">
                     <strong>${failed ? 'Analysis failed' : 'Analysis ready!'}</strong>
-                    <div class="notify-ready-sub">${escapeHtml(jobTitle)} at ${escapeHtml(companyName)}</div>
+                    <div class="notify-ready-sub">${subline}</div>
                 </div>
-                ${!failed ? `<a href="/dashboard/application/${encodeURIComponent(detailId)}" class="btn btn-sm btn-primary flex-shrink-0">View Results</a>` : ''}
+                ${detailBtn}
                 <button type="button" class="btn-close ms-2 flex-shrink-0" data-bs-dismiss="alert" aria-label="Close"></button>
             </div>`;
         container.appendChild(div);
@@ -735,7 +799,15 @@
         const jobTitle    = appAfter ? String(appAfter['job_title']    || 'Job Application') : 'Job Application';
         const companyName = appAfter ? String(appAfter['company_name'] || 'Company')         : 'Company';
 
-        notifyReady(jobTitle, companyName, sessionId, type === 'workflow_error');
+        let wsFailureDetail = '';
+        if (type === 'workflow_error') {
+            const d = msg['data'];
+            if (d && typeof d === 'object' && d['error'] != null) {
+                wsFailureDetail = String(d['error']);
+            }
+        }
+
+        notifyReady(jobTitle, companyName, sessionId, type === 'workflow_error', wsFailureDetail);
     }
 
     // =============================================================================
