@@ -156,7 +156,10 @@
             return;
         }
 
-        loadUserData();
+        // Must finish loading saved profile before applying parsed resume from sessionStorage.
+        // Otherwise populateFormData() can resolve after autoFillProfile() and overwrite parsed data.
+        await loadUserData();
+
         initializeEventListeners();
         updateStepDisplay();
 
@@ -179,6 +182,19 @@
         checkApiKeyStatus();
         setupInlineApiKey();
 
+        if (fromResume) {
+            const parsedData = sessionStorage.getItem('parsedResumeData');
+            if (parsedData) {
+                try {
+                    const resumeData = JSON.parse(parsedData);
+                    autoFillProfile(resumeData);
+                    sessionStorage.removeItem('parsedResumeData');
+                } catch (e) {
+                    console.error('Failed to parse resume data:', e);
+                }
+            }
+        }
+
         if (isEditMode) {
             // In edit mode, skip step 0 (resume upload) and go to step 1
             // Use requestAnimationFrame to defer until layout is settled
@@ -191,29 +207,11 @@
             }
         }
 
-        if (fromResume) {
-            // Check for parsed resume data in sessionStorage
-            const parsedData = sessionStorage.getItem('parsedResumeData');
-            if (parsedData) {
-                try {
-                    const resumeData = JSON.parse(parsedData);
-                    // Auto-fill the profile with parsed data (defer until DOM is ready)
-                    requestAnimationFrame(() => {
-                        autoFillProfile(resumeData);
-                        sessionStorage.removeItem('parsedResumeData');
-                        changeStep(1); // Go to Basic Info to review
-                    });
-                } catch (e) {
-                    console.error('Failed to parse resume data:', e);
-                }
-            }
-        }
-
-                    // Update UI
-                    updateStepIndicators();
-                    updateProgressBar();
-                    checkPreferencesStep();
-                    updateStepDisplay();
+        // Update UI
+        updateStepIndicators();
+        updateProgressBar();
+        checkPreferencesStep();
+        updateStepDisplay();
     });
 
     // Abort any in-flight requests when the user navigates away
@@ -761,7 +759,7 @@
             progressBar.classList.remove("d-none", "success");
             progressBar.classList.add("indeterminate");
             setResumeUploadSpinnerVisible(true);
-            statusText.textContent = "Analyzing your resume...";
+            statusText.textContent = "Parsing your resume...";
             statusContainer.className = "upload-status";
 
             // Prepare form data
@@ -870,6 +868,12 @@
 
             // Use existing render function
             renderWorkExperience();
+
+            const noExpEl = /** @type {HTMLInputElement|null} */ (document.getElementById("no-experience"));
+            if (noExpEl && noExpEl.checked) {
+                noExpEl.checked = false;
+                noExpEl.dispatchEvent(new Event("change"));
+            }
         }
 
         // Step 3: Skills

@@ -18,8 +18,10 @@
      * Show a notification via window.app; falls back to alertContainer HTML.
      * @param {string} message
      * @param {string} [type] - 'success' | 'danger' | 'warning' | 'info'
+     * @param {{ loading?: boolean }} [opts] — `loading: true` uses a spinner (info-only), for long-running actions
      */
-    function notify(message, type = 'info') {
+    function notify(message, type = 'info', opts) {
+        const loading = !!(opts && opts.loading);
         const notifType = type === 'danger' ? 'error' : type;
         // @ts-ignore
         const bus = window.eventBus; const busEvents = window.BusEvents;
@@ -31,7 +33,14 @@
         const app = window.app;
         if (app && typeof app.showNotification === 'function') { app.showNotification(message, notifType); return; }
         const container = document.getElementById('alertContainer');
-        if (container) container.innerHTML = `<div class="alert alert-${type} alert-dismissible fade show" role="alert"><i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-triangle'} me-2"></i>${escapeHtml(message)}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`;
+        if (!container) return;
+        /** @type {string} */
+        let iconClass = 'fa-info-circle';
+        if (type === 'success') iconClass = 'fa-check-circle';
+        else if (type === 'danger') iconClass = 'fa-exclamation-circle';
+        else if (type === 'warning') iconClass = 'fa-exclamation-triangle';
+        else if (loading) iconClass = 'fa-circle-notch fa-spin';
+        container.innerHTML = `<div class="alert alert-${type} alert-dismissible fade show" role="alert"><i class="fas ${iconClass} me-2" aria-hidden="true"></i>${escapeHtml(message)}<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Dismiss"></button></div>`;
     }
 
     // =============================================================================
@@ -341,7 +350,7 @@
 
         const formData = new FormData();
         formData.append('resume', file);
-        showAlert('Parsing resume...', 'info');
+        showAlert('Parsing your resume...', 'info', { loading: true });
 
         try {
             const response = await fetch(`${API_BASE}/profile/parse-resume`, {
@@ -767,7 +776,12 @@
      * @param {string} message
      * @param {string} type
      */
-    function showAlert(message, type) { notify(message, type); }
+    /**
+     * @param {string} message
+     * @param {string} [type]
+     * @param {{ loading?: boolean }} [opts]
+     */
+    function showAlert(message, type, opts) { notify(message, type, opts); }
 
     // =============================================================================
     // ACCOUNT SECTION — PASSWORD VISIBILITY
