@@ -10,7 +10,15 @@ Endpoints:
 
 import uuid
 import pytest
+import jwt
 from unittest.mock import AsyncMock, patch, MagicMock
+
+from sqlalchemy import update
+
+from api.workflow import _canonical_job_url
+from config.settings import get_security_settings
+from models.database import ApplicationStatus, JobApplication, User, UserProfile
+from tests.test_api.conftest import _NullSessionLocal
 
 BASE = "/api/v1/workflow"
 SESSION_ID = str(uuid.uuid4())
@@ -154,3 +162,178 @@ class TestWorkflowHistory:
     async def test_pagination_params_accepted(self, authed_client_with_user):
         resp = await authed_client_with_user.get(f"{BASE}/history?page=1&page_size=10")
         assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Duplicate prevention helpers + POST /start conflict
+# ---------------------------------------------------------------------------
+
+
+def test_canonical_job_url_strips_tracking_and_fragments():
+    a = "https://Jobs.EXAMPLE.com/role/abc/?utm_source=x&gclid=1&role=eng"
+    b = "https://jobs.example.com/role/abc?role=eng"
+    assert _canonical_job_url(a) == _canonical_job_url(b)
+
+
+class TestWorkflowStartDuplicate:
+    """POST /api/v1/workflow/start duplicate detection (409)."""
+
+    @pytest.mark.asyncio
+    async def test_duplicate_job_url_returns_409(self, authed_client_with_user):
+        from main import app
+        from utils.auth import get_current_user, get_current_user_with_complete_profile
+
+        token = authed_client_with_user.headers["Authorization"].split(" ", 1)[1]
+        sec = get_security_settings()
+        payload = jwt.decode(
+            token,
+            sec.jwt_config["secret_key"],
+            algorithms=[sec.jwt_config["algorithm"]],
+        )
+        uid = uuid.UUID(payload["sub"])
+
+        job_url = "https://careers.example.com/jobs/tetrix-senior-fs?utm_medium=social"
+
+        async with _NullSessionLocal() as session:
+            await session.execute(
+                update(User).where(User.id == uid).values(profile_completed=True)
+            )
+            session.add(
+                UserProfile(
+                    id=uuid.uuid4(),
+                    user_id=uid,
+                    professional_title="Engineer",
+                    years_experience=5,
+                    summary="Summary text for testing duplicate detection.",
+                    city="City",
+                    state="ST",
+                    country="US",
+                )
+            )
+            session.add(
+                JobApplication(
+                    id=uuid.uuid4(),
+                    user_id=uid,
+                    session_id=None,
+                    status=ApplicationStatus.COMPLETED.value,
+                    job_url="https://careers.example.com/jobs/tetrix-senior-fs",
+                    job_title="Senior Full Stack Engineer",
+                    company_name="Tetrix",
+                )
+            )
+            await session.commit()
+
+        async def _mock_complete_user():
+            return {
+                "id": str(uid),
+                "_id": str(uid),
+                "email": payload.get("email", "u@example.com"),
+                "full_name": "Test User",
+                "auth_method": "local",
+                "is_admin": False,
+                "profile_completed": True,
+                "profile_completion_percentage": 100,
+                "has_google_linked": False,
+                "has_password": True,
+            }
+
+        app.dependency_overrides[get_current_user] = _mock_complete_user
+        app.dependency_overrides[get_current_user_with_complete_profile] = _mock_complete_user
+
+        with patch("utils.redis_client.get_redis_client", AsyncMock(return_value=None)), patch(
+            "config.settings.get_settings",
+            return_value=MagicMock(
+                gemini_api_key="AIzaSyDummyTestKey012345678901234567890",
+                use_cloud_tasks=False,
+                use_vertex_ai=False,
+            ),
+        ):
+            resp = await authed_client_with_user.post(
+                f"{BASE}/start",
+                data={"job_url": job_url},
+            )
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body.get("error_code") == "RES_3002"
+        details = body.get("details") or []
+        assert any(d.get("field") == "application_id" for d in details)
+
+    @pytest.mark.asyncio
+    async def test_duplicate_manual_job_text_returns_409(self, authed_client_with_user):
+        """Same pasted job description twice should 409 (content fingerprint)."""
+        from main import app
+        from utils.auth import get_current_user, get_current_user_with_complete_profile
+
+        token = authed_client_with_user.headers["Authorization"].split(" ", 1)[1]
+        sec = get_security_settings()
+        payload = jwt.decode(
+            token,
+            sec.jwt_config["secret_key"],
+            algorithms=[sec.jwt_config["algorithm"]],
+        )
+        uid = uuid.UUID(payload["sub"])
+
+        long_job = (
+            "We are hiring a Senior Software Engineer - Product to build our platform. "
+            "Requirements include Python, distributed systems, and collaboration. " * 3
+        )
+
+        async with _NullSessionLocal() as session:
+            await session.execute(
+                update(User).where(User.id == uid).values(profile_completed=True)
+            )
+            session.add(
+                UserProfile(
+                    id=uuid.uuid4(),
+                    user_id=uid,
+                    professional_title="Engineer",
+                    years_experience=5,
+                    summary="Summary for fingerprint duplicate test.",
+                    city="City",
+                    state="ST",
+                    country="US",
+                )
+            )
+            await session.commit()
+
+        async def _mock_complete_user():
+            return {
+                "id": str(uid),
+                "_id": str(uid),
+                "email": payload.get("email", "u@example.com"),
+                "full_name": "Test User",
+                "auth_method": "local",
+                "is_admin": False,
+                "profile_completed": True,
+                "profile_completion_percentage": 100,
+                "has_google_linked": False,
+                "has_password": True,
+            }
+
+        app.dependency_overrides[get_current_user] = _mock_complete_user
+        app.dependency_overrides[get_current_user_with_complete_profile] = _mock_complete_user
+
+        mock_settings = MagicMock(
+            gemini_api_key="AIzaSyDummyTestKey012345678901234567890",
+            use_cloud_tasks=False,
+            use_vertex_ai=False,
+        )
+
+        with patch("utils.redis_client.get_redis_client", AsyncMock(return_value=None)), patch(
+            "config.settings.get_settings",
+            return_value=mock_settings,
+        ), patch(
+            "api.workflow._execute_workflow_background",
+            new_callable=AsyncMock,
+        ):
+            r1 = await authed_client_with_user.post(
+                f"{BASE}/start",
+                data={"job_text": long_job},
+            )
+            assert r1.status_code == 200, r1.text
+            r2 = await authed_client_with_user.post(
+                f"{BASE}/start",
+                data={"job_text": long_job},
+            )
+        assert r2.status_code == 409
+        assert r2.json().get("error_code") == "RES_3002"

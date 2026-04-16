@@ -262,7 +262,13 @@ async function startWorkflow(jobContent, sourceUrl, metadata = {}) {
   
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.detail || errorData.message || `API error: ${response.status}`);
+    let msg = errorData.detail || errorData.message || `API error: ${response.status}`;
+    if (errorData.error_code === 'RES_3002') {
+      msg =
+        errorData.message ||
+        'You already have this role and company on your applications list. Open your dashboard—you do not need to add the same job twice.';
+    }
+    throw new Error(msg);
   }
   
   return response.json();

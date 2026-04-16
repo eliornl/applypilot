@@ -475,7 +475,15 @@ async function extractAndSubmitJob() {
     });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
+      const errorData = await response.json().catch(() => (/** @type {Record<string, any>} */ ({})));
+      if (errorData.error_code === 'RES_3002') {
+        hideExtracting();
+        const dupMsg =
+          errorData.message ||
+          'You already have this role and company on your list. Open your dashboard to view that application.';
+        showToast(dupMsg, 'info');
+        return;
+      }
       throw new Error(errorData.detail || errorData.message || `API error: ${response.status}`);
     }
 

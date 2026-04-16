@@ -258,6 +258,7 @@
                         tracked.push({ sessionId });
                         if (tracked.length > 20) tracked.splice(0, tracked.length - 20);
                         localStorage.setItem('applypilot_tracked_sessions', JSON.stringify(tracked));
+                        sessionStorage.setItem('new_application_session_id', sessionId);
                     }
                 } catch (_e) {}
                 sessionStorage.setItem('new_application_toast', 'Application submitted! AI agents are analyzing it in the background.');
@@ -274,6 +275,10 @@
                 if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = originalBtnHtml; }
                 if (errorCode === 'CFG_6001') {
                     showApiKeyAlert();
+                } else if (errorCode === 'RES_3002') {
+                    const dupMsg =
+                        'You already have this role and company on your applications list. Open that card on your dashboard—you do not need to add the same job twice.';
+                    notify(dupMsg, 'warning');
                 } else {
                     showAlert(`Error creating application: ${errorDetail}`, 'danger');
                 }

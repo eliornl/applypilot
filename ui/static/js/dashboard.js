@@ -828,8 +828,12 @@ class DashboardManager {
         throw new Error(response.message || "Failed to start workflow");
       }
     } catch (error) {
-      const err = /** @type {Error} */ (error);
-      this.showMessage(err.message || "Failed to create application", "error");
+      const err = /** @type {Error & { errorCode?: string }} */ (error);
+      const isDup = err.errorCode === "RES_3002";
+      this.showMessage(
+        err.message || "Failed to create application",
+        isDup ? "warning" : "error",
+      );
     } finally {
       this.setFormLoading(form, false);
     }
@@ -1862,7 +1866,13 @@ class DashboardManager {
     let result;
     try { result = await response.json(); } catch { throw new Error(`Invalid JSON response: ${response.status}`); }
     const res = /** @type {Record<string,any>} */ (result);
-    if (!response.ok) throw new Error(res['message'] || res['detail'] || res['error'] || `HTTP ${response.status}`);
+    if (!response.ok) {
+      const fallbackErr = new Error(res['message'] || res['detail'] || res['error'] || `HTTP ${response.status}`);
+      if (res['error_code']) {
+        /** @type {any} */ (fallbackErr).errorCode = res['error_code'];
+      }
+      throw fallbackErr;
+    }
     return result;
   }
 

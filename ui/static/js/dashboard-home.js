@@ -58,6 +58,25 @@
     let _wsReconnectAttempts = 0;
     const WS_MAX_RECONNECT = 8;
 
+    /**
+     * Prevents duplicate "Application submitted!" toasts: WebSocket sends many
+     * `agent_update` events before `loadApplications` adds the new card, so
+     * `!appBefore` was true for each — plus the sessionStorage toast on redirect.
+     * @type {Set<string>}
+     */
+    let _submittedToastShownForSession = new Set();
+
+    /** @param {string} sessionId */
+    function rememberSubmittedToast(sessionId) {
+        if (!sessionId) return;
+        _submittedToastShownForSession.add(sessionId);
+    }
+
+    /** @param {string} sessionId */
+    function hasSubmittedToastForSession(sessionId) {
+        return Boolean(sessionId) && _submittedToastShownForSession.has(sessionId);
+    }
+
     // =============================================================================
     // HELPERS — auth / notify / escape
     // =============================================================================
@@ -775,9 +794,12 @@
         const appBefore = _loadedApps.find(a => String(a['workflow_session_id'] || a['id']) === sessionId);
 
         // A new session started (e.g. submitted from the extension in another tab) —
-        // show a submitted toast and refresh the list so the card appears immediately.
+        // show one submitted toast and refresh so the card appears immediately.
         if (type === 'agent_update' && !appBefore) {
-            notify('Application submitted! AI agents are analyzing it in the background.', 'success', true);
+            if (!hasSubmittedToastForSession(sessionId)) {
+                rememberSubmittedToast(sessionId);
+                notify('Application submitted! AI agents are analyzing it in the background.', 'success', true);
+            }
             loadApplications(true);
             loadStats();
             return;
@@ -1163,8 +1185,11 @@
 
         // Show toast if redirected here after submitting a new application
         const newAppToast = sessionStorage.getItem('new_application_toast');
+        const newAppSid = sessionStorage.getItem('new_application_session_id');
         if (newAppToast) {
             sessionStorage.removeItem('new_application_toast');
+            sessionStorage.removeItem('new_application_session_id');
+            if (newAppSid) rememberSubmittedToast(newAppSid);
             notify(newAppToast, 'success', true);
         }
 

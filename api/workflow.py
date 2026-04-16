@@ -3,9 +3,11 @@ REST API endpoints for managing workflow processing.
 Provides endpoints for starting, monitoring, and managing job application workflows.
 """
 
+import hashlib
 import uuid
 from datetime import datetime, timezone
 import logging
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from utils.logging_config import mask_email as _mask_email
 from typing import Dict, Any, List, Optional
@@ -65,7 +67,16 @@ from models.database import (
     UserWorkflowPreferences,
 )
 from utils.encryption import decrypt_api_key
-from utils.error_responses import internal_error, no_api_key_error, not_found_error, rate_limit_error, unauthorized_error, validation_error
+from utils.error_responses import (
+    APIError,
+    ErrorCode,
+    internal_error,
+    no_api_key_error,
+    not_found_error,
+    rate_limit_error,
+    unauthorized_error,
+    validation_error,
+)
 from utils.security import sanitize_llm_output
 
 # =============================================================================
@@ -133,6 +144,145 @@ def get_user_uuid(current_user: Dict[str, Any]) -> uuid.UUID:
     if isinstance(user_id, str):
         return uuid.UUID(user_id)
     return user_id
+
+
+def _canonical_job_url(url: str) -> str:
+    """
+    Normalize job posting URLs for duplicate detection.
+
+    Lowercases scheme and host, trims trailing slashes on the path, drops URL
+    fragments, and strips common tracking query parameters so two links to the
+    same posting are more likely to match.
+    """
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    parsed = urlparse(raw)
+    scheme = (parsed.scheme or "https").lower()
+    netloc = (parsed.netloc or "").lower()
+    path = (parsed.path or "").rstrip("/")
+    query_str = ""
+    if parsed.query:
+        qs = parse_qs(parsed.query, keep_blank_values=True)
+        noise = frozenset(
+            k.lower()
+            for k in qs
+            if k.lower().startswith("utm_")
+            or k.lower()
+            in {
+                "gclid",
+                "fbclid",
+                "igshid",
+                "mc_eid",
+                "_ga",
+                "ref",
+            }
+        )
+        filtered: list[tuple[str, str]] = []
+        for k in sorted(qs.keys()):
+            if k.lower() in noise:
+                continue
+            for v in qs[k]:
+                filtered.append((k, v))
+        query_str = urlencode(filtered, doseq=True) if filtered else ""
+    return urlunparse((scheme, netloc, path, "", query_str, ""))
+
+
+def _normalize_title_company_key(title: Optional[str], company: Optional[str]) -> Optional[tuple[str, str]]:
+    """Return a comparable (title, company) pair, or None if either side is empty."""
+    if not title or not company:
+        return None
+    t = " ".join(title.strip().lower().split())
+    c = " ".join(company.strip().lower().split())
+    if not t or not c:
+        return None
+    return (t, c)
+
+
+# Minimum length before we trust a content hash for deduplication (avoids collisions on tiny inputs).
+_MIN_JOB_CONTENT_FINGERPRINT_CHARS: int = 80
+
+
+def _fingerprint_job_content(raw: Optional[str]) -> Optional[str]:
+    """
+    Stable SHA-256 hex digest of normalized job posting text (manual / file / extension).
+
+    Used to block starting a second workflow when the user pastes the same posting twice
+    without a URL or pre-detected title/company (cases the DB unique index does not catch
+    until after analysis).
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    normalized = " ".join(raw.strip().lower().split())
+    if len(normalized) < _MIN_JOB_CONTENT_FINGERPRINT_CHARS:
+        return None
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+async def _find_duplicate_active_application(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    effective_job_url: Optional[str],
+    detected_title: Optional[str],
+    detected_company: Optional[str],
+    content_fingerprint: Optional[str],
+) -> Optional[JobApplication]:
+    """
+    If the user already has a non-deleted application for the same job URL, the same
+    title+company pair, or the same normalized job text (fingerprint), return that row.
+    """
+    if effective_job_url:
+        canon = _canonical_job_url(effective_job_url)
+        if canon:
+            res = await db.execute(
+                select(JobApplication).where(
+                    JobApplication.user_id == user_id,
+                    JobApplication.deleted_at.is_(None),
+                    JobApplication.job_url.isnot(None),
+                )
+            )
+            for row in res.scalars().all():
+                if _canonical_job_url(row.job_url or "") == canon:
+                    return row
+
+    key = _normalize_title_company_key(detected_title, detected_company)
+    if key is not None:
+        nt, nc = key
+        res2 = await db.execute(
+            select(JobApplication)
+            .where(
+                JobApplication.user_id == user_id,
+                JobApplication.deleted_at.is_(None),
+                JobApplication.job_title.isnot(None),
+                JobApplication.company_name.isnot(None),
+                func.lower(func.btrim(JobApplication.job_title)) == nt,
+                func.lower(func.btrim(JobApplication.company_name)) == nc,
+            )
+            .limit(1)
+        )
+        dup = res2.scalar_one_or_none()
+        if dup:
+            return dup
+
+    if content_fingerprint:
+        res3 = await db.execute(
+            select(JobApplication)
+            .join(
+                WorkflowSession,
+                JobApplication.session_id == WorkflowSession.session_id,
+            )
+            .where(
+                JobApplication.user_id == user_id,
+                JobApplication.deleted_at.is_(None),
+                WorkflowSession.job_input_data.contains(
+                    {"content_fingerprint": content_fingerprint}
+                ),
+            )
+            .limit(1)
+        )
+        return res3.scalar_one_or_none()
+
+    return None
 
 
 # =============================================================================
@@ -366,9 +516,6 @@ async def start_workflow(
         if not resolved_url and not resolved_text and not file_content:
             raise validation_error("At least one input method is required: job_url, job_text, or job_file")
 
-        # Create session ID
-        session_id = str(uuid.uuid4())
-
         # Get user profile data
         profile_result = await db.execute(
             select(UserProfile).where(UserProfile.user_id == user_id)
@@ -427,20 +574,71 @@ async def start_workflow(
         detected_title = (request.detected_title if request else None) or detected_title_form
         detected_company = (request.detected_company if request else None) or detected_company_form
 
-        # Determine input method
+        effective_job_url = resolved_url if resolved_url else source_url
+
+        # Resolve input method and job text before duplicate check so we can fingerprint
+        # pasted job descriptions (manual / file / extension) even without a URL.
         if resolved_url:
             input_method = InputMethod.URL.value
             job_input = resolved_url
+            content_fingerprint: Optional[str] = None
         elif file_content:
             input_method = InputMethod.FILE.value
             job_input = file_content.decode("utf-8", errors="ignore")
+            content_fingerprint = _fingerprint_job_content(job_input)
         elif source == "extension":
-            # Content extracted via Chrome extension
             input_method = InputMethod.EXTENSION.value
             job_input = resolved_text
+            content_fingerprint = _fingerprint_job_content(resolved_text)
         else:
             input_method = InputMethod.MANUAL.value
             job_input = resolved_text
+            content_fingerprint = _fingerprint_job_content(resolved_text)
+
+        dup_row = await _find_duplicate_active_application(
+            db,
+            user_id,
+            effective_job_url,
+            detected_title,
+            detected_company,
+            content_fingerprint,
+        )
+        if dup_row:
+            dup_details: List[Dict[str, Any]] = [
+                {
+                    "field": "application_id",
+                    "message": str(dup_row.id),
+                    "code": "DUPLICATE_APPLICATION",
+                },
+            ]
+            if dup_row.session_id:
+                dup_details.append(
+                    {
+                        "field": "session_id",
+                        "message": dup_row.session_id,
+                        "code": "DUPLICATE_APPLICATION",
+                    }
+                )
+            # APIError subclasses HTTPException — outer handler re-raises HTTPException
+            # without running the lock-release path; release workflow_creating here.
+            try:
+                from utils.redis_client import get_redis_client as _dup_wf_rc
+                _dwrc = await _dup_wf_rc()
+                if _dwrc:
+                    await _dwrc.delete(f"workflow_creating:{user_id}")
+            except Exception:
+                logger.debug(
+                    "Failed to release workflow creation lock after duplicate hit",
+                    exc_info=True,
+                )
+            raise APIError(
+                error_code=ErrorCode.RESOURCE_ALREADY_EXISTS,
+                message="You already have an application for this job. Open it from your dashboard, or delete the old one first if you want to start over.",
+                status_code=status.HTTP_409_CONFLICT,
+                details=dup_details,
+            )
+
+        session_id = str(uuid.uuid4())
 
         # Create workflow session
         workflow_session = WorkflowSession(
@@ -460,14 +658,14 @@ async def start_workflow(
                 "source_url": source_url,  # URL where content was extracted (for extension)
                 "detected_title": detected_title,  # Pre-detected job title
                 "detected_company": detected_company,  # Pre-detected company name
+                "content_fingerprint": content_fingerprint,
             },
             user_data=user_data,
             processing_start_time=datetime.now(timezone.utc),
         )
 
         # Create job application entry with job_url if available
-        # For extension, use source_url as job_url
-        effective_job_url = resolved_url if resolved_url else source_url
+        # For extension, use source_url as job_url (effective_job_url set above)
         job_application = JobApplication(
             id=uuid.uuid4(),
             user_id=user_id,

@@ -403,7 +403,13 @@ class JobApplicationAssistant {
                     }
                     
                     if (!retryResponse.ok) {
-                        throw new Error(retryResult.message || retryResult.error || `HTTP ${retryResponse.status}`);
+                        const retryErr = new Error(
+                            retryResult.message || retryResult.error || `HTTP ${retryResponse.status}`,
+                        );
+                        if (retryResult.error_code) {
+                            /** @type {any} */ (retryErr).errorCode = retryResult.error_code;
+                        }
+                        throw retryErr;
                     }
                     
                     return retryResult;
@@ -423,7 +429,13 @@ class JobApplicationAssistant {
             }
 
             if (!response.ok) {
-                throw new Error(result.message || result.detail || result.error || `HTTP ${response.status}`);
+                const apiErr = new Error(
+                    result.message || result.detail || result.error || `HTTP ${response.status}`,
+                );
+                if (result.error_code) {
+                    /** @type {any} */ (apiErr).errorCode = result.error_code;
+                }
+                throw apiErr;
             }
 
             return result;
