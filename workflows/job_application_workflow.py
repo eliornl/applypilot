@@ -29,6 +29,7 @@ STEP 4: Run in PARALLEL (both at same time)
 """
 
 import logging
+import uuid
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import Dict, Any, Optional, Tuple
@@ -1321,6 +1322,31 @@ class JobApplicationWorkflow:
                                         update(JobApplicationModel)
                                         .where(JobApplicationModel.session_id == session_id)
                                         .values(**_early_vals)
+                                    )
+                                try:
+                                    from utils.application_dedupe import (
+                                        soft_delete_older_duplicates_for_same_job,
+                                    )
+
+                                    n_dup = await soft_delete_older_duplicates_for_same_job(
+                                        self.db,
+                                        user_id=uuid.UUID(str(state["user_id"])),
+                                        job_title=_early_title,
+                                        company_name=_early_company,
+                                        keep_session_id=session_id,
+                                    )
+                                    if n_dup:
+                                        structured_logger.info(
+                                            "Removed %s older duplicate application row(s) "
+                                            "after job analyzer title write (session=%s)",
+                                            n_dup,
+                                            session_id,
+                                        )
+                                except Exception as dedupe_err:
+                                    logger.debug(
+                                        "Duplicate application cleanup skipped: %s",
+                                        dedupe_err,
+                                        exc_info=True,
                                     )
                             except Exception as _upd_err:
                                 logger.debug(

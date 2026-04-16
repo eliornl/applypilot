@@ -430,15 +430,53 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
             };
           }
           
-          // Otherwise extract job content (same as content script)
-          const body = document.body.cloneNode(true);
+          // Otherwise extract job content (align with popup extractPageContent root choice)
+          function getPreferredJobContentRoot() {
+            try {
+              const host = window.location.hostname || '';
+              const path = window.location.pathname || '';
+              if (!/linkedin\.(com|cn)$/i.test(host) || !/\/jobs/i.test(path)) {
+                return null;
+              }
+              const trySelectors = ['.jobs-search__job-details-body', '.jobs-details__main-content'];
+              for (const sel of trySelectors) {
+                const el = document.querySelector(sel);
+                const t = el && (el.innerText || el.textContent || '').trim();
+                if (t && t.length >= 80) return el;
+              }
+              const articles = document.querySelectorAll('article.jobs-description__container');
+              if (articles.length === 0) return null;
+              let best = null;
+              let bestLen = 0;
+              articles.forEach((a) => {
+                const len = (a.innerText || '').length;
+                if (len > bestLen) {
+                  bestLen = len;
+                  best = a;
+                }
+              });
+              if (!best) return null;
+              const wrap =
+                best.closest('.jobs-search__job-details-body') ||
+                best.closest('[class*="jobs-details"]') ||
+                best.closest('main') ||
+                best;
+              const t = (wrap.innerText || '').trim();
+              return t.length >= 80 ? wrap : null;
+            } catch (e) {
+              return null;
+            }
+          }
+
+          const rootEl = getPreferredJobContentRoot() || document.body;
+          const body = rootEl.cloneNode(true);
           ['script', 'style', 'noscript', 'iframe', 'header', 'footer', 'nav'].forEach(tag => {
             body.querySelectorAll(tag).forEach(el => el.remove());
           });
           
           return {
             content: body.textContent.replace(/\s+/g, ' ').trim().substring(0, 50000),
-            title: document.querySelector('h1')?.textContent?.trim() || document.title,
+            title: body.querySelector('h1')?.textContent?.trim() || document.title,
             company: '',
             url: window.location.href
           };

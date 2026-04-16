@@ -4,6 +4,8 @@ Provides endpoints for starting, monitoring, and managing job application workfl
 """
 
 import hashlib
+import re
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 import logging
@@ -78,6 +80,8 @@ from utils.error_responses import (
     validation_error,
 )
 from utils.security import sanitize_llm_output
+from utils.application_dedupe import normalize_title_company_key as _normalize_title_company_key
+from utils.resume_parser import extract_text_from_pdf
 
 # =============================================================================
 # CONSTANTS AND CONFIGURATION
@@ -91,6 +95,7 @@ VALID_URL_PREFIXES: tuple = ("http://", "https://")
 
 # File processing
 MAX_FILE_SIZE: int = 5 * 1024 * 1024  # 5 MB
+MIN_EXTRACTED_JOB_FILE_TEXT_LEN: int = 50
 ALLOWED_FILE_TYPES: List[str] = ["application/pdf", "text/plain"]
 ALLOWED_FILE_EXTENSIONS: List[str] = [".pdf", ".txt"]
 
@@ -125,6 +130,37 @@ router: APIRouter = APIRouter()
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
+
+
+def _job_text_from_uploaded_file(file_content: bytes, matched_ext: str) -> str:
+    """
+    Turn uploaded job file bytes into plain text for the workflow.
+
+    PDFs must be parsed with PyMuPDF — raw UTF-8 decoding of PDF bytes does not
+    expose the visible job text to the LLM.
+    """
+    if matched_ext == ".pdf":
+        try:
+            text = extract_text_from_pdf(file_content)
+        except ValueError as e:
+            logger.debug("PDF text extraction failed for job upload: %s", e, exc_info=True)
+            raise validation_error(
+                "Could not read text from this PDF. If it is a scanned document, "
+                "try pasting the job description as text instead."
+            ) from e
+        text = text.strip()
+        if len(text) < MIN_EXTRACTED_JOB_FILE_TEXT_LEN:
+            raise validation_error(
+                "Could not extract enough text from this PDF. It may be image-only or "
+                "protected. Try pasting the job description as text."
+            )
+        return text
+    if matched_ext == ".txt":
+        text = file_content.decode("utf-8").strip()
+        if len(text) < MIN_EXTRACTED_JOB_FILE_TEXT_LEN:
+            raise validation_error("Job description file is too short.")
+        return text
+    raise validation_error(f"Unsupported job file type: {matched_ext}")
 
 
 def _safe_error_msg(exc: Exception, debug: bool = False) -> str:
@@ -231,17 +267,6 @@ def _canonical_job_url(url: str) -> str:
     return urlunparse((scheme, netloc, path, "", query_str, ""))
 
 
-def _normalize_title_company_key(title: Optional[str], company: Optional[str]) -> Optional[tuple[str, str]]:
-    """Return a comparable (title, company) pair, or None if either side is empty."""
-    if not title or not company:
-        return None
-    t = " ".join(title.strip().lower().split())
-    c = " ".join(company.strip().lower().split())
-    if not t or not c:
-        return None
-    return (t, c)
-
-
 # Minimum length before we trust a content hash for deduplication (avoids collisions on tiny inputs).
 _MIN_JOB_CONTENT_FINGERPRINT_CHARS: int = 80
 
@@ -253,10 +278,15 @@ def _fingerprint_job_content(raw: Optional[str]) -> Optional[str]:
     Used to block starting a second workflow when the user pastes the same posting twice
     without a URL or pre-detected title/company (cases the DB unique index does not catch
     until after analysis).
+
+    Normalization aligns extension-extracted text with manual paste (Unicode NFKC,
+    strip zero-width characters, collapse whitespace).
     """
     if not raw or not isinstance(raw, str):
         return None
-    normalized = " ".join(raw.strip().lower().split())
+    text = unicodedata.normalize("NFKC", raw)
+    text = re.sub(r"[\u200b-\u200d\ufeff\u2060]", "", text)
+    normalized = " ".join(text.strip().lower().split())
     if len(normalized) < _MIN_JOB_CONTENT_FINGERPRINT_CHARS:
         return None
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
@@ -529,6 +559,7 @@ async def start_workflow(
         resolved_text = job_text or (request.job_text if request else None)
         file_content = None
         file_name = None
+        matched_ext: Optional[str] = None
 
         # Process uploaded file
         if job_file and job_file.filename:
@@ -627,7 +658,9 @@ async def start_workflow(
             content_fingerprint: Optional[str] = None
         elif file_content:
             input_method = InputMethod.FILE.value
-            job_input = file_content.decode("utf-8", errors="ignore")
+            if not matched_ext:
+                raise validation_error("Invalid file upload state.")
+            job_input = _job_text_from_uploaded_file(file_content, matched_ext)
             content_fingerprint = _fingerprint_job_content(job_input)
         elif source == "extension":
             input_method = InputMethod.EXTENSION.value
@@ -728,7 +761,7 @@ async def start_workflow(
         db.add(job_application)
         await db.commit()
 
-        effective_job_input = job_input if not file_content else file_content.decode("utf-8", errors="ignore")
+        effective_job_input = job_input
 
         # Dispatch workflow — prefer Cloud Tasks for automatic retry & separate timeout.
         # Falls back to FastAPI BackgroundTasks when Cloud Tasks is not configured.

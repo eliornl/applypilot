@@ -532,15 +532,61 @@ async function copyPageContent() {
 
 /**
  * Universal page content extraction.
- * 
- * PHILOSOPHY: Don't try to be too smart on the client side.
- * Just clean the page and send everything to the AI backend.
- * The LLM is smart enough to find the job description within noisy content.
- * 
+ *
+ * PHILOSOPHY: Prefer a single main job pane when the DOM exposes one (split-view
+ * job search UIs put the job list before the open role in document order). Otherwise
+ * clone the page body — the LLM can still find the posting, but mixed lists confuse it.
+ *
  * This function is injected into the page via chrome.scripting.executeScript.
  */
 function extractPageContent() {
   const result = { content: '', title: document.title || '' };
+
+  /**
+   * When a site uses a list + detail layout, `document.body` innerText often leads
+   * with the first list row, not the selected job. Narrow the root when possible.
+   * Class names are heuristic and may change with site updates — fallback is always body.
+   */
+  function getPreferredJobContentRoot() {
+    try {
+      const host = window.location.hostname || '';
+      const path = window.location.pathname || '';
+      if (!/linkedin\.(com|cn)$/i.test(host) || !/\/jobs/i.test(path)) {
+        return null;
+      }
+
+      const trySelectors = ['.jobs-search__job-details-body', '.jobs-details__main-content'];
+      for (const sel of trySelectors) {
+        const el = document.querySelector(sel);
+        const t = el && (el.innerText || el.textContent || '').trim();
+        if (t && t.length >= 80) return el;
+      }
+
+      const articles = document.querySelectorAll('article.jobs-description__container');
+      if (articles.length === 0) return null;
+
+      let best = null;
+      let bestLen = 0;
+      articles.forEach((a) => {
+        const len = (a.innerText || '').length;
+        if (len > bestLen) {
+          bestLen = len;
+          best = a;
+        }
+      });
+      if (!best) return null;
+
+      const wrap =
+        best.closest('.jobs-search__job-details-body') ||
+        best.closest('[class*="jobs-details"]') ||
+        best.closest('main') ||
+        best;
+      const t = (wrap.innerText || '').trim();
+      return t.length >= 80 ? wrap : null;
+    } catch (e) {
+      return null;
+    }
+  }
 
   // Elements to remove (definitely not job content)
   const REMOVE_SELECTORS = [
@@ -609,8 +655,8 @@ function extractPageContent() {
     return node;
   }
 
-  // Clone body and clean it
-  const bodyClone = document.body.cloneNode(true);
+  const rootEl = getPreferredJobContentRoot() || document.body;
+  const bodyClone = rootEl.cloneNode(true);
   removeUnwantedElements(bodyClone);
   
   // Get clean text content
