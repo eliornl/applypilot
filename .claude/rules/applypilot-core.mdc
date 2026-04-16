@@ -55,7 +55,7 @@ The frontend (`dashboard-new-application.js`) checks `error_code === 'CFG_6001'`
 
 `details` includes `application_id` and, when present, `session_id` (`DUPLICATE_APPLICATION`). The handler **releases** the Redis `workflow_creating:{user_id}` lock before raising so the client is not stuck behind a stale lock.
 
-**Frontend:** `dashboard-new-application.js`, `dashboard.js` (apiCall path), `extension/popup/popup.js`, and `extension/background/service-worker.js` should treat `RES_3002` as a **warning-style** user message (not a hard failure). See also `docs/workflow-duplicate-detection.md`.
+**Frontend:** `dashboard-new-application.js`, `dashboard.js` (apiCall path), `extension/popup/popup.js`, and `extension/background/service-worker.js` should treat `RES_3002` as a **warning-style** user message (not a hard failure).
 
 ## Custom JSON Response
 The app uses a `CustomJSONResponse` (defined in `main.py`) as `default_response_class`. It calls `serialize_object_for_json()` to handle `uuid.UUID` and `datetime` objects automatically. Do not add manual `.isoformat()` or `str(uuid)` calls in response dicts — they will be serialized correctly.
@@ -89,7 +89,7 @@ When **any** workflow agent fails, the run is terminal (`workflow_status = faile
 
 - **`workflows/job_application_workflow.py`**: `add_error()` stores **plain** user-facing strings (no `[agent_name]` prefix in `error_messages`). The LangGraph graph routes to `_error_handler_node` when profile matching or company research does not complete successfully; parallel resume + cover letter both must succeed or the step fails entirely. **`_clear_agent_outputs_for_failed_workflow()`** clears in-memory outputs; **`_save_workflow_state`** nulls all five agent JSONB columns when status is `failed`.
 - **`api/workflow.py`**: `_update_workflow_session_with_state()` nulls agent JSONB on failed final state; **`_strip_agent_outputs_on_session_model()`** and raw `UPDATE` nulls on background-task error paths; **`_soft_delete_job_application_for_failed_workflow()`** hides the dashboard row when those code paths run.
-- **`api/applications.py`**: **`_dashboard_application_visibility_filter()`** — list + stats **LEFT JOIN** `workflow_sessions` and exclude rows where `workflow_sessions.workflow_status = 'failed'`, so a row still marked `processing` on `job_applications` does not appear as a phantom FAILED card (see **`docs/workflow-failure-behavior.md`**).
+- **`api/applications.py`**: **`_dashboard_application_visibility_filter()`** — list + stats **LEFT JOIN** `workflow_sessions` and exclude rows where `workflow_sessions.workflow_status = 'failed'`, so a row still marked `processing` on `job_applications` does not appear as a phantom FAILED card.
 
 Use **`user_facing_message_from_llm_exception()`** (`utils/llm_client.py`) when converting LLM exceptions to user-visible strings.
 
@@ -99,6 +99,6 @@ When **any** workflow agent fails, the run is terminal (`workflow_status = faile
 
 - **`workflows/job_application_workflow.py`**: `add_error()` stores **plain** user-facing strings (no `[agent_name]` prefix in `error_messages`). The LangGraph graph routes to `_error_handler_node` when profile matching or company research does not complete successfully; parallel resume + cover letter both must succeed or the step fails entirely. **`_clear_agent_outputs_for_failed_workflow()`** clears in-memory outputs; **`_save_workflow_state`** nulls all five agent JSONB columns when status is `failed`.
 - **`api/workflow.py`**: `_update_workflow_session_with_state()` nulls agent JSONB on failed final state; **`_strip_agent_outputs_on_session_model()`** and raw `UPDATE` nulls on background-task error paths; **`_soft_delete_job_application_for_failed_workflow()`** hides the dashboard row when those code paths run.
-- **`api/applications.py`**: **`_dashboard_application_visibility_filter()`** — list + stats **LEFT JOIN** `workflow_sessions` and exclude rows where `workflow_sessions.workflow_status = 'failed'`, so a row still marked `processing` on `job_applications` does not appear as a phantom FAILED card (see **`docs/workflow-failure-behavior.md`**).
+- **`api/applications.py`**: **`_dashboard_application_visibility_filter()`** — list + stats **LEFT JOIN** `workflow_sessions` and exclude rows where `workflow_sessions.workflow_status = 'failed'`, so a row still marked `processing` on `job_applications` does not appear as a phantom FAILED card.
 
 Use **`user_facing_message_from_llm_exception()`** (`utils/llm_client.py`) when converting LLM exceptions to user-visible strings.

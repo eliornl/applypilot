@@ -128,7 +128,7 @@ function showToast(message, type = 'info') {
 
 ### Duplicate workflow start — `RES_3002`
 
-If `POST .../workflow/start` returns **409** with `error_code === 'RES_3002'`, the user already has an application for that job. **`popup.js`** / **`service-worker.js`** must show an **info** (or warning-style) message via `showToast` / the same UX path — not a generic network error. Details: `applypilot-core.mdc` (`RES_3002`) and `docs/workflow-duplicate-detection.md`.
+If `POST .../workflow/start` returns **409** with `error_code === 'RES_3002'`, the user already has an application for that job. **`popup.js`** / **`service-worker.js`** must show an **info** (or warning-style) message via `showToast` / the same UX path — not a generic network error. Details: `applypilot-core.mdc` (`RES_3002`).
 
 ## Content Extraction Priority
 ```javascript

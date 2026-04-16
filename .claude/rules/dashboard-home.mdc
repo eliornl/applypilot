@@ -30,7 +30,7 @@ The backend uses `func.lower().contains()` (parameterised — no SQL injection r
 
 `GET /api/v1/applications/` and `GET /api/v1/applications/stats/overview` **outerjoin** `workflow_sessions` on `job_applications.session_id` and exclude rows where `workflow_sessions.workflow_status = 'failed'` (in addition to `deleted_at IS NULL` and `job_applications.status != 'failed'`).
 
-**Why:** `job_applications` can remain `processing` for a short window after the workflow session is already `failed`, while `_format_application_response()` maps that pair to a **failed** badge for the API consumer — which used to show a phantom FAILED card. Filtering on workflow status keeps failed analyses off the list and aligns counts with the empty state. See **`docs/workflow-failure-behavior.md`**.
+**Why:** `job_applications` can remain `processing` for a short window after the workflow session is already `failed`, while `_format_application_response()` maps that pair to a **failed** badge for the API consumer — which used to show a phantom FAILED card. Filtering on workflow status keeps failed analyses off the list and aligns counts with the empty state. See **`applypilot-core.mdc`** (workflow failure — no partial client data).
 
 ---
 
