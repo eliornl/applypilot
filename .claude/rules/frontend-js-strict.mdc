@@ -302,6 +302,15 @@ return text.replace(/[^a-zA-Z0-9\s.,;:!?()\[\]\-'"•\n]/g, '');
 
 The same pattern applies to the backend validators (`DESCRIPTION_PATTERN`, `PROFESSIONAL_NAME_PATTERN` in `api/profile.py`).
 
+### Required numeric fields — `0` is valid
+
+Profile **Years of Experience** (`years_experience`) may be **`0`** (students, career changers, first role). In JavaScript, **`0` is falsy** — never treat it as “missing”:
+
+- **Saving (`saveBasicInfo`)** — After `parseInt`, do not use `if (!data[field])` for a mixed required-field list; `!0` is `true`. Parse to a number, then require `years_experience` with an explicit check (e.g. `Number.isNaN(parsed)` for empty/invalid, not `!parsed`).
+- **Populating the form** — Use `value !== undefined && value !== null` (then `String(value)` for the input), **not** `if (profileData.years_experience)` — otherwise a saved **`0`** never appears in the field.
+
+The API already allows zero (`BasicInfo` in `api/profile.py` uses `ge=0`).
+
 ### Multi-Step Form — Validate All Steps Before Saving
 
 `completeProfile()` must validate **all steps upfront** before making any API calls. Running save → validate → save → validate in sequence means early steps save successfully while later validation errors confuse the user (spinner runs for seconds then fails).
@@ -323,6 +332,10 @@ for (const { step, fn } of stepValidations) {
 }
 // All valid — now safe to setLoading(true) and save
 ```
+
+### `profile-setup.js` — “No work experience” must be persisted
+
+If the user checks **“I don’t have any relevant work experience yet”**, `saveWorkExperience()` must **`PUT /api/v1/profile/work-experience`** with `{ work_experience: [] }`. Returning success without that call leaves the column **`NULL`** in PostgreSQL, so `POST /profile/complete` still reports **Work Experience** as missing. Unchecked = require at least one valid entry (enforced by `validateWorkExperience()`). When loading profile data, keep the checkbox in sync when the saved list is empty.
 
 ### `changeStep()` Must NOT Clear Error Messages
 

@@ -54,7 +54,7 @@ The `UserProfile` model contains exactly these fields. **There is no `education`
 | `city` | String(100) | Optional location |
 | `state` | String(100) | Optional |
 | `country` | String(100) | Optional |
-| `work_experience` | JSONB | List of past roles with title, company, dates, accomplishments |
+| `work_experience` | JSONB | List of past roles with title, company, dates, accomplishments (see **completion semantics** below) |
 | `skills` | JSONB | List of skill strings |
 | `job_types` | JSONB | e.g. `["full-time", "contract"]` |
 | `work_arrangements` | JSONB | e.g. `["remote", "hybrid"]` |
@@ -65,6 +65,18 @@ The `UserProfile` model contains exactly these fields. **There is no `education`
 | `requires_visa_sponsorship` | Boolean | default False |
 | `has_security_clearance` | Boolean | default False |
 | `max_travel_preference` | String | Optional travel % or category |
+
+### Profile setup — `work_experience` NULL vs `[]` (JSONB)
+
+Used by `api/profile.py` `_check_work_experience_completion()` and `POST /profile/complete`:
+
+| DB value | Meaning |
+|----------|---------|
+| **`NULL`** | Step 2 was never persisted via `PUT /profile/work-experience` — work experience section **not** complete. |
+| **`[]`** (empty JSON array) | User saved step 2 with **no roles** (e.g. checked “no relevant work experience yet” in the UI). Section **complete**. |
+| **Non-empty list** | At least one saved role. Section **complete**. |
+
+`UserProfile.to_dict()` maps both `NULL` and `[]` to `[]` for API responses, so the client cannot tell them apart from JSON alone—ORM/raw column checks must distinguish `NULL` vs empty JSONB for completion logic.
 
 **Never add `education`, `location_preferences`, or `target_role` as profile fields** — they do not exist in the schema, the profile setup UI, or any agent prompt. Any content referencing these fields (help text, privacy policy, UI labels) must be corrected.
 - `WorkflowSession`: `job_analysis`, `company_research`, `profile_matching`, `resume_recommendations`, `cover_letter`, `interview_prep`, `agent_status`, `completed_agents`, `failed_agents`, `error_messages`, `warning_messages`, `job_input_data`, `user_data`, `agent_start_times`, `agent_durations`

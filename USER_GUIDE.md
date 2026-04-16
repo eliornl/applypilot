@@ -70,6 +70,8 @@ Click "Fill in manually" to skip the upload and enter everything by hand.
 | Professional Summary | Yes |
 | Currently a Student | No |
 
+**Years of experience** accepts **0** — use it if you are a student, changing careers, or have not yet worked in your field (the app stores this as a number; it is not treated as “empty”).
+
 ### Step 2: Work Experience
 
 1. Click **Add Work Experience**
@@ -78,7 +80,12 @@ Click "Fill in manually" to skip the upload and enter everything by hand.
 4. Mark as current position if applicable
 5. Add multiple roles as needed
 
-If you have no relevant work experience yet, check **"I don't have any relevant work experience yet"** instead of leaving the step empty.
+**Either / or:**
+
+- **You have experience:** leave the checkbox unchecked and add **at least one** role (company, job title, and start date are required per entry).
+- **You do not have relevant experience yet:** check **"I don't have any relevant work experience yet"**. That saves your choice so this step counts as complete—you do not need to add a placeholder job. Leaving the step empty without checking the box is not valid.
+
+The app stores an empty work history when that box is checked so **Complete Setup** and profile completion on the server can succeed.
 
 ### Step 3: Skills
 
