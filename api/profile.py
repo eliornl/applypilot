@@ -32,8 +32,8 @@ from utils.cache import (
 from utils.encryption import (
     encrypt_api_key,
     decrypt_api_key,
-    validate_gemini_api_key,
 )
+from utils.gemini_api_key_format import validate_gemini_api_key
 from utils.logging_config import get_structured_logger, mask_email
 from utils.error_responses import APIError, ErrorCode, internal_error, no_api_key_error, not_found_error, not_implemented_error, rate_limit_error, validation_error
 from models.database import User, UserProfile as UserProfileModel, JobApplication, WorkflowSession, UserWorkflowPreferences

@@ -154,39 +154,3 @@ def is_encrypted(value: str) -> bool:
     """
     return value.startswith(ENCRYPTED_PREFIX) if value else False
 
-
-def validate_gemini_api_key(api_key: str) -> bool:
-    """
-    Validate the format of a Gemini API key.
-    
-    Note: This only validates the format, not whether the key is actually valid.
-    A real validation would require making an API call.
-    
-    Args:
-        api_key: The API key to validate
-        
-    Returns:
-        bool: True if the key format appears valid
-    """
-    if not api_key or not api_key.strip():
-        return False
-    
-    api_key = api_key.strip()
-    
-    # Gemini API keys typically start with "AI" and are ~39 characters
-    # But we'll be lenient and just check for reasonable length
-    if len(api_key) < 20:
-        return False
-    
-    if len(api_key) > 100:
-        return False
-    
-    # Should be alphanumeric with possible underscores/hyphens
-    import re
-    if not re.match(r'^[A-Za-z0-9_\-]+$', api_key):
-        return False
-    
-    return True
-
-
-

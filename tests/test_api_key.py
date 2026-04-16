@@ -224,8 +224,9 @@ class TestApiKeySet:
         
         # Preview should be in format "XXXX...YYYY"
         assert "..." in key_preview
-        assert key_preview.startswith("AIza")  # First 4 chars
-        assert key_preview.endswith("LPZk")    # Last 4 chars
+        vk = VALID_TEST_API_KEY
+        if len(vk) > 8:
+            assert key_preview == f"{vk[:4]}...{vk[-4:]}"
 
     def test_set_api_key_update_existing(
         self, http_client: httpx.Client, authenticated_user: Dict[str, str]

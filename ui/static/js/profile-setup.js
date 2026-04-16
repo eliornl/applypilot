@@ -657,11 +657,6 @@
                 input.focus();
                 return;
             }
-            if (!key.startsWith('AIza')) {
-                if (errorEl) { errorEl.textContent = 'Gemini API keys start with "AIza" — please double-check your key.'; errorEl.style.display = 'block'; }
-                input.focus();
-                return;
-            }
             if (errorEl) errorEl.style.display = 'none';
 
             saveBtn.disabled = true;

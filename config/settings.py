@@ -7,6 +7,8 @@ from typing import List, Optional, Union, Dict, Any
 from pydantic_settings import BaseSettings
 from pydantic import field_validator, Field, SecretStr
 
+from utils import gemini_api_key_format
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
@@ -280,13 +282,13 @@ class Settings(BaseSettings):
     @field_validator("gemini_api_key")
     @classmethod
     def validate_gemini_api_key(cls, v):
-        """Validate Google AI Studio API key format."""
+        """Validate optional server-side Gemini API key shape (Google rotates formats)."""
         if v is None:
             return v
-        if not v.startswith("AIza"):
+        if not gemini_api_key_format.validate_gemini_api_key(v):
             raise ValueError(
-                "GEMINI_API_KEY appears invalid: Google AI Studio keys start with 'AIza'. "
-                "Check your key at https://aistudio.google.com/app/apikey"
+                "GEMINI_API_KEY appears invalid: use a Google Gemini / AI Studio API key "
+                "(single line; see https://aistudio.google.com/app/apikey)."
             )
         return v
 
