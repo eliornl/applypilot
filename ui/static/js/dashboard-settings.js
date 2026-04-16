@@ -288,6 +288,11 @@
         document.getElementById('coverLetterToneSelect')?.addEventListener('change', _schedulePreferencesSave);
         document.getElementById('resumeLengthSelect')?.addEventListener('change', _schedulePreferencesSave);
 
+        const _tab = new URLSearchParams(window.location.search).get('tab');
+        if (_tab === 'ai-setup') {
+            showSection('apiKeys');
+        }
+
         // Model select: separate debounced save
         document.getElementById('preferredModelSelect')?.addEventListener('change', function () {
             if (_modelSaveTimer) clearTimeout(_modelSaveTimer);
@@ -377,7 +382,11 @@
         document.querySelectorAll('.settings-section').forEach(s => s.classList.remove('active'));
         document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
         document.getElementById(sectionName + 'Section')?.classList.add('active');
-        (/** @type {HTMLElement|null} */ (evt?.target ?? null))?.classList.add('active');
+        const navTarget = /** @type {HTMLElement|null} */ (
+            evt?.target
+            ?? document.querySelector(`.settings-nav a[data-section="${sectionName}"], .settings-sidebar a[data-section="${sectionName}"]`)
+        );
+        navTarget?.classList.add('active');
         const alertContainer = document.getElementById('alertContainer');
         if (alertContainer) alertContainer.innerHTML = '';
     }

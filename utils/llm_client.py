@@ -87,6 +87,73 @@ class GeminiError(Exception):
 
 
 # =============================================================================
+# USER-FACING ERROR STRINGS (workflow / dashboard)
+# =============================================================================
+
+_GEMINI_QUOTA_USER_MESSAGE: str = (
+    "The AI quota or rate limit for the configured API key was reached. "
+    "Try again in a little while, review your plan and quotas for that key, "
+    "or update your key under Settings → AI Setup."
+)
+
+
+def _text_indicates_gemini_quota_exhausted(text: str) -> bool:
+    """
+    Return True if exception text looks like a Gemini / Google AI quota or
+    rate-limit response (429 RESOURCE_EXHAUSTED, free-tier caps, etc.).
+    """
+    if not text:
+        return False
+    upper = text.upper()
+    if "RESOURCE_EXHAUSTED" in upper:
+        return True
+    lower = text.lower()
+    if "exceeded your current quota" in lower or "quota exceeded" in lower:
+        return True
+    if "free_tier" in lower and "quota" in lower:
+        return True
+    if "429" in text and (
+        "quota" in lower
+        or "rate" in lower
+        or "resource_exhausted" in lower
+        or "generativelanguage" in lower
+    ):
+        return True
+    return False
+
+
+def _exception_chain_text(exc: BaseException) -> str:
+    """Join str() of exc, GeminiError.original_error, and __cause__/__context__."""
+    parts: List[str] = []
+    seen: set[int] = set()
+    cur: Optional[BaseException] = exc
+    depth = 0
+    while cur is not None and id(cur) not in seen and depth < 8:
+        seen.add(id(cur))
+        parts.append(str(cur))
+        if isinstance(cur, GeminiError) and cur.original_error is not None:
+            inner = cur.original_error
+            if id(inner) not in seen:
+                parts.append(str(inner))
+        nxt = cur.__cause__ if cur.__cause__ is not None else cur.__context__
+        cur = nxt
+        depth += 1
+    return " ".join(parts)
+
+
+def user_facing_message_from_llm_exception(exc: BaseException) -> str:
+    """
+    Map an LLM/SDK exception to text safe to store in workflow error_messages
+    and show on the dashboard. Quota / rate-limit errors become a short,
+    actionable message; everything else returns str(exc).
+    """
+    combined = _exception_chain_text(exc)
+    if _text_indicates_gemini_quota_exhausted(combined):
+        return _GEMINI_QUOTA_USER_MESSAGE
+    return str(exc)
+
+
+# =============================================================================
 # SINGLETON CLIENT CLASS
 # =============================================================================
 

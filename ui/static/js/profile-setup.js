@@ -297,8 +297,8 @@
         // Populate professional details
         if (profileData.professional_title)
             document.getElementById("professional-title").value = profileData.professional_title;
-        if (profileData.years_experience != null)
-            document.getElementById("years-experience").value = profileData.years_experience;
+        if (profileData.years_experience !== undefined && profileData.years_experience !== null)
+            document.getElementById("years-experience").value = String(profileData.years_experience);
         if (profileData.summary)
             document.getElementById("summary").value = profileData.summary;
 
@@ -717,6 +717,16 @@
     }
 
     /**
+     * The template has a Bootstrap spinner next to #upload-status-text; toggle it so it
+     * does not keep animating after success or failure.
+     * @param {boolean} visible
+     */
+    function setResumeUploadSpinnerVisible(visible) {
+        const spin = document.querySelector("#upload-status .spinner-border");
+        if (spin) spin.classList.toggle("d-none", !visible);
+    }
+
+    /**
      * Handle resume file upload and parsing
      * @param {File} file - The resume file to upload
      */
@@ -724,6 +734,7 @@
         const dropZone = document.getElementById("resume-drop-zone");
         const progressContainer = document.getElementById("upload-progress");
         const progressBar = document.getElementById("upload-progress-bar");
+        const progressTrack = progressContainer?.querySelector(".progress");
         const statusText = document.getElementById("upload-status-text");
         const statusContainer = document.getElementById("upload-status");
 
@@ -742,11 +753,14 @@
         }
 
         try {
+            hideAlerts();
             // Show progress with indeterminate animation
             dropZone.classList.add("uploading");
             progressContainer.classList.remove("d-none");
+            if (progressTrack) progressTrack.classList.remove("d-none");
+            progressBar.classList.remove("d-none", "success");
             progressBar.classList.add("indeterminate");
-            progressBar.classList.remove("success");
+            setResumeUploadSpinnerVisible(true);
             statusText.textContent = "Analyzing your resume...";
             statusContainer.className = "upload-status";
 
@@ -792,7 +806,9 @@
             await autoFillProfile(result.data);
 
             // Show success - switch from indeterminate to success state
+            setResumeUploadSpinnerVisible(false);
             progressBar.classList.remove("indeterminate");
+            progressBar.classList.remove("d-none");
             progressBar.classList.add("success");
             statusContainer.className = "upload-status success";
             statusText.innerHTML = '<i class="fas fa-check-circle me-1"></i> Resume parsed successfully!';
@@ -804,10 +820,17 @@
 
         } catch (error) {
             console.error("Resume upload error:", error);
-            progressBar.classList.remove("indeterminate");
+            const err = /** @type {Error} */ (error);
+            const msg = err.message || "Failed to parse resume. Please try again or enter your information manually.";
+            setResumeUploadSpinnerVisible(false);
+            progressBar.classList.remove("indeterminate", "success");
+            progressBar.classList.add("d-none");
+            if (progressTrack) progressTrack.classList.add("d-none");
             statusContainer.className = "upload-status error";
-            statusText.innerHTML = `<i class="fas fa-exclamation-circle me-1"></i> ${escapeHtml(error.message)}`;
-            showError(error.message || "Failed to parse resume. Please try again or enter your information manually.");
+            statusText.innerHTML = `<i class="fas fa-exclamation-circle me-1"></i> ${escapeHtml(msg)}`;
+            // Inline status only — avoid duplicating the same text in #error-alert
+            errorAlert?.classList.add("d-none");
+            successAlert?.classList.add("d-none");
         } finally {
             dropZone.classList.remove("uploading");
         }
@@ -1303,31 +1326,25 @@
             const formData = new FormData(document.getElementById("basic-info-form"));
             const data = Object.fromEntries(formData.entries());
 
+            // Convert years_experience to integer (0 is valid — do not use truthiness)
+            const rawYears = data["years_experience"];
+            data.years_experience =
+                rawYears === undefined || rawYears === null || rawYears === ""
+                    ? NaN
+                    : parseInt(String(rawYears), 10);
+
             // Convert is_student checkbox to boolean
             data.is_student = data.is_student === "on";
 
-            // Ensure all required fields are present
-            const requiredFields = ["city", "state", "country", "professional_title", "years_experience", "summary"];
+            // Ensure all required fields are present (years_experience checked separately — 0 is valid)
+            const requiredFields = ["city", "state", "country", "professional_title", "summary"];
             for (const field of requiredFields) {
-                if (field === "years_experience") {
-                    const raw = data.years_experience;
-                    if (raw === undefined || raw === null) {
-                        throw new Error(`Missing required field: ${field}`);
-                    }
-                    const trimmed = String(raw).trim();
-                    if (trimmed === "") {
-                        throw new Error(`Missing required field: ${field}`);
-                    }
-                    const parsed = parseInt(trimmed, 10);
-                    if (Number.isNaN(parsed)) {
-                        throw new Error(`Missing required field: ${field}`);
-                    }
-                    data.years_experience = parsed;
-                    continue;
-                }
                 if (!data[field]) {
                     throw new Error(`Missing required field: ${field}`);
                 }
+            }
+            if (Number.isNaN(data.years_experience)) {
+                throw new Error("Missing required field: years_experience");
             }
 
 

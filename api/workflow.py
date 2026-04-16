@@ -138,6 +138,49 @@ def _safe_error_msg(exc: Exception, debug: bool = False) -> str:
     return "Workflow processing failed due to an internal error. Please try again."
 
 
+async def _soft_delete_job_application_for_failed_workflow(
+    db: AsyncSession,
+    session_id: str,
+) -> None:
+    """
+    Remove the dashboard card for a failed analysis (soft-delete).
+
+    Workflow sessions keep error details for support; job_applications rows are
+    hidden from list/stats like user-initiated deletes.
+    """
+    now = datetime.now(timezone.utc)
+    await db.execute(
+        update(JobApplication)
+        .where(
+            JobApplication.session_id == session_id,
+            JobApplication.deleted_at.is_(None),
+        )
+        .values(
+            deleted_at=now,
+            status=ApplicationStatus.FAILED.value,
+            updated_at=now,
+        )
+    )
+
+
+_WORKFLOW_SESSION_AGENT_OUTPUT_COLUMNS = (
+    "job_analysis",
+    "company_research",
+    "profile_matching",
+    "resume_recommendations",
+    "cover_letter",
+)
+
+
+def _strip_agent_outputs_on_session_model(workflow_session: WorkflowSession) -> None:
+    """Clear persisted agent JSONB blobs when a workflow fails (no partial results)."""
+    from sqlalchemy.orm.attributes import flag_modified
+
+    for col in _WORKFLOW_SESSION_AGENT_OUTPUT_COLUMNS:
+        setattr(workflow_session, col, None)
+        flag_modified(workflow_session, col)
+
+
 def get_user_uuid(current_user: Dict[str, Any]) -> uuid.UUID:
     """Extract and convert user ID to UUID."""
     user_id = current_user.get("id") or current_user.get("_id")
@@ -1566,22 +1609,22 @@ async def _execute_workflow_background(
                     workflow_session.error_messages = (workflow_session.error_messages or []) + [_safe_error_msg(e, settings.debug)]
                     workflow_session.processing_end_time = datetime.now(timezone.utc)
                     flag_modified(workflow_session, "error_messages")
+                    _strip_agent_outputs_on_session_model(workflow_session)
                     await db.commit()
                 except Exception as rollback_err:
                     logger.error(f"Workflow {session_id}: Failed to save error state: {rollback_err}")
                 # Clear stale cache on failure too
                 await invalidate_workflow_state(session_id)
 
-                # Update job application status
+                # Hide failed analysis from the applications list (soft-delete)
                 try:
-                    await db.execute(
-                        update(JobApplication)
-                        .where(JobApplication.session_id == session_id)
-                        .values(status=ApplicationStatus.FAILED.value)
-                    )
+                    await _soft_delete_job_application_for_failed_workflow(db, session_id)
                     await db.commit()
                 except Exception as app_err:
-                    logger.error(f"Workflow {session_id}: Failed to set application to failed: {app_err}")
+                    logger.error(
+                        f"Workflow {session_id}: Failed to soft-delete application: {app_err}",
+                        exc_info=True,
+                    )
 
     except Exception as e:
         logger.error(f"Background workflow execution failed: {e}", exc_info=True)
@@ -1598,12 +1641,19 @@ async def _execute_workflow_background(
                     .values(
                         workflow_status=WorkflowStatus.FAILED.value,
                         processing_end_time=datetime.now(timezone.utc),
+                        job_analysis=None,
+                        company_research=None,
+                        profile_matching=None,
+                        resume_recommendations=None,
+                        cover_letter=None,
                     )
                 )
+                await _soft_delete_job_application_for_failed_workflow(_db, session_id)
                 await _db.commit()
         except Exception as _update_err:
             logger.error(
-                f"Workflow {session_id}: failed to set FAILED status after top-level error: {_update_err}"
+                f"Workflow {session_id}: failed to set FAILED status after top-level error: {_update_err}",
+                exc_info=True,
             )
 
 
@@ -1699,6 +1749,8 @@ async def _continue_workflow_background(session_id: str, user_id: Optional[str] 
                     workflow_session.error_messages = (workflow_session.error_messages or []) + [_safe_error_msg(e, settings.debug)]
                     workflow_session.processing_end_time = datetime.now(timezone.utc)
                     flag_modified(workflow_session, "error_messages")
+                    _strip_agent_outputs_on_session_model(workflow_session)
+                    await _soft_delete_job_application_for_failed_workflow(db, session_id)
                     await db.commit()
                 except Exception as rollback_err:
                     logger.error(f"Workflow {session_id}: Failed to save continuation error state: {rollback_err}")
@@ -1718,12 +1770,19 @@ async def _continue_workflow_background(session_id: str, user_id: Optional[str] 
                     .values(
                         workflow_status=WorkflowStatus.FAILED.value,
                         processing_end_time=datetime.now(timezone.utc),
+                        job_analysis=None,
+                        company_research=None,
+                        profile_matching=None,
+                        resume_recommendations=None,
+                        cover_letter=None,
                     )
                 )
+                await _soft_delete_job_application_for_failed_workflow(_db, session_id)
                 await _db.commit()
         except Exception as _update_err:
             logger.error(
-                f"Workflow {session_id}: failed to set FAILED status after top-level continuation error: {_update_err}"
+                f"Workflow {session_id}: failed to set FAILED status after top-level continuation error: {_update_err}",
+                exc_info=True,
             )
 
 
@@ -1812,6 +1871,8 @@ async def _generate_documents_background(
                     workflow_session.error_messages = (workflow_session.error_messages or []) + [_safe_error_msg(e, settings.debug)]
                     workflow_session.processing_end_time = datetime.now(timezone.utc)
                     flag_modified(workflow_session, "error_messages")
+                    _strip_agent_outputs_on_session_model(workflow_session)
+                    await _soft_delete_job_application_for_failed_workflow(db, session_id)
                     await db.commit()
                 except Exception as rollback_err:
                     logger.error(f"Session {session_id}: failed to persist error state: {rollback_err}")
@@ -1827,12 +1888,19 @@ async def _generate_documents_background(
                     .values(
                         workflow_status=WorkflowStatus.FAILED.value,
                         processing_end_time=datetime.now(timezone.utc),
+                        job_analysis=None,
+                        company_research=None,
+                        profile_matching=None,
+                        resume_recommendations=None,
+                        cover_letter=None,
                     )
                 )
+                await _soft_delete_job_application_for_failed_workflow(_db, session_id)
                 await _db.commit()
         except Exception as _update_err:
             logger.error(
-                f"Session {session_id}: failed to set FAILED status after top-level doc gen error: {_update_err}"
+                f"Session {session_id}: failed to set FAILED status after top-level doc gen error: {_update_err}",
+                exc_info=True,
             )
 
 
@@ -1869,24 +1937,44 @@ async def _update_workflow_session_with_state(
     flag_modified(workflow_session, "error_messages")
     flag_modified(workflow_session, "warning_messages")
 
-    # Update agent results
-    if final_state.get("job_analysis"):
-        workflow_session.job_analysis = final_state["job_analysis"]
-        flag_modified(workflow_session, "job_analysis")
-    if final_state.get("company_research"):
-        workflow_session.company_research = final_state["company_research"]
-        flag_modified(workflow_session, "company_research")
-    if final_state.get("profile_matching"):
-        workflow_session.profile_matching = final_state["profile_matching"]
-        flag_modified(workflow_session, "profile_matching")
-    if final_state.get("resume_recommendations"):
-        workflow_session.resume_recommendations = final_state["resume_recommendations"]
-        flag_modified(workflow_session, "resume_recommendations")
-    if final_state.get("cover_letter"):
-        workflow_session.cover_letter = final_state["cover_letter"]
-        flag_modified(workflow_session, "cover_letter")
+    # Failed workflows must not retain partial agent outputs in the session row.
+    if _normalize_workflow_status_string(final_state.get("workflow_status")) == WorkflowStatus.FAILED.value:
+        for _col in (
+            "job_analysis",
+            "company_research",
+            "profile_matching",
+            "resume_recommendations",
+            "cover_letter",
+        ):
+            setattr(workflow_session, _col, None)
+            flag_modified(workflow_session, _col)
+    else:
+        if final_state.get("job_analysis"):
+            workflow_session.job_analysis = final_state["job_analysis"]
+            flag_modified(workflow_session, "job_analysis")
+        if final_state.get("company_research"):
+            workflow_session.company_research = final_state["company_research"]
+            flag_modified(workflow_session, "company_research")
+        if final_state.get("profile_matching"):
+            workflow_session.profile_matching = final_state["profile_matching"]
+            flag_modified(workflow_session, "profile_matching")
+        if final_state.get("resume_recommendations"):
+            workflow_session.resume_recommendations = final_state["resume_recommendations"]
+            flag_modified(workflow_session, "resume_recommendations")
+        if final_state.get("cover_letter"):
+            workflow_session.cover_letter = final_state["cover_letter"]
+            flag_modified(workflow_session, "cover_letter")
 
     await db.commit()
+
+
+def _normalize_workflow_status_string(raw: Any) -> str:
+    """Coerce workflow_status from final_state (enum or str) to a lowercase string."""
+    if raw is None:
+        return str(WorkflowStatus.COMPLETED.value)
+    if hasattr(raw, "value"):
+        return str(raw.value).strip().lower()
+    return str(raw).strip().lower()
 
 
 async def _update_job_application_with_final_state(
@@ -1904,22 +1992,26 @@ async def _update_job_application_with_final_state(
     job_title = job_analysis.get("job_title")
     company_name = job_analysis.get("company_name")
 
+    ws_raw = final_state.get("workflow_status")
+    workflow_status_norm = _normalize_workflow_status_string(ws_raw)
+
     logger.info(
         f"Job application update: title={job_title}, company={company_name}, "
-        f"workflow_status={final_state.get('workflow_status')}"
+        f"workflow_status={ws_raw!r} (normalized={workflow_status_norm!r})"
     )
 
     # Determine application status
-    workflow_status = final_state.get("workflow_status", WorkflowStatus.COMPLETED.value)
+    failed_workflow = False
 
-    if workflow_status == WorkflowStatus.COMPLETED.value:
+    if workflow_status_norm == WorkflowStatus.COMPLETED.value:
         app_status = ApplicationStatus.COMPLETED.value
-    elif workflow_status == "analysis_complete":
+    elif workflow_status_norm == WorkflowStatus.ANALYSIS_COMPLETE.value:
         app_status = ApplicationStatus.COMPLETED.value
-    elif workflow_status == WorkflowStatus.AWAITING_CONFIRMATION.value:
+    elif workflow_status_norm == WorkflowStatus.AWAITING_CONFIRMATION.value:
         app_status = ApplicationStatus.COMPLETED.value
-    elif workflow_status == WorkflowStatus.FAILED.value:
+    elif workflow_status_norm == WorkflowStatus.FAILED.value:
         app_status = ApplicationStatus.FAILED.value
+        failed_workflow = True
     else:
         app_status = ApplicationStatus.PROCESSING.value
 
@@ -1949,10 +2041,13 @@ async def _update_job_application_with_final_state(
     # If the unique constraint on (user_id, job_title, company_name) fires (duplicate job),
     # the savepoint rolls back and we retry with only status + match_score so the card
     # transitions from "processing" to "completed" even when title/company can't change.
+    now_ts = datetime.now(timezone.utc)
     full_values: Dict[str, Any] = {
         "status": app_status,
-        "updated_at": datetime.now(timezone.utc),
+        "updated_at": now_ts,
     }
+    if failed_workflow:
+        full_values["deleted_at"] = now_ts
     if job_title:
         full_values["job_title"] = job_title
     if company_name:
@@ -1976,8 +2071,10 @@ async def _update_job_application_with_final_state(
         )
         minimal_values: Dict[str, Any] = {
             "status": app_status,
-            "updated_at": datetime.now(timezone.utc),
+            "updated_at": now_ts,
         }
+        if failed_workflow:
+            minimal_values["deleted_at"] = now_ts
         if match_score is not None:
             minimal_values["match_score"] = match_score
         await db.execute(

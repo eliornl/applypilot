@@ -58,7 +58,6 @@ from workflows.state_schema import (
     JobInputData,
     create_initial_state,
     add_error,
-    add_warning,
     get_current_time_string,
     key_to_agent,
 )
@@ -73,7 +72,7 @@ from agents.company_research import CompanyResearchAgent
 from agents.profile_matching import ProfileMatchingAgent
 from agents.resume_advisor import ResumeAdvisorAgent
 from agents.cover_letter_writer import CoverLetterWriterAgent
-from utils.llm_client import get_gemini_client
+from utils.llm_client import get_gemini_client, user_facing_message_from_llm_exception
 from utils.redis_client import get_redis_client
 from utils.security import (
     sanitize_job_analysis,
@@ -98,27 +97,22 @@ GATE_RECOMMENDATIONS: Tuple[str, ...] = ("NOT_RECOMMENDED", "WEAK_MATCH")
 AGENT_CONFIG: Dict[str, Dict[str, Any]] = {
     "job_analyzer": {
         "phase": WorkflowPhase.JOB_ANALYSIS,
-        "is_critical": True,
         "display_name": "Job analysis",
     },
     "profile_matching": {
         "phase": WorkflowPhase.PROFILE_MATCHING,
-        "is_critical": False,
         "display_name": "Profile matching",
     },
     "company_research": {
         "phase": WorkflowPhase.COMPANY_RESEARCH,
-        "is_critical": False,
         "display_name": "Company research",
     },
     "resume_advisor": {
         "phase": WorkflowPhase.DOCUMENT_GENERATION,
-        "is_critical": False,
         "display_name": "Resume advisory",
     },
     "cover_letter_writer": {
         "phase": WorkflowPhase.DOCUMENT_GENERATION,
-        "is_critical": False,
         "display_name": "Cover letter writing",
     },
 }
@@ -273,8 +267,15 @@ class JobApplicationWorkflow:
             },
         )
 
-        # Profile Matching → Gate Decision
-        workflow.add_edge(NodeName.PROFILE_MATCHING.value, "gate_decision")
+        # Profile Matching → Gate Decision or terminal failure (no partial results)
+        workflow.add_conditional_edges(
+            NodeName.PROFILE_MATCHING.value,
+            self._route_after_profile_matching,
+            {
+                "success": "gate_decision",
+                "error": NodeName.ERROR_HANDLER.value,
+            },
+        )
 
         # Gate Decision → Continue or Stop at gate
         workflow.add_conditional_edges(
@@ -286,11 +287,12 @@ class JobApplicationWorkflow:
             },
         )
 
-        # Company Research → Document Generation OR Analysis Complete (user preference)
+        # Company Research → Document Generation OR Analysis Complete OR failure
         workflow.add_conditional_edges(
             NodeName.COMPANY_RESEARCH.value,
             self._route_after_company_research,
             {
+                "error": NodeName.ERROR_HANDLER.value,
                 "generate_documents": NodeName.DOCUMENT_GENERATION.value,
                 "analysis_complete": NodeName.ANALYSIS_COMPLETE.value,
             },
@@ -327,15 +329,17 @@ class JobApplicationWorkflow:
             NodeName.DOCUMENT_GENERATION.value, self._document_generation_parallel_node
         )
         workflow.add_node(NodeName.ANALYSIS_COMPLETE.value, self._analysis_complete_node)
+        workflow.add_node(NodeName.ERROR_HANDLER.value, self._error_handler_node)
 
         # Set entry point for continuation
         workflow.set_entry_point(NodeName.COMPANY_RESEARCH.value)
 
-        # Company Research → Document Generation OR Analysis Complete (same routing as main)
+        # Company Research → Document Generation OR Analysis Complete OR failure
         workflow.add_conditional_edges(
             NodeName.COMPANY_RESEARCH.value,
             self._route_after_company_research,
             {
+                "error": NodeName.ERROR_HANDLER.value,
                 "generate_documents": NodeName.DOCUMENT_GENERATION.value,
                 "analysis_complete": NodeName.ANALYSIS_COMPLETE.value,
             },
@@ -346,6 +350,9 @@ class JobApplicationWorkflow:
 
         # Analysis Complete terminal node
         workflow.add_edge(NodeName.ANALYSIS_COMPLETE.value, END)
+
+        # Error handler → End (same as main workflow)
+        workflow.add_edge(NodeName.ERROR_HANDLER.value, END)
 
         return workflow.compile()
 
@@ -739,11 +746,9 @@ class JobApplicationWorkflow:
             if agent_enum not in state["failed_agents"]:
                 state["failed_agents"].append(agent_enum)
 
-            # Add appropriate error/warning messages
-            if config["is_critical"]:
-                state = add_error(state, str(e), agent_name)
-            else:
-                state = add_warning(state, str(e), agent_name)
+            # Any agent failure fails the whole workflow — no partial results for the client.
+            user_msg = user_facing_message_from_llm_exception(e)
+            state = add_error(state, user_msg, agent_name)
 
             # Broadcast agent failed via WebSocket
             await broadcast_agent_update(
@@ -751,7 +756,7 @@ class JobApplicationWorkflow:
                 session_id=workflow_id,
                 agent_name=agent_name,
                 status="failed",
-                message=str(e),
+                message=user_msg,
             )
 
         finally:
@@ -931,6 +936,9 @@ class JobApplicationWorkflow:
         # Update workflow phase to document generation
         state["current_phase"] = WorkflowPhase.DOCUMENT_GENERATION
 
+        ra_key = Agent.RESUME_ADVISOR.value
+        cl_key = Agent.COVER_LETTER_WRITER.value
+
         # Create parallel tasks for document generation agents
         async def run_resume_advisor() -> WorkflowState:
             """Execute resume advisor with deep copy of state."""
@@ -964,13 +972,33 @@ class JobApplicationWorkflow:
         resume_state: WorkflowState = results[0]
         cover_letter_state: WorkflowState = results[1]
 
-        # Merge results into main state
+        ra_ok = resume_state["agent_status"].get(ra_key) == AgentStatus.COMPLETED
+        cl_ok = cover_letter_state["agent_status"].get(cl_key) == AgentStatus.COMPLETED
+        if not (ra_ok and cl_ok):
+            self._merge_parallel_branch_into_main(state, resume_state, ra_key)
+            self._merge_parallel_branch_into_main(state, cover_letter_state, cl_key)
+            self._clear_agent_outputs_for_failed_workflow(state)
+            state["current_phase"] = WorkflowPhase.ERROR
+            state["workflow_status"] = WorkflowStatus.FAILED
+            state["processing_end_time"] = get_current_time_string()
+            await self._save_workflow_state(state)
+            err_list = state.get("error_messages") or []
+            err_msg = err_list[-1] if err_list else "Document generation failed"
+            await broadcast_workflow_error(
+                user_id=str(state.get("user_id", "")),
+                session_id=str(state.get("session_id", "")),
+                error_message=err_msg,
+                failed_agent=None,
+            )
+            return state
+
+        # Merge results into main state (both agents succeeded)
         self._process_parallel_agent_result(
-            state, Agent.RESUME_ADVISOR.value, resume_state, "resume_recommendations"
+            state, ra_key, resume_state, "resume_recommendations"
         )
 
         self._process_parallel_agent_result(
-            state, Agent.COVER_LETTER_WRITER.value, cover_letter_state, "cover_letter"
+            state, cl_key, cover_letter_state, "cover_letter"
         )
 
         # Set completion status
@@ -1007,18 +1035,21 @@ class JobApplicationWorkflow:
         """Execute error handling and recovery processing."""
         logger.info("Executing error handler")
 
+        self._clear_agent_outputs_for_failed_workflow(state)
+
         # Update workflow status
         state["current_phase"] = WorkflowPhase.ERROR
         state["workflow_status"] = WorkflowStatus.FAILED
 
-        # Log completed agents for partial results
         completed_agents = state.get("completed_agents", [])
-
         if completed_agents:
             completed_agent_names = [agent.value for agent in completed_agents]
-            logger.info(f"Partial results available from: {completed_agent_names}")
+            logger.info(
+                "Workflow failed; agents that had completed before failure: %s",
+                completed_agent_names,
+            )
         else:
-            logger.info("No partial results available")
+            logger.info("Workflow failed before any agent completed")
 
         # Always set end time for metrics
         state["processing_end_time"] = get_current_time_string()
@@ -1029,16 +1060,14 @@ class JobApplicationWorkflow:
         user_id = str(state.get("user_id", ""))
         session_id = state.get("session_id", "")
         error_messages = state.get("error_messages", [])
-        failed_agents = state.get("failed_agents", [])
-        
+
         error_message = error_messages[-1] if error_messages else "Workflow failed"
-        failed_agent = failed_agents[-1].value if failed_agents else None
-        
+
         await broadcast_workflow_error(
             user_id=user_id,
             session_id=session_id,
             error_message=error_message,
-            failed_agent=failed_agent,
+            failed_agent=None,
         )
 
         return state
@@ -1046,6 +1075,40 @@ class JobApplicationWorkflow:
     # =========================================================================
     # HELPER METHODS
     # =========================================================================
+
+    def _clear_agent_outputs_for_failed_workflow(self, state: WorkflowState) -> None:
+        """Strip all agent-generated content — failed workflows must not expose partial results."""
+        state["job_analysis"] = None
+        state["company_research"] = None
+        state["profile_matching"] = None
+        state["resume_recommendations"] = None
+        state["cover_letter"] = None
+
+    def _merge_parallel_branch_into_main(
+        self,
+        main: WorkflowState,
+        branch: WorkflowState,
+        agent_key: str,
+    ) -> None:
+        """Merge status, timings, and messages from one parallel branch into the main state."""
+        self._merge_messages(main, branch)
+        st = branch.get("agent_status", {}).get(agent_key)
+        if st is not None:
+            main["agent_status"][agent_key] = st
+        start_t = branch.get("agent_start_times", {}).get(agent_key)
+        if start_t:
+            main["agent_start_times"][agent_key] = start_t
+        dur = branch.get("agent_durations", {}).get(agent_key)
+        if dur is not None:
+            if "agent_durations" not in main:
+                main["agent_durations"] = {}
+            main["agent_durations"][agent_key] = dur
+        for item in branch.get("failed_agents") or []:
+            if item not in main["failed_agents"]:
+                main["failed_agents"].append(item)
+        for item in branch.get("completed_agents") or []:
+            if item not in main["completed_agents"]:
+                main["completed_agents"].append(item)
 
     def _process_parallel_agent_result(
         self,
@@ -1118,6 +1181,12 @@ class JobApplicationWorkflow:
         else:
             return "error"
 
+    def _route_after_profile_matching(self, state: WorkflowState) -> str:
+        """Route after profile matching — any failure ends the workflow with no partial data."""
+        if state["agent_status"].get(Agent.PROFILE_MATCHING.value) == AgentStatus.COMPLETED:
+            return "success"
+        return "error"
+
     def _route_gate_decision(self, state: WorkflowState) -> str:
         """Route workflow based on gate decision."""
         if state.get("workflow_status") == WorkflowStatus.AWAITING_CONFIRMATION:
@@ -1126,11 +1195,9 @@ class JobApplicationWorkflow:
             return "continue"
 
     def _route_after_company_research(self, state: WorkflowState) -> str:
-        """Route after company research based on auto_generate_documents preference.
-
-        Default (auto_generate_documents=False): stop here as ANALYSIS_COMPLETE.
-        If the user opted in: continue to document generation.
-        """
+        """Route after company research: fail fast, or analysis vs document generation."""
+        if state["agent_status"].get(Agent.COMPANY_RESEARCH.value) != AgentStatus.COMPLETED:
+            return "error"
         prefs = state.get("workflow_preferences") or {}
         if prefs.get("auto_generate_documents", False):
             return "generate_documents"
@@ -1161,11 +1228,13 @@ class JobApplicationWorkflow:
 
             if workflow_session:
                 # Update existing session
-                workflow_session.workflow_status = (
+                wf_status_raw = (
                     state["workflow_status"].value
                     if hasattr(state["workflow_status"], "value")
                     else state["workflow_status"]
                 )
+                workflow_session.workflow_status = wf_status_raw
+                wf_status_norm = str(wf_status_raw).strip().lower()
                 workflow_session.current_phase = (
                     state["current_phase"].value
                     if hasattr(state["current_phase"], "value")
@@ -1216,48 +1285,59 @@ class JobApplicationWorkflow:
                 ):
                     flag_modified(workflow_session, _jsonb_field)
 
-                # Update agent results
-                if state.get("job_analysis"):
-                    workflow_session.job_analysis = state["job_analysis"]
-                    flag_modified(workflow_session, "job_analysis")
+                # Failed workflows: never persist agent output blobs (no partial results).
+                if wf_status_norm == WorkflowStatus.FAILED.value:
+                    for _col in (
+                        "job_analysis",
+                        "company_research",
+                        "profile_matching",
+                        "resume_recommendations",
+                        "cover_letter",
+                    ):
+                        setattr(workflow_session, _col, None)
+                        flag_modified(workflow_session, _col)
+                else:
+                    if state.get("job_analysis"):
+                        workflow_session.job_analysis = state["job_analysis"]
+                        flag_modified(workflow_session, "job_analysis")
 
-                    # Early-write title/company to job_applications so the dashboard
-                    # card shows real names as soon as Job Analyzer finishes (~4 s in).
-                    # Use a savepoint so a constraint violation (e.g. duplicate title/company)
-                    # only rolls back this inner write and never poisons the outer transaction.
-                    _early_title = state["job_analysis"].get("job_title")
-                    _early_company = state["job_analysis"].get("company_name")
-                    if _early_title or _early_company:
-                        _early_vals: Dict[str, Any] = {
-                            "updated_at": datetime.now(timezone.utc)
-                        }
-                        if _early_title:
-                            _early_vals["job_title"] = _early_title
-                        if _early_company:
-                            _early_vals["company_name"] = _early_company
-                        try:
-                            async with self.db.begin_nested():
-                                await self.db.execute(
-                                    update(JobApplicationModel)
-                                    .where(JobApplicationModel.session_id == session_id)
-                                    .values(**_early_vals)
+                        # Early-write title/company to job_applications so the dashboard
+                        # card shows real names as soon as Job Analyzer finishes (~4 s in).
+                        # Use a savepoint so a constraint violation (e.g. duplicate title/company)
+                        # only rolls back this inner write and never poisons the outer transaction.
+                        _early_title = state["job_analysis"].get("job_title")
+                        _early_company = state["job_analysis"].get("company_name")
+                        if _early_title or _early_company:
+                            _early_vals: Dict[str, Any] = {
+                                "updated_at": datetime.now(timezone.utc)
+                            }
+                            if _early_title:
+                                _early_vals["job_title"] = _early_title
+                            if _early_company:
+                                _early_vals["company_name"] = _early_company
+                            try:
+                                async with self.db.begin_nested():
+                                    await self.db.execute(
+                                        update(JobApplicationModel)
+                                        .where(JobApplicationModel.session_id == session_id)
+                                        .values(**_early_vals)
+                                    )
+                            except Exception as _upd_err:
+                                logger.debug(
+                                    "Early title/company update skipped: %s", _upd_err
                                 )
-                        except Exception as _upd_err:
-                            logger.debug(
-                                "Early title/company update skipped: %s", _upd_err
-                            )
-                if state.get("company_research"):
-                    workflow_session.company_research = state["company_research"]
-                    flag_modified(workflow_session, "company_research")
-                if state.get("profile_matching"):
-                    workflow_session.profile_matching = state["profile_matching"]
-                    flag_modified(workflow_session, "profile_matching")
-                if state.get("resume_recommendations"):
-                    workflow_session.resume_recommendations = state["resume_recommendations"]
-                    flag_modified(workflow_session, "resume_recommendations")
-                if state.get("cover_letter"):
-                    workflow_session.cover_letter = state["cover_letter"]
-                    flag_modified(workflow_session, "cover_letter")
+                    if state.get("company_research"):
+                        workflow_session.company_research = state["company_research"]
+                        flag_modified(workflow_session, "company_research")
+                    if state.get("profile_matching"):
+                        workflow_session.profile_matching = state["profile_matching"]
+                        flag_modified(workflow_session, "profile_matching")
+                    if state.get("resume_recommendations"):
+                        workflow_session.resume_recommendations = state["resume_recommendations"]
+                        flag_modified(workflow_session, "resume_recommendations")
+                    if state.get("cover_letter"):
+                        workflow_session.cover_letter = state["cover_letter"]
+                        flag_modified(workflow_session, "cover_letter")
 
                 await self.db.commit()
                 logger.debug(f"Updated workflow session: {session_id}")

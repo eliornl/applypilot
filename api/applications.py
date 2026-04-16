@@ -22,8 +22,9 @@ from config.settings import get_settings
 from models.database import (
     ApplicationStatus,
     JobApplication,
-    WorkflowSession,
     UserProfile,
+    WorkflowSession,
+    WorkflowStatusEnum,
 )
 
 # =============================================================================
@@ -92,6 +93,25 @@ def get_user_uuid(current_user: Dict[str, Any]) -> uuid.UUID:
     if isinstance(user_id, str):
         return uuid.UUID(user_id)
     return user_id
+
+
+def _dashboard_application_visibility_filter(user_id: uuid.UUID):
+    """Rows visible on the dashboard: not soft-deleted, not failed in DB, and not failed in workflow.
+
+    Job applications can stay ``processing`` while ``workflow_sessions.workflow_status`` is
+    already ``failed`` (race or before ``_update_job_application_with_final_state``). The
+    formatter maps that to ``failed`` for the client — exclude those rows here so failed
+    analyses never appear as cards.
+    """
+    return and_(
+        JobApplication.user_id == user_id,
+        JobApplication.deleted_at.is_(None),
+        JobApplication.status != ApplicationStatus.FAILED.value,
+        or_(
+            WorkflowSession.workflow_status.is_(None),
+            WorkflowSession.workflow_status != WorkflowStatusEnum.FAILED.value,
+        ),
+    )
 
 
 # =============================================================================
@@ -200,9 +220,14 @@ async def list_applications(
     try:
         user_id = get_user_uuid(current_user)
 
-        # Build query — exclude soft-deleted records
-        query = select(JobApplication).where(
-            and_(JobApplication.user_id == user_id, JobApplication.deleted_at.is_(None))
+        # Build query — exclude soft-deleted, DB-failed, and workflow-failed rows
+        query = (
+            select(JobApplication)
+            .outerjoin(
+                WorkflowSession,
+                JobApplication.session_id == WorkflowSession.session_id,
+            )
+            .where(_dashboard_application_visibility_filter(user_id))
         )
 
         # Add status filter if specified (case-insensitive)
@@ -478,9 +503,13 @@ async def get_application_stats(
                         else_=0,
                     )
                 ).label("responses"),
-            ).where(
-                and_(JobApplication.user_id == user_id, JobApplication.deleted_at.is_(None))
             )
+            .select_from(JobApplication)
+            .outerjoin(
+                WorkflowSession,
+                JobApplication.session_id == WorkflowSession.session_id,
+            )
+            .where(_dashboard_application_visibility_filter(user_id))
         )
         row = stats_result.one()
         total: int = row.total or 0

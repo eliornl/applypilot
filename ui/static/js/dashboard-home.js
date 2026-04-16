@@ -97,6 +97,32 @@
             .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
     }
 
+    /**
+     * Shorten noisy Gemini quota / rate-limit errors for dashboard toasts (legacy rows + WS).
+     * @param {string} raw
+     * @returns {string}
+     */
+    function formatWorkflowFailureDetail(raw) {
+        if (raw == null || typeof raw !== 'string') return '';
+        let s = raw.trim();
+        if (!s) return '';
+        // Legacy rows: "[job_analyzer] …" — users do not need agent names in toasts
+        s = s.replace(/^\[[^\]]+\]\s*/u, '').trim();
+        if (!s) return '';
+        const upper = s.toUpperCase();
+        const low = s.toLowerCase();
+        if (upper.includes('RESOURCE_EXHAUSTED')) {
+            return 'The AI quota or rate limit for the configured API key was reached. Try again later, or review your key under Settings → AI Setup.';
+        }
+        if (s.includes('429') && (low.includes('quota') || low.includes('exceeded your current quota'))) {
+            return 'The AI quota or rate limit for the configured API key was reached. Try again later, or review your key under Settings → AI Setup.';
+        }
+        if (low.includes('free_tier') && low.includes('quota')) {
+            return 'The AI quota or rate limit for the configured API key was reached. Try again later, or review your key under Settings → AI Setup.';
+        }
+        return s;
+    }
+
     function getAuthToken() {
         // @ts-ignore
         if (window.app && typeof window.app.getAuthToken === 'function') return window.app.getAuthToken();
@@ -668,7 +694,7 @@
     }
 
     /**
-     * Shows a persistent completion toast with a View link.
+     * Shows a persistent completion toast. Success includes "View Results"; failures are message + close only (no link).
      * @param {string} jobTitle
      * @param {string} companyName
      * @param {string} detailId
@@ -694,7 +720,9 @@
             }
         });
 
-        const detail = typeof failureDetail === 'string' ? failureDetail.trim() : '';
+        const detail = formatWorkflowFailureDetail(
+            typeof failureDetail === 'string' ? failureDetail.trim() : ''
+        );
         const shortDetail = detail.length > 220 ? `${detail.slice(0, 217)}…` : detail;
 
         let subline = '';
@@ -704,14 +732,15 @@
             subline = escapeHtml(shortDetail);
         } else if (jobTitle === 'Job Application' && companyName === 'Company') {
             subline = escapeHtml(
-                'No job title or company was extracted. Use Open to see what went wrong.'
+                'No job title or company was extracted. Try again with more detail, or check AI Setup.'
             );
         } else {
             subline = `${escapeHtml(jobTitle)} at ${escapeHtml(companyName)}`;
         }
 
+        // Failed / incomplete: no navigation — analyses that errored are not listed.
         const detailBtn = failed
-            ? `<a href="/dashboard/application/${encodeURIComponent(detailId)}" class="btn btn-sm btn-outline-primary flex-shrink-0">Open</a>`
+            ? ''
             : `<a href="/dashboard/application/${encodeURIComponent(detailId)}" class="btn btn-sm btn-primary flex-shrink-0">View Results</a>`;
 
         const div = document.createElement('div');

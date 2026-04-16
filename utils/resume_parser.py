@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 
-from utils.llm_client import get_gemini_client
+from utils.llm_client import get_gemini_client, user_facing_message_from_llm_exception
 from utils.llm_parsing import parse_json_from_llm_response
 
 # =============================================================================
@@ -338,7 +338,11 @@ async def parse_resume(resume_text: str, user_api_key: str | None = None) -> Dic
 
     except Exception as e:
         logger.error(f"Resume parsing failed: {str(e)}", exc_info=True)
-        raise ValueError(f"Failed to parse resume: {str(e)}")
+        friendly = user_facing_message_from_llm_exception(e)
+        # Quota / rate-limit: use plain-language message only (no "Failed to parse" prefix).
+        if friendly != str(e):
+            raise ValueError(friendly)
+        raise ValueError(f"Failed to parse resume: {friendly}")
 
 
 async def parse_resume_from_file(

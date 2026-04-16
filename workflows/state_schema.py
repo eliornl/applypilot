@@ -548,52 +548,42 @@ def create_initial_state(
 
 
 def add_error(
-    state: WorkflowState, error_message: str, agent_name: Optional[str] = None
+    state: WorkflowState, error_message: str, _agent_name: Optional[str] = None
 ) -> WorkflowState:
     """
     Add an error message to the workflow state for tracking and reporting.
 
-    This function records error messages with optional agent attribution,
-    providing a centralized way to track issues during workflow execution.
-    Error messages are formatted consistently and stored for later analysis.
+    Messages are stored as plain user-facing text (no agent prefix). Which agent
+    failed is tracked in ``failed_agents`` and server logs.
 
     Args:
         state: Current workflow state to update
         error_message: Description of the error that occurred
-        agent_name: Optional name of the agent that generated the error
+        _agent_name: Reserved for call-site symmetry with ``add_warning``; not
+            embedded in ``error_message``.
 
     Returns:
         Updated workflow state with the new error message
     """
-    # Format error message with agent attribution if provided
-    error_entry: str = (
-        f"[{agent_name}] {error_message}" if agent_name else error_message
-    )
-    state["error_messages"].append(error_entry)
+    state["error_messages"].append(error_message)
     return state
 
 
 def add_warning(
-    state: WorkflowState, warning_message: str, agent_name: Optional[str] = None
+    state: WorkflowState, warning_message: str, _agent_name: Optional[str] = None
 ) -> WorkflowState:
     """
     Add a warning message to the workflow state for tracking and reporting.
 
-    This function records warning messages with optional agent attribution,
-    providing a centralized way to track non-critical issues during workflow
-    execution. Warnings indicate potential problems that don't halt execution.
+    Messages are stored as plain user-facing text (no agent prefix).
 
     Args:
         state: Current workflow state to update
         warning_message: Description of the warning condition
-        agent_name: Optional name of the agent that generated the warning
+        _agent_name: Reserved for call-site symmetry; not embedded in the stored string.
 
     Returns:
         Updated workflow state with the new warning message
     """
-    # Format warning message with agent attribution if provided
-    warning_entry: str = (
-        f"[{agent_name}] {warning_message}" if agent_name else warning_message
-    )
-    state["warning_messages"].append(warning_entry)
+    state["warning_messages"].append(warning_message)
     return state
