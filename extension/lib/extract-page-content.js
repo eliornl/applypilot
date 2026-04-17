@@ -306,9 +306,13 @@
 
   /**
    * Split view: the open job description is in the right column — highest getBoundingClientRect().left wins.
+   * When `requireJobIdMatch` is true (URL has currentJobId), only consider nodes whose HTML references that posting.
    */
-  function getLinkedInRightmostDetailBody() {
+  function getLinkedInRightmostDetailBody(requireJobIdMatch) {
     if (!isLinkedInJobsPage()) return null;
+    var jid = linkedInUrlJobId();
+    var needles = jid ? linkedInJobPostingNeedles(jid) : [];
+    var mustMatch = !!requireJobIdMatch && needles.length > 0;
     var selectors = [
       '.jobs-search__job-details-body',
       'article.jobs-description__container',
@@ -323,6 +327,7 @@
     var el;
     var t;
     var rect;
+    var blob;
     for (si = 0; si < selectors.length; si++) {
       try {
         nodes = document.querySelectorAll(selectors[si]);
@@ -332,6 +337,8 @@
       for (ni = 0; ni < nodes.length; ni++) {
         el = nodes[ni];
         if (isInsideSearchResultsRail(el) || isInsideCompactListJobCard(el)) continue;
+        blob = (el.innerHTML || '') + (el.outerHTML || '').slice(0, 80000);
+        if (mustMatch && !blobMatchesLinkedInJobNeedles(blob, needles)) continue;
         t = (el.innerText || '').trim();
         if (t.length < MIN_CANDIDATE_CHARS) continue;
         try {
@@ -380,9 +387,9 @@
         if (isInsideSearchResultsRail(el) || isInsideCompactListJobCard(el)) continue;
         t = (el.innerText || '').trim();
         if (t.length < MIN_CANDIDATE_CHARS) continue;
-        blob = (el.innerHTML || '') + t;
+        blob = (el.innerHTML || '') + (el.outerHTML || '').slice(0, 60000) + t;
         var score = t.length;
-        if (jid && blob.indexOf(jid) !== -1) {
+        if (jid && blobMatchesLinkedInJobNeedles(blob, linkedInJobPostingNeedles(jid))) {
           score += 80000;
         }
         scored.push({ el: el, score: score });
@@ -402,7 +409,10 @@
   function getLinkedInOpenJobPaneRoot() {
     if (!isLinkedInJobsPage()) return null;
 
-    function bestByTextLength(selectors) {
+    var jid = linkedInUrlJobId();
+    var needles = linkedInJobPostingNeedles(jid || '');
+
+    function bestByTextLength(selectors, preferMatchingJobIdInBlob) {
       var best = null;
       var bestLen = 0;
       var si;
@@ -410,6 +420,7 @@
       var ni;
       var r;
       var txt;
+      var blob;
       for (si = 0; si < selectors.length; si++) {
         try {
           nodes = document.querySelectorAll(selectors[si]);
@@ -419,6 +430,15 @@
         for (ni = 0; ni < nodes.length; ni++) {
           r = nodes[ni];
           if (!r || isInsideSearchResultsRail(r) || isInsideCompactListJobCard(r)) continue;
+          blob = (r.innerHTML || '') + (r.innerText || '').slice(0, 120000);
+          if (
+            preferMatchingJobIdInBlob &&
+            jid &&
+            needles.length &&
+            !blobMatchesLinkedInJobNeedles(blob, needles)
+          ) {
+            continue;
+          }
           txt = (r.innerText || '').trim();
           if (txt.length >= MIN_CANDIDATE_CHARS && txt.length > bestLen) {
             bestLen = txt.length;
@@ -429,12 +449,15 @@
       return best;
     }
 
-    var railFirst = bestByTextLength([
+    var railSelectors = [
       '.jobs-search__right-rail',
       '[class*="jobs-search__right-rail"]',
       '[class*="jobs-split-view__right-rail"]',
       '[class*="scaffold-layout__detail"]'
-    ]);
+    ];
+    var railFirst =
+      jid && needles.length ? bestByTextLength(railSelectors, true) : null;
+    if (!railFirst) railFirst = bestByTextLength(railSelectors, false);
     if (railFirst) return railFirst;
 
     var wrappers = [
@@ -499,51 +522,138 @@
     return null;
   }
 
+  /** DOM / JSON-LD often use `urn:li:jobPosting:4393453758`, not the bare id — match all shapes. */
+  function linkedInJobPostingNeedles(jid) {
+    if (!jid) return [];
+    return [jid, 'urn:li:jobPosting:' + jid, 'jobPosting:' + jid];
+  }
+
+  function blobMatchesLinkedInJobNeedles(blob, needles) {
+    if (!blob || !needles.length) return false;
+    var i;
+    for (i = 0; i < needles.length; i++) {
+      if (blob.indexOf(needles[i]) !== -1) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Prefer description nodes whose subtree references the URL job id (Li URN or numeric).
+   * Runs before geometry heuristics so we never pick a longer unrelated pane or another listing.
+   */
+  function findLinkedInDetailBodyMatchingUrlJobId() {
+    var jid = linkedInUrlJobId();
+    if (!jid) return null;
+    var needles = linkedInJobPostingNeedles(jid);
+    var selectors = [
+      '.jobs-search__job-details-body',
+      'article.jobs-description__container',
+      '[class*="jobs-details__main-content"]',
+      '[class*="job-details-body"]'
+    ];
+    var best = null;
+    var bestLen = 0;
+    var si;
+    var ni;
+    var nodes;
+    var el;
+    var t;
+    var blob;
+    for (si = 0; si < selectors.length; si++) {
+      try {
+        nodes = document.querySelectorAll(selectors[si]);
+      } catch (e) {
+        nodes = [];
+      }
+      for (ni = 0; ni < nodes.length; ni++) {
+        el = nodes[ni];
+        if (isInsideSearchResultsRail(el) || isInsideCompactListJobCard(el)) continue;
+        blob = (el.innerHTML || '') + '\n' + (el.outerHTML || '').slice(0, 80000);
+        if (!blobMatchesLinkedInJobNeedles(blob, needles)) continue;
+        t = (el.innerText || '').trim();
+        if (t.length < MIN_CANDIDATE_CHARS) continue;
+        if (t.length > bestLen) {
+          bestLen = t.length;
+          best = el;
+        }
+      }
+    }
+    return best;
+  }
+
   function getLinkedInRootMatchingUrlJobId() {
     var jid = linkedInUrlJobId();
     if (!jid || !isLinkedInJobsPage()) return null;
 
+    var detailColSelector = [
+      '[class*="jobs-search__right-rail"]',
+      '[class*="scaffold-layout__detail"]',
+      '[class*="jobs-split-view__detail"]',
+      '[class*="jobs-search__job-details"]',
+      '[class*="jobs-unified-top-card"]'
+    ].join(', ');
+
     var candidates = [];
     try {
-      document.querySelectorAll('[data-job-id]').forEach(function (n) {
-        if (n.getAttribute('data-job-id') === jid) candidates.push(n);
+      document.querySelectorAll('[data-job-id="' + jid + '"]').forEach(function (n) {
+        candidates.push(n);
       });
     } catch (e) {
+      /* skip */
+    }
+
+    try {
+      document.querySelectorAll('[data-entity-urn*="jobPosting:' + jid + '"]').forEach(function (n) {
+        candidates.push(n);
+      });
+    } catch (e2) {
       /* skip */
     }
 
     var i;
     var el;
     var detail;
+    var td;
+    var best = null;
+    var bestLen = 0;
+
     for (i = 0; i < candidates.length; i++) {
       el = candidates[i];
-      if (isInsideCompactListJobCard(el) && !el.closest('[class*="jobs-search__job-details"]')) {
-        continue;
+      /* Left-list rows also carry data-job-id — ignore unless we're in the detail column. */
+      if (el.closest('[class*="jobs-search-results"]') && !el.closest(detailColSelector)) continue;
+      detail = el.closest(detailColSelector + ', article.jobs-description__container');
+      if (!detail) {
+        detail = el.closest('[class*="jobs-search__job-details"], [class*="jobs-unified"]');
       }
-      detail = el.closest(
-        '[class*="jobs-search__right-rail"], [class*="jobs-search__job-details"], [class*="jobs-unified"], article.jobs-description__container'
-      );
-      if (detail) {
-        var td = (detail.innerText || '').trim();
-        if (td.length >= MIN_CANDIDATE_CHARS) return detail;
+      if (!detail) continue;
+      detail =
+        detail.querySelector('.jobs-search__job-details-body, article.jobs-description__container') ||
+        detail;
+      td = (detail.innerText || '').trim();
+      if (td.length >= MIN_CANDIDATE_CHARS && td.length > bestLen) {
+        bestLen = td.length;
+        best = detail;
       }
     }
-    return null;
+    return best;
   }
 
   function getBestSplitViewDetailRoot() {
     if (isLinkedInJobsPage()) {
-      var rightmost = getLinkedInRightmostDetailBody();
-      if (rightmost) return rightmost;
+      /* URL wins: focused job is tied to currentJobId / urn:li:jobPosting — not max width or max length. */
+      var urlMatchedBody = findLinkedInDetailBodyMatchingUrlJobId();
+      if (urlMatchedBody) return urlMatchedBody;
+      var linkedInId = getLinkedInRootMatchingUrlJobId();
+      if (linkedInId) return linkedInId;
       var anchored = getLinkedInAnchoredDetailRoot();
       if (anchored) return anchored;
+      var rightmost = getLinkedInRightmostDetailBody(true);
+      if (!rightmost) rightmost = getLinkedInRightmostDetailBody(false);
+      if (rightmost) return rightmost;
     }
 
     var linkedInRail = getLinkedInOpenJobPaneRoot();
     if (linkedInRail) return linkedInRail;
-
-    var linkedInId = getLinkedInRootMatchingUrlJobId();
-    if (linkedInId) return linkedInId;
 
     var selectors = [
       '.jobs-search__job-details-body',
