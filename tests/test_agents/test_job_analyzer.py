@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
 
-from agents.job_analyzer import JobAnalyzerAgent, MIN_JOB_TEXT_LENGTH
+from agents.job_analyzer import JobAnalyzerAgent, MIN_JOB_TEXT_LENGTH, _normalize_string_list
 from workflows.state_schema import InputMethod
 
 
@@ -362,3 +362,22 @@ class TestJobAnalyzerAdditional:
 
         with pytest.raises(ValueError):
             await agent.process(state)
+
+
+class TestNormalizeStringList:
+    """Coerce LLM shapes that omit JSON arrays."""
+
+    def test_string_becomes_single_item(self):
+        assert _normalize_string_list(" Own the backend ") == ["Own the backend"]
+
+    def test_multiline_splits_when_requested(self):
+        assert _normalize_string_list("A\n\nB\nC", split_lines=True) == ["A", "B", "C"]
+
+    def test_list_of_dicts_extracts_known_keys(self):
+        raw = [{"duty": "Ship APIs"}, {"text": "Monitor prod"}]
+        assert _normalize_string_list(raw) == ["Ship APIs", "Monitor prod"]
+
+    def test_empty_and_none(self):
+        assert _normalize_string_list(None) == []
+        assert _normalize_string_list("") == []
+        assert _normalize_string_list([]) == []

@@ -13,7 +13,7 @@
   var MAX_EXTRACT_CHARS = 50000;
 
   /** Bump when extractor behavior changes (shown in diagnostics to confirm reload). */
-  var EXTRACTOR_BUILD_ID = 'li-guest-api-v5';
+  var EXTRACTOR_BUILD_ID = 'li-guest-api-v11';
 
   /** Last LinkedIn jobs-guest attempt (shown in diagnostics when debug on). */
   var lastLinkedInGuestApiDiag = null;
@@ -789,6 +789,456 @@
   }
 
   /**
+   * Right-column job-detail shell (list item excluded). Used to scope top-card queries —
+   * global `.jobs-unified-top-card` often misses or hits the wrong column after DOM changes.
+   */
+  function findLinkedInJobDetailPaneRoot() {
+    var vw = Math.max(window.innerWidth || document.documentElement.clientWidth || 800, 320);
+    var minLeftPx = vw < 520 ? 0 : Math.max(96, vw * 0.11);
+    var wrapperSelectors = [
+      '[class*="jobs-search__job-details--wrapper"]',
+      '[class*="jobs-search-two-pane__details"]',
+      '[class*="jobs-details-serp-page__job-details"]',
+      '[class*="jobs-details-two-column"]',
+      '[class*="job-details-reader"]',
+      '[class*="jobs-search__job-details--container"]',
+      '[class*="scaffold-layout__detail"]'
+    ];
+    var best = null;
+    var bestScore = -1;
+    var si;
+    var wi;
+    for (si = 0; si < wrapperSelectors.length; si++) {
+      var wraps;
+      try {
+        wraps = document.querySelectorAll(wrapperSelectors[si]);
+      } catch (e) {
+        wraps = [];
+      }
+      for (wi = 0; wi < wraps.length; wi++) {
+        var w = wraps[wi];
+        try {
+          if (isInsideSearchResultsRail(w)) continue;
+          var r = w.getBoundingClientRect();
+          if (r.width < 200 || r.height < 160) continue;
+          if (r.left < minLeftPx && vw >= 520) continue;
+          var score = r.width * Math.min(r.height, 1600) + r.left * 2;
+          if (score > bestScore) {
+            bestScore = score;
+            best = w;
+          }
+        } catch (e2) {
+          continue;
+        }
+      }
+    }
+    return best;
+  }
+
+  /** Last resort: an h1 in the right band that looks like a job title, climb to a small header subtree. */
+  function pickLinkedInTopCardNearJobTitleH1() {
+    var vw = Math.max(window.innerWidth || document.documentElement.clientWidth || 800, 320);
+    var minLeftPx = vw < 520 ? 0 : vw * 0.14;
+    var h1s;
+    try {
+      h1s = document.querySelectorAll('h1');
+    } catch (eH) {
+      return null;
+    }
+    var hi;
+    for (hi = 0; hi < h1s.length; hi++) {
+      var h = h1s[hi];
+      try {
+        var r = h.getBoundingClientRect();
+        if (r.left < minLeftPx && vw >= 560) continue;
+        var ht = String(h.innerText || '').trim();
+        if (!ht || ht.length > 280) continue;
+        var card = h.closest(
+          '[class*="top-card"], [class*="job-details-header"], [class*="JobDetails"]'
+        );
+        if (!card) card = h.parentElement && h.parentElement.parentElement;
+        if (!card) continue;
+        var blob = String(card.innerText || '').trim();
+        if (blob.length > 8000) continue;
+        var rr = card.getBoundingClientRect();
+        if (rr.height > 640) continue;
+        return card;
+      } catch (e1) {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Top-card in the job-detail column (right pane). `querySelector` on `.jobs-unified-top-card`
+   * often hits the left-rail compact card first — score by geometry.
+   */
+  function pickLinkedInDetailTopCardElement() {
+    var cardSel =
+      '.job-details-jobs-unified-top-card, .jobs-unified-top-card, [class*="jobs-details-top-card"], [class*="top-card-layout"], [class*="jobs-details-top-card-wrapper"]';
+
+    var pane = findLinkedInJobDetailPaneRoot();
+    if (pane) {
+      try {
+        var scoped = pane.querySelector(cardSel);
+        if (scoped) return scoped;
+      } catch (eSc) {
+        /* continue */
+      }
+    }
+
+    try {
+      var art = document.querySelector(
+        'article.jobs-description__container, [class*="jobs-description__container"], .jobs-description-content__text'
+      );
+      if (art) {
+        var wrap = art.closest(
+          '[class*="jobs-search__job-details"], [class*="job-details-reader"], [class*="jobs-details-serp"], [class*="jobs-search-two-pane"]'
+        );
+        if (wrap) {
+          var near = wrap.querySelector(cardSel);
+          if (near) return near;
+        }
+      }
+    } catch (eArt) {
+      /* skip */
+    }
+
+    var vw = Math.max(window.innerWidth || document.documentElement.clientWidth || 800, 320);
+    var minLeftPx = vw < 520 ? 0 : Math.max(96, vw * 0.14);
+
+    var selStr = cardSel;
+    var parts = selStr.split(',');
+    var candidates = [];
+    var si;
+    var pi;
+    var nodes;
+    for (si = 0; si < parts.length; si++) {
+      try {
+        nodes = document.querySelectorAll(parts[si].trim());
+      } catch (e) {
+        nodes = [];
+      }
+      for (pi = 0; pi < nodes.length; pi++) {
+        var el = nodes[pi];
+        try {
+          if (!el || !el.getBoundingClientRect) continue;
+          if (isInsideSearchResultsRail(el)) continue;
+          if (isInsideCompactListJobCard(el)) continue;
+          var r = el.getBoundingClientRect();
+          if (r.width < 64 || r.height < 36) continue;
+          if (r.left < minLeftPx && vw >= 520) continue;
+          candidates.push(el);
+        } catch (e2) {
+          continue;
+        }
+      }
+    }
+
+    if (!candidates.length) {
+      return pickLinkedInTopCardNearJobTitleH1();
+    }
+
+    var best = null;
+    var bestScore = -1;
+    var ci;
+    for (ci = 0; ci < candidates.length; ci++) {
+      var c = candidates[ci];
+      var rr = c.getBoundingClientRect();
+      var score = rr.width * rr.height + rr.left * 1.5;
+      if (score > bestScore) {
+        bestScore = score;
+        best = c;
+      }
+    }
+    return best || pickLinkedInTopCardNearJobTitleH1();
+  }
+
+  /**
+   * LinkedIn often omits the bare `job-details-jobs-unified-top-card` block node — only BEM leaves
+   * (`__company-name`, `__job-title`, `fit-level-preferences`, …) exist. Climb from a known leaf.
+   */
+  function resolveLinkedInUnifiedTopCardRoot() {
+    if (!isLinkedInJobsPage() || !linkedInUrlJobId()) return null;
+
+    var seeds = [];
+    try {
+      var f = document.querySelector(
+        '.job-details-fit-level-preferences, [class*="job-details-fit-level"], [class*="fit-level-preferences"]'
+      );
+      if (f) seeds.push(f);
+    } catch (e0) {
+      /* skip */
+    }
+    try {
+      var jt = document.querySelector(
+        '[class*="job-details-jobs-unified-top-card__job-title"], .job-details-jobs-unified-top-card__job-title'
+      );
+      if (jt) seeds.push(jt);
+    } catch (e1) {
+      /* skip */
+    }
+    try {
+      var cn = document.querySelector('[class*="job-details-jobs-unified-top-card__company-name"]');
+      if (cn) seeds.push(cn);
+    } catch (e2) {
+      /* skip */
+    }
+
+    var si;
+    for (si = 0; si < seeds.length; si++) {
+      var seed = seeds[si];
+      if (!seed) continue;
+      var p = seed;
+      var depth = 0;
+      while (p && depth < 18) {
+        try {
+          var r = p.getBoundingClientRect();
+          var blob = String(p.innerText || '').trim();
+          var hasH1 = p.querySelector && p.querySelector('h1');
+          var hasCo =
+            p.querySelector &&
+            (p.querySelector('[class*="company-name"]') || p.querySelector('a[href*="/company/"]'));
+          if (
+            hasH1 &&
+            hasCo &&
+            r.width > 140 &&
+            r.height > 64 &&
+            r.height < 1800 &&
+            blob.length > 24 &&
+            blob.length < 14000
+          ) {
+            return p;
+          }
+        } catch (e3) {
+          /* skip */
+        }
+        p = p.parentElement;
+        depth++;
+      }
+    }
+
+    try {
+      var bare = document.querySelector('.job-details-jobs-unified-top-card, .jobs-unified-top-card');
+      return bare || null;
+    } catch (e4) {
+      return null;
+    }
+  }
+
+  /**
+   * Visible right-pane top card: employer, title, location/date line, promoted line, salary & job-type pills.
+   * jobs-guest HTML often omits these; merge so downstream analysis sees comp + arrangement signals.
+   */
+  function getLinkedInLiveTopCardMetadataText() {
+    if (!isLinkedInJobsPage() || !linkedInUrlJobId()) return '';
+
+    var jidTc = linkedInUrlJobId();
+    /* MAIN script may write from an iframe; use top sessionStorage (per-frame storage differs). */
+    try {
+      var stTop = window.top.sessionStorage;
+      var topCached = stTop.getItem('jaa_li_topcard_' + jidTc);
+      if (topCached && topCached.replace(/\s+/g, '').length >= 12) {
+        return topCached.trim();
+      }
+    } catch (eTop) {
+      /* ignore */
+    }
+    try {
+      var mainCached = sessionStorage.getItem('jaa_li_topcard_' + jidTc);
+      if (mainCached && mainCached.replace(/\s+/g, '').length >= 12) {
+        return mainCached.trim();
+      }
+    } catch (eSs) {
+      /* ignore */
+    }
+
+    var card =
+      resolveLinkedInUnifiedTopCardRoot() ||
+      pickLinkedInDetailTopCardElement() ||
+      (function () {
+        var pane = getLinkedInVisibleJobDetailsWrapper();
+        var scope = pane;
+        if (!scope) {
+          try {
+            scope = document.querySelector('[class*="jobs-search__job-details"]') || document.body;
+          } catch (eScope) {
+            scope = document.body;
+          }
+        }
+        try {
+          return scope.querySelector(
+            '.job-details-jobs-unified-top-card, .jobs-unified-top-card, [class*="jobs-details-top-card"]'
+          );
+        } catch (eF) {
+          return null;
+        }
+      })();
+
+    if (!card) return '';
+
+    function textOf(sel) {
+      try {
+        var el = card.querySelector(sel);
+        return el ? String(el.innerText || '')
+          .trim()
+          .replace(/\s+/g, ' ') : '';
+      } catch (eTxt) {
+        return '';
+      }
+    }
+
+    var lines = [];
+    var seen = {};
+
+    var company = textOf(
+      '[class*="jobs-unified-top-card__company-name"], [class*="job-details-jobs-unified-top-card__company-name"]'
+    );
+    if (!company) {
+      try {
+        var ca = card.querySelector('a[href*="/company/"]');
+        if (ca) company = String(ca.innerText || '').trim().replace(/\s+/g, ' ');
+      } catch (eCo) {
+        company = '';
+      }
+    }
+    if (!company) {
+      company = textOf('[class*="company-name"] a, a[data-tracking-control-name*="company"]');
+    }
+
+    var title = textOf(
+      '[class*="jobs-unified-top-card__job-title"], [class*="job-details-jobs-unified-top-card__job-title"], h1[class*="job-title"]'
+    );
+    if (!title) title = textOf('h1');
+
+    var primary = textOf('[class*="primary-description"]');
+    var secondary = textOf('[class*="secondary-description"]');
+    var tertiary = textOf('[class*="tertiary-description"]');
+
+    if (company) lines.push('Company: ' + company);
+    if (title) lines.push(title);
+    if (primary) lines.push(primary);
+    if (secondary) lines.push(secondary);
+    if (tertiary) lines.push(tertiary);
+
+    try {
+      card
+        .querySelectorAll(
+          'ul[class*="job-insight"] li, li[class*="job-insight"], [class*="job-insight-view-model"] span, [class*="topcard__flavor"] li'
+        )
+        .forEach(function(li) {
+          var t = String(li.innerText || '')
+            .trim()
+            .replace(/\s+/g, ' ');
+          if (t && t.length < 280 && !seen[t]) {
+            seen[t] = true;
+            lines.push(t);
+          }
+        });
+    } catch (eLi) {
+      /* skip */
+    }
+
+    /* Salary / Hybrid / Full-time — modern layout uses buttons in job-details-fit-level-preferences (not ul.job-insight). */
+    try {
+      card
+        .querySelectorAll(
+          '.job-details-fit-level-preferences button, [class*="fit-level-preferences"] button, [class*="job-details-fit-level"] button'
+        )
+        .forEach(function(btn) {
+          var t = String(btn.innerText || '')
+            .trim()
+            .replace(/\s+/g, ' ');
+          if (!t || t.length > 220) return;
+          if (!seen[t]) {
+            seen[t] = true;
+            lines.push(t);
+          }
+        });
+    } catch (eFit) {
+      /* skip */
+    }
+
+    if (lines.length < 5) {
+      try {
+        card.querySelectorAll('[class*="job-criteria"], [class*="tvm__text"]').forEach(function(el) {
+          var t = String(el.innerText || '')
+            .trim()
+            .replace(/\s+/g, ' ');
+          if (!t || t.length > 220 || t.length < 2) return;
+          if (/see application/i.test(t)) return;
+          if (!seen[t]) {
+            seen[t] = true;
+            lines.push(t);
+          }
+        });
+      } catch (eCrit) {
+        /* skip */
+      }
+    }
+
+    /* Structured selectors miss A/B-tested UIs — take header lines until "About the job". */
+    if (lines.length < 3) {
+      try {
+        var rawLines = String(card.innerText || '')
+          .split(/\r?\n/)
+          .map(function(s) {
+            return s.trim();
+          })
+          .filter(Boolean);
+        var ri;
+        for (ri = 0; ri < rawLines.length && ri < 22; ri++) {
+          var ln = rawLines[ri];
+          if (/^about the job\b/i.test(ln)) break;
+          if (/^show more options\b/i.test(ln)) continue;
+          if (/^(share|save|hide|report|dismiss)$/i.test(ln)) continue;
+          if (ln.length > 300) continue;
+          if (!seen[ln]) {
+            seen[ln] = true;
+            lines.push(ln);
+          }
+          if (lines.length >= 14) break;
+        }
+      } catch (eRaw) {
+        /* skip */
+      }
+    }
+
+    return lines.join('\n').trim();
+  }
+
+  /**
+   * Prepend top-card lines that are not already present near the start of the guest body (dedupe).
+   */
+  function prependLinkedInTopCardMetaIfNeeded(body, metaBlock) {
+    if (!body || !metaBlock || metaBlock.length < 10) return body;
+    var headNorm = String(body.slice(0, 2000))
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+    var parts = String(metaBlock)
+      .split(/\r?\n/)
+      .map(function(s) {
+        return s.trim();
+      })
+      .filter(Boolean);
+    var onlyAdd = [];
+    var pi;
+    for (pi = 0; pi < parts.length; pi++) {
+      var p = parts[pi];
+      var key = p
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .slice(0, 56);
+      if (key.length < 4) continue;
+      if (headNorm.indexOf(key) !== -1) continue;
+      onlyAdd.push(p);
+    }
+    if (!onlyAdd.length) return body;
+    return onlyAdd.join('\n') + '\n\n---\n\n' + body;
+  }
+
+  /**
    * MAIN-world hook (`linkedin-voyager-hook.js`) writes parsed posting text to sessionStorage per job id.
    * Same tab storage is visible here (isolated-world extractor).
    */
@@ -1178,7 +1628,18 @@
       return '';
     }
 
-    var out = parsed.text;
+    var beforeMetaMerge = parsed.text;
+    /* MAIN-world may write jaa_li_topcard_* on a delay; detail pane can hydrate late. */
+    var metaBlock = '';
+    var ta;
+    for (ta = 0; ta < 12; ta++) {
+      metaBlock = getLinkedInLiveTopCardMetadataText();
+      if (metaBlock && metaBlock.replace(/\s+/g, '').length >= 14) break;
+      if (ta < 11) await new Promise(function(res) { setTimeout(res, 150); });
+    }
+    var out = prependLinkedInTopCardMetaIfNeeded(beforeMetaMerge, metaBlock);
+    var topCardPrepended = out !== beforeMetaMerge;
+
     if (out.length < MIN_CANDIDATE_CHARS) {
       lastLinkedInGuestApiDiag = {
         source: source,
@@ -1204,7 +1665,8 @@
       meta: meta,
       ok: true,
       outLen: out.length,
-      htmlSource: parsed.htmlSource || undefined
+      htmlSource: parsed.htmlSource || undefined,
+      topCardPrepended: topCardPrepended
     };
     return out;
   }

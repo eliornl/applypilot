@@ -486,7 +486,13 @@
         const allSkills = Array.from(allSkillsSet);
 
         const qualifications = ensureArray(job.required_qualifications);
-        const responsibilities = ensureArray(job.responsibilities);
+        const responsibilities = ensureArray(job.responsibilities).filter(r => {
+            const s =
+                typeof r === 'object' && r !== null
+                    ? String(r.text ?? r.duty ?? r.responsibility ?? '').trim()
+                    : String(r).trim();
+            return s.length > 0;
+        });
         const preferredQuals = ensureArray(job.preferred_qualifications);
         const softSkills = ensureArray(job.soft_skills);
 
@@ -1043,7 +1049,13 @@
                 <div class="content-section">
                     <h2 class="section-title"><i class="fas fa-tasks"></i> What You'll Do</h2>
                     <ul class="content-list resp-list">
-                        ${responsibilities.map(r => `<li><i class="fas fa-arrow-right"></i><span>${escapeHtml(String(r))}</span></li>`).join('')}
+                        ${responsibilities.map(r => {
+                            const line =
+                                typeof r === 'object' && r !== null
+                                    ? String(r.text ?? r.duty ?? r.responsibility ?? '')
+                                    : String(r);
+                            return `<li><i class="fas fa-arrow-right"></i><span>${escapeHtml(line)}</span></li>`;
+                        }).join('')}
                     </ul>
                 </div>`;
         }

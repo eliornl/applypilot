@@ -6,6 +6,7 @@ Uses AI-powered content analysis to generate structured job data for application
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from utils.text_processing import clean_text
@@ -20,6 +21,52 @@ from utils.cache import (
 )
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+
+def _normalize_string_list(val: Any, *, split_lines: bool = False) -> List[str]:
+    """Coerce LLM output to List[str]; models often emit a prose string instead of an array."""
+
+    def _flatten_dict(obj: Dict[str, Any]) -> Optional[str]:
+        for key in (
+            "qualification",
+            "requirement",
+            "duty",
+            "responsibility",
+            "text",
+            "description",
+            "item",
+            "skill",
+            "name",
+        ):
+            raw = obj.get(key)
+            if isinstance(raw, str) and raw.strip():
+                return raw.strip()
+        return None
+
+    if val is None:
+        return []
+    if isinstance(val, list):
+        out: List[str] = []
+        for item in val:
+            if isinstance(item, str):
+                s = item.strip()
+                if s:
+                    out.append(s)
+            elif isinstance(item, dict):
+                t = _flatten_dict(item)
+                if t:
+                    out.append(t)
+        return out
+    if isinstance(val, str):
+        s = val.strip()
+        if not s:
+            return []
+        if split_lines and ("\n" in s or "\r" in s):
+            lines = [ln.strip() for ln in re.split(r"\r?\n+", s) if ln.strip()]
+            if len(lines) > 1:
+                return lines
+        return [s]
+    return []
 
 # =============================================================================
 # CONSTANTS
@@ -153,7 +200,10 @@ Extract information into this EXACT JSON structure. Output ONLY valid JSON, no e
 5. Set to null if information is not present - don't guess
 6. For salary, extract numbers only if explicitly stated
 7. Look for hidden skills in responsibilities section
-8. Include soft skills mentioned in "ideal candidate" sections"""
+8. Include soft skills mentioned in "ideal candidate" sections
+9. responsibilities MUST be a JSON array of strings — never one long prose paragraph as a substitute. Break "What you'll do" into one element per bullet or discrete duty (minimum 3 items when the posting lists multiple duties).
+10. company_name: use the employer named in the posting header, "Company:", or overview. For confidential or recruiter posts with no named legal entity, use null — do not invent a company (the dashboard will show "Unknown").
+"""
 
 
 def _validate_posted_date(date_str: Optional[str]) -> Optional[str]:
@@ -432,14 +482,18 @@ class JobAnalyzerAgent:
                 salary_range=parsed_data.get("salary_range") or {},
                 posted_date=_validate_posted_date(parsed_data.get("posted_date")),
                 application_deadline=parsed_data.get("application_deadline"),
-                benefits=get_list("benefits"),
+                benefits=_normalize_string_list(parsed_data.get("benefits")),
                 is_student_position=parsed_data.get("is_student_position"),
                 company_size=parsed_data.get("company_size"),
                 # Skills and qualifications
                 required_skills=get_list("required_skills"),
-                soft_skills=get_list("soft_skills"),
-                required_qualifications=get_list("required_qualifications"),
-                preferred_qualifications=get_list("preferred_qualifications"),
+                soft_skills=_normalize_string_list(parsed_data.get("soft_skills")),
+                required_qualifications=_normalize_string_list(
+                    parsed_data.get("required_qualifications")
+                ),
+                preferred_qualifications=_normalize_string_list(
+                    parsed_data.get("preferred_qualifications")
+                ),
                 education_requirements=parsed_data.get("education_requirements") or {},
                 years_experience_required=parsed_data.get("years_experience_required"),
                 language_requirements=get_list("language_requirements"),
@@ -454,7 +508,9 @@ class JobAnalyzerAgent:
                 max_travel_preference=parsed_data.get("max_travel_preference"),
                 contact_information=get_str("contact_information"),
                 # Role context
-                responsibilities=get_list("responsibilities"),
+                responsibilities=_normalize_string_list(
+                    parsed_data.get("responsibilities"), split_lines=True
+                ),
                 team_info=parsed_data.get("team_info"),
                 reporting_to=parsed_data.get("reporting_to"),
             )
