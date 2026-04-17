@@ -11,6 +11,9 @@ downloads/
 eggs/
 .eggs/
 lib/
+# Exception: MV3 injected page script (not Python lib/)
+!extension/lib/
+!extension/lib/**
 lib64/
 parts/
 sdist/

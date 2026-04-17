@@ -45,6 +45,13 @@ A Chrome extension that lets you extract any job posting with one click and anal
 
 Optimised content selectors exist for many popular job boards and ATS platforms (Greenhouse, Lever, Workday, Ashby, BambooHR, SmartRecruiters, iCIMS, Taleo, and others). For unrecognised sites the extension falls back to the page `<main>` element, which works on virtually any company careers page.
 
+### Connectors & maintenance
+
+- **Per-host roots:** `lib/extract-page-content.js` → `SITE_CONNECTOR_ROOTS` (hostname regex + CSS selectors). Update when a major site changes layout and users report bad extracts.
+- **Structured data:** JSON-LD `JobPosting` is preferred when the page embeds a full description.
+- **User override:** Highlighting the job description on the page, then **Analyze**, always uses the selection (most reliable).
+- **Quality tips:** After a successful analyze, the popup may show a short **info** tip when extraction confidence is **medium** or **low** (heuristic: length, line count, and source). This nudges users toward the selection fallback without blocking success.
+
 ## Configuration
 
 ### Switching environments
@@ -68,6 +75,8 @@ chrome.storage.local.set({ jaa_api_url: 'http://localhost:8000/api/v1' })
 ```
 extension/
 ├── manifest.json           # Manifest V3 — version, permissions, metadata
+├── lib/
+│   └── extract-page-content.js  # Injected extractor (JSON-LD, connectors, DOM)
 ├── popup/
 │   ├── popup.html          # Popup UI — Font Awesome icons, app font/colors
 │   ├── popup.css           # Mirrors main app's CSS variables & design system

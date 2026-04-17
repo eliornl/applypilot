@@ -24,6 +24,40 @@ const CONFIG = {
   }
 };
 
+/** Injected into the page tab; shared with the background context menu path. */
+const JAA_EXTRACT_FILE = 'lib/extract-page-content.js';
+
+/**
+ * Loads the page extractor and returns `{ content, title, source? }` from the tab.
+ * @param {number} tabId
+ * @returns {Promise<{ content: string, title: string, source?: string, error?: string }>}
+ */
+async function runExtractPageContent(tabId) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: [JAA_EXTRACT_FILE]
+  });
+  const [exec] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: async () => {
+      const runAsync = window.__jaaExtractPageContentAsync;
+      if (typeof runAsync === 'function') {
+        return await runAsync();
+      }
+      const fn = window.__jaaExtractPageContent;
+      if (typeof fn !== 'function') {
+        return {
+          content: '',
+          title: document.title || '',
+          error: 'extractor_missing'
+        };
+      }
+      return fn();
+    }
+  });
+  return exec.result;
+}
+
 // =============================================================================
 // DOM ELEMENTS
 // =============================================================================
@@ -360,7 +394,12 @@ function resetView() {
 
 let _notifTimer = null;
 
-function showToast(message, type = 'info') {
+/**
+ * @param {string} message
+ * @param {'success'|'error'|'info'} [type]
+ * @param {number} [durationMs] Defaults to 3000; use longer for multi-line tips.
+ */
+function showToast(message, type = 'info', durationMs = 3000) {
   const bar = document.getElementById('popupNotification');
   if (!bar) return;
 
@@ -370,12 +409,35 @@ function showToast(message, type = 'info') {
   if (_notifTimer) { clearTimeout(_notifTimer); _notifTimer = null; }
 
   bar.className = `popup-notification ${type}`;
-  bar.innerHTML = `<i class="fas ${icon} notif-icon"></i><span>${message}</span>`;
+  bar.innerHTML = `<i class="fas ${icon} notif-icon"></i><span></span>`;
+  const span = bar.querySelector('span');
+  if (span) span.textContent = message;
 
   _notifTimer = setTimeout(() => {
     bar.classList.add('hidden');
     _notifTimer = null;
-  }, 3000);
+  }, durationMs);
+}
+
+/**
+ * Last-mile UX: when heuristics say extraction may be noisy, nudge user toward selection fallback.
+ * @param {{ confidence?: string } | null | undefined} extracted
+ */
+function maybeShowExtractionQualityTip(extracted) {
+  const conf = extracted && extracted.confidence;
+  if (conf === 'low') {
+    showToast(
+      'Tip: If the role or company look wrong on your dashboard, highlight the full job description on the page, then tap Analyze again.',
+      'info',
+      14000
+    );
+  } else if (conf === 'medium') {
+    showToast(
+      'Tip: On split job lists, wrong title or company? Select only the job description text, then analyze.',
+      'info',
+      8000
+    );
+  }
 }
 
 // =============================================================================
@@ -443,16 +505,13 @@ async function extractAndSubmitJob() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab) throw new Error('No active tab found');
 
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: extractPageContent
-    });
+    const extracted = await runExtractPageContent(tab.id);
 
-    if (!result || !result.result || !result.result.content) {
+    if (!extracted || extracted.error || !extracted.content) {
       throw new Error('Failed to extract content from page');
     }
 
-    const { content } = result.result;
+    const { content } = extracted;
 
     if (content.length < 100) {
       throw new Error('Page content is too short. Make sure the job posting is fully loaded.');
@@ -488,6 +547,7 @@ async function extractAndSubmitJob() {
     }
 
     showSuccess();
+    maybeShowExtractionQualityTip(extracted);
 
   } catch (error) {
     console.error('Extraction failed:', error);
@@ -504,16 +564,13 @@ async function copyPageContent() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab) throw new Error('No active tab found');
 
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: extractPageContent
-    });
+    const extracted = await runExtractPageContent(tab.id);
 
-    if (!result || !result.result || !result.result.content) {
+    if (!extracted || extracted.error || !extracted.content) {
       throw new Error('Failed to extract content from page');
     }
 
-    await navigator.clipboard.writeText(result.result.content);
+    await navigator.clipboard.writeText(extracted.content);
     showToast('Copied to clipboard!', 'success');
 
     // Brief visual feedback on icon
@@ -528,151 +585,6 @@ async function copyPageContent() {
   } finally {
     elements.copyBtn.disabled = false;
   }
-}
-
-/**
- * Universal page content extraction.
- *
- * PHILOSOPHY: Prefer a single main job pane when the DOM exposes one (split-view
- * job search UIs put the job list before the open role in document order). Otherwise
- * clone the page body — the LLM can still find the posting, but mixed lists confuse it.
- *
- * This function is injected into the page via chrome.scripting.executeScript.
- */
-function extractPageContent() {
-  const result = { content: '', title: document.title || '' };
-
-  /**
-   * When a site uses a list + detail layout, `document.body` innerText often leads
-   * with the first list row, not the selected job. Narrow the root when possible.
-   * Class names are heuristic and may change with site updates — fallback is always body.
-   */
-  function getPreferredJobContentRoot() {
-    try {
-      const host = window.location.hostname || '';
-      const path = window.location.pathname || '';
-      if (!/linkedin\.(com|cn)$/i.test(host) || !/\/jobs/i.test(path)) {
-        return null;
-      }
-
-      const trySelectors = ['.jobs-search__job-details-body', '.jobs-details__main-content'];
-      for (const sel of trySelectors) {
-        const el = document.querySelector(sel);
-        const t = el && (el.innerText || el.textContent || '').trim();
-        if (t && t.length >= 80) return el;
-      }
-
-      const articles = document.querySelectorAll('article.jobs-description__container');
-      if (articles.length === 0) return null;
-
-      let best = null;
-      let bestLen = 0;
-      articles.forEach((a) => {
-        const len = (a.innerText || '').length;
-        if (len > bestLen) {
-          bestLen = len;
-          best = a;
-        }
-      });
-      if (!best) return null;
-
-      const wrap =
-        best.closest('.jobs-search__job-details-body') ||
-        best.closest('[class*="jobs-details"]') ||
-        best.closest('main') ||
-        best;
-      const t = (wrap.innerText || '').trim();
-      return t.length >= 80 ? wrap : null;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  // Elements to remove (definitely not job content)
-  const REMOVE_SELECTORS = [
-    // Technical elements - be aggressive
-    'script', 'style', 'noscript', 'iframe', 'svg', 'canvas', 'template', 'link', 'meta',
-    'code', 'pre', // Often contains JSON/code data
-    '[type="application/json"]',
-    '[type="application/ld+json"]',
-    // Navigation and structure  
-    'header', 'footer', 'nav', '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]',
-    // Hidden elements
-    '[aria-hidden="true"]', '[hidden]', '.hidden', '.visually-hidden',
-    '[style*="display: none"]', '[style*="display:none"]',
-    // Popups and overlays
-    '.cookie-banner', '.cookie-consent', '[class*="cookie"]',
-    '.popup', '.modal', '.overlay', '.dialog', '[role="dialog"]',
-    // Ads
-    '.advertisement', '.ad-container', '[class*="advert"]', '[id*="google_ads"]',
-    '[class*="sponsored"]', '[class*="promo"]',
-    // Social/comments
-    '.social-share', '.share-buttons', '.comments', '.comment-section',
-    // Chat widgets
-    '[class*="chat-widget"]', '[class*="intercom"]', '[class*="drift"]', '[class*="zendesk"]'
-  ];
-
-  function cleanText(raw) {
-    let text = raw
-      .replace(/\t/g, ' ')
-      .replace(/[ ]{2,}/g, ' ')
-      .replace(/\n{3,}/g, '\n\n')
-      .replace(/^\s+$/gm, '')
-      .trim();
-    
-    // Remove JSON-like garbage (some job sites embed structured data in page text)
-    // Pattern: lines that look like JSON objects/arrays
-    text = text.split('\n').filter(line => {
-      const trimmed = line.trim();
-      // Skip lines that look like JSON
-      if (trimmed.startsWith('{') && trimmed.includes('"$type"')) return false;
-      if (trimmed.startsWith('[') && trimmed.includes('"$type"')) return false;
-      if (trimmed.includes('urn:li:')) return false;
-      if (trimmed.includes('entityUrn')) return false;
-      if (trimmed.includes('chameleon')) return false;
-      if (trimmed.includes('lixTracking')) return false;
-      // Skip very long lines with no spaces (likely encoded data)
-      if (trimmed.length > 500 && !trimmed.includes(' ')) return false;
-      return true;
-    }).join('\n');
-    
-    return text.trim();
-  }
-
-  function removeUnwantedElements(node) {
-    REMOVE_SELECTORS.forEach(selector => {
-      try {
-        node.querySelectorAll(selector).forEach(el => el.remove());
-      } catch (e) { /* skip */ }
-    });
-    
-    // Also remove any element with data attributes containing JSON
-    try {
-      node.querySelectorAll('[data-entity-hovercard-id]').forEach(el => el.remove());
-      node.querySelectorAll('[data-tracking-control-name]').forEach(el => el.remove());
-    } catch (e) { /* skip */ }
-    
-    return node;
-  }
-
-  const rootEl = getPreferredJobContentRoot() || document.body;
-  const bodyClone = rootEl.cloneNode(true);
-  removeUnwantedElements(bodyClone);
-  
-  // Get clean text content
-  let text = cleanText(bodyClone.innerText || bodyClone.textContent || '');
-  
-  // Final cleanup - remove any remaining JSON blobs
-  text = text.replace(/\{"[^}]{500,}\}/g, ''); // Remove large JSON objects
-  text = text.replace(/\[[^\]]{500,}\]/g, '');  // Remove large JSON arrays
-  
-  // Limit size (50KB should be plenty for the AI to find the job posting)
-  if (text.length > 50000) {
-    text = text.substring(0, 50000);
-  }
-
-  result.content = text;
-  return result;
 }
 
 // =============================================================================

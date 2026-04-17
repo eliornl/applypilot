@@ -13,7 +13,8 @@
   ],
   "host_permissions": [
     "https://*.a.run.app/*",
-    "http://localhost:8000/*"
+    "http://localhost:8000/*",
+    "https://api.ashbyhq.com/*"
   ],
   "optional_host_permissions": [
     "https://*/*"

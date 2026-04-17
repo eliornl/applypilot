@@ -130,17 +130,21 @@ function showToast(message, type = 'info') {
 
 If `POST .../workflow/start` returns **409** with `error_code === 'RES_3002'`, the user already has an application for that job. **`popup.js`** / **`service-worker.js`** must show an **info** (or warning-style) message via `showToast` / the same UX path — not a generic network error. Details: `applypilot-core.mdc` (`RES_3002`).
 
-## Content extraction (`extractPageContent` in `popup.js`)
+## Content extraction (`extension/lib/extract-page-content.js`)
 
-The popup injects **`extractPageContent`** via `chrome.scripting.executeScript` (not a static per-site selector list). Philosophy: clone a **single root**, strip chrome (scripts, nav, tracking attrs), then send text to the backend.
+The popup and context menu inject **`lib/extract-page-content.js`**, then call **`window.__jaaExtractPageContent`**. One shared implementation (no duplicated logic).
 
-- **Default:** clone `document.body` (minus removed nodes), `innerText` → `job_text`.
-- **Split-view job search UIs** (list column + detail pane): if the hostname matches **`\*.linkedin.(com|cn)`** and the path matches **`/jobs`**, prefer a **detail-pane root** so the first list row does not dominate the string:
-  - Try `.jobs-search__job-details-body`, then `.jobs-details__main-content`.
-  - Else prefer the wrapper around the largest `article.jobs-description__container`.
-- If no root passes a minimum text-length check, fall back to **`document.body`**. Class names are **heuristic** — third-party DOMs change; keep fallbacks.
+- **Selection first:** if the user highlighted **≥ 100** characters, that string is the payload (same as before on the context menu; now also applies to the popup primary button).
+- **JSON-LD `JobPosting`:** parse `script[type="application/ld+json"]` for `schema.org` **JobPosting** (including `@graph`). Prefer LD when it is the full description; if the visible DOM is clearly a superset of the same text, use **DOM** to avoid stubs. For partial LD (**≥ ~40** chars) plus DOM, **merge** (`source: json-ld+dom`). **`og:description` / meta description** can be appended when the body is still short.
+- **SPA retry:** `__jaaExtractPageContentAsync` runs extraction twice with a **~500ms** gap and keeps the longer result (helps lazy-loaded job panels).
+- **Site connectors:** `SITE_CONNECTOR_ROOTS` maps **hostname regex** → extra **root selectors** (Indeed, Glassdoor, ZipRecruiter, Monster, CareerBuilder, Workday `myworkdayjobs.com`, Greenhouse, Lever, Ashby). These are merged into the candidate list before scoring.
+- **Otherwise (generic DOM):** collect candidates — `main`, `[role="main"]`, `article` (when substantial), common `job-description` / `job-details` / `posting` attribute substring selectors, plus **optional hostname hints** (e.g. detail-pane selectors on split-view job search URLs). **Score** each candidate by length, job-keyword hits, paragraph count, and penalize “many very short lines” (list-like). Pick the best subtree, else **`document.body`**.
+- **Strip chrome** before `innerText`: includes **`aside`** / **`[role="complementary"]`** to drop sidebars. Light text cleanup (e.g. `(Verified job)` fragments).
+- **Split list + detail:** exclude candidates inside **`[class*="jobs-search-results"]`** (and similar list-rail substrings); **prefer** panes matching **`jobs-search__job-details`** / **`jobs-details__main`** with enough text; strip list-rail subtrees from clones when the root is still broad (`main` / `body`). On LinkedIn split views, prefer **`jobs-search__right-rail`** / job-details wrapper and exclude **`job-card-container`** list rows.
 
-**Context menu** (`service-worker.js`): non-selection extraction uses the **same root-selection logic** as the popup; `h1` for notification title is taken from the **cloned root**, not `document.querySelector('h1')` first globally.
+**Context menu** (`service-worker.js`): loads the same file + runner; passes through `title` for metadata only (popup still sends **`job_text` only** to `/workflow/start`).
+
+**Confidence + UX:** `extractPageContent` sets **`confidence`**: `high` | `medium` | `low`. After a successful analyze, **`popup.js`** may show a longer **info** toast suggesting the user **select the job description** if confidence is not high (last-mile support, not a hard error).
 
 ## Submitting to Backend
 

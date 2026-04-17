@@ -26,6 +26,9 @@ const CONFIG = {
   TOKEN_REFRESH_INTERVAL: 55 * 60 * 1000
 };
 
+/** Same injected script as `popup.js` — generic page extraction + selection override. */
+const JAA_EXTRACT_FILE = 'lib/extract-page-content.js';
+
 // =============================================================================
 // STATE
 // =============================================================================
@@ -414,69 +417,35 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       return;
     }
     
-    // Execute content script to extract
+    // Execute shared extractor (same logic as popup — selection-first, generic DOM scoring)
     try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: [JAA_EXTRACT_FILE]
+      });
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: () => {
-          // Use selection if available, otherwise extract full content
-          const selection = window.getSelection().toString().trim();
-          if (selection.length > 100) {
-            return {
-              content: selection,
-              title: document.title,
-              company: '',
-              url: window.location.href
-            };
-          }
-          
-          // Otherwise extract job content (align with popup extractPageContent root choice)
-          function getPreferredJobContentRoot() {
-            try {
-              const host = window.location.hostname || '';
-              const path = window.location.pathname || '';
-              if (!/linkedin\.(com|cn)$/i.test(host) || !/\/jobs/i.test(path)) {
-                return null;
-              }
-              const trySelectors = ['.jobs-search__job-details-body', '.jobs-details__main-content'];
-              for (const sel of trySelectors) {
-                const el = document.querySelector(sel);
-                const t = el && (el.innerText || el.textContent || '').trim();
-                if (t && t.length >= 80) return el;
-              }
-              const articles = document.querySelectorAll('article.jobs-description__container');
-              if (articles.length === 0) return null;
-              let best = null;
-              let bestLen = 0;
-              articles.forEach((a) => {
-                const len = (a.innerText || '').length;
-                if (len > bestLen) {
-                  bestLen = len;
-                  best = a;
-                }
-              });
-              if (!best) return null;
-              const wrap =
-                best.closest('.jobs-search__job-details-body') ||
-                best.closest('[class*="jobs-details"]') ||
-                best.closest('main') ||
-                best;
-              const t = (wrap.innerText || '').trim();
-              return t.length >= 80 ? wrap : null;
-            } catch (e) {
-              return null;
+        func: async () => {
+          const runAsync = window.__jaaExtractPageContentAsync;
+          let r;
+          if (typeof runAsync === 'function') {
+            r = await runAsync();
+          } else {
+            const fn = window.__jaaExtractPageContent;
+            if (typeof fn !== 'function') {
+              return {
+                content: '',
+                title: document.title || '',
+                company: '',
+                url: window.location.href,
+                error: 'extractor_missing'
+              };
             }
+            r = fn();
           }
-
-          const rootEl = getPreferredJobContentRoot() || document.body;
-          const body = rootEl.cloneNode(true);
-          ['script', 'style', 'noscript', 'iframe', 'header', 'footer', 'nav'].forEach(tag => {
-            body.querySelectorAll(tag).forEach(el => el.remove());
-          });
-          
           return {
-            content: body.textContent.replace(/\s+/g, ' ').trim().substring(0, 50000),
-            title: body.querySelector('h1')?.textContent?.trim() || document.title,
+            content: r.content,
+            title: r.title,
             company: '',
             url: window.location.href
           };
@@ -485,7 +454,19 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       
       if (results && results[0] && results[0].result) {
         const data = results[0].result;
-        
+
+        if (data.error || !data.content || data.content.length < 100) {
+          chrome.notifications.create({
+            type: 'basic',
+            iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+            title: 'Extraction Failed',
+            message:
+              'Could not read enough job text. Try highlighting the job description, then use Extract again.',
+            priority: 2
+          });
+          return;
+        }
+
         // Start workflow
         const workflowResult = await startWorkflow(data.content, data.url, {
           detected_title: data.title,
