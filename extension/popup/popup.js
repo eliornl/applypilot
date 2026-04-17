@@ -26,20 +26,64 @@ const CONFIG = {
 
 /** Injected into the page tab; shared with the background context menu path. */
 const JAA_EXTRACT_FILE = 'lib/extract-page-content.js';
+/** MAIN world: hooks fetch/XHR on job search so Voyager JSON can be cached for extraction */
+const JAA_LI_MAIN_HOOK_FILE = 'lib/linkedin-voyager-hook.js';
+/** MAIN world: prefetch jobs-guest API body into sessionStorage (isolated extractor reads it). */
+const JAA_LI_GUEST_PREFETCH_FILE = 'lib/linkedin-guest-prefetch.js';
 
 /**
- * Loads the page extractor and returns `{ content, title, source? }` from the tab.
+ * Loads the page extractor and returns `{ content, title, source?, diagnostics? }` from the tab.
+ * `@param {{ forceDiagnostics?: boolean }} options` — when true, sets debug before extract (page `localStorage`
+ * alone does not reach the extension isolated world where the extractor runs).
  * @param {number} tabId
- * @returns {Promise<{ content: string, title: string, source?: string, error?: string }>}
+ * @returns {Promise<{ content: string, title: string, source?: string, diagnostics?: object, error?: string }>}
  */
-async function runExtractPageContent(tabId) {
+async function runExtractPageContent(tabId, options = {}) {
+  let forceDiagnostics = !!options.forceDiagnostics;
+  if (!forceDiagnostics) {
+    try {
+      const st = await chrome.storage.local.get(['extract_diagnostics']);
+      if (st.extract_diagnostics === true) forceDiagnostics = true;
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  if (!forceDiagnostics) forceDiagnostics = IS_DEV;
+
+  try {
+    const tabInfo = await chrome.tabs.get(tabId);
+    const tabUrl = tabInfo.url || '';
+    if (/linkedin\.com\/jobs/i.test(tabUrl)) {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: [JAA_LI_MAIN_HOOK_FILE],
+        world: 'MAIN'
+      });
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: [JAA_LI_GUEST_PREFETCH_FILE],
+        world: 'MAIN'
+      });
+      await new Promise(function (r) {
+        setTimeout(r, 750);
+      });
+    }
+  } catch (eHook) {
+    /* ignore — tab closed or no permission */
+  }
+
   await chrome.scripting.executeScript({
     target: { tabId },
     files: [JAA_EXTRACT_FILE]
   });
   const [exec] = await chrome.scripting.executeScript({
     target: { tabId },
-    func: async () => {
+    func: async (diag) => {
+      try {
+        if (diag) window.__JAA_EXTRACT_DEBUG = true;
+      } catch (e) {
+        /* ignore */
+      }
       const runAsync = window.__jaaExtractPageContentAsync;
       if (typeof runAsync === 'function') {
         return await runAsync();
@@ -53,7 +97,8 @@ async function runExtractPageContent(tabId) {
         };
       }
       return fn();
-    }
+    },
+    args: [forceDiagnostics]
   });
   return exec.result;
 }
@@ -511,6 +556,10 @@ async function extractAndSubmitJob() {
       throw new Error('Failed to extract content from page');
     }
 
+    if (extracted.diagnostics) {
+      console.info('[ApplyPilot] extract diagnostics — copy this object when reporting bugs:', extracted.diagnostics);
+    }
+
     const { content } = extracted;
 
     if (content.length < 100) {
@@ -568,6 +617,10 @@ async function copyPageContent() {
 
     if (!extracted || extracted.error || !extracted.content) {
       throw new Error('Failed to extract content from page');
+    }
+
+    if (extracted.diagnostics) {
+      console.info('[ApplyPilot] extract diagnostics — copy this object when reporting bugs:', extracted.diagnostics);
     }
 
     await navigator.clipboard.writeText(extracted.content);

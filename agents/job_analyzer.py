@@ -27,7 +27,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 # Content processing constraints
 MIN_JOB_TEXT_LENGTH: int = 50  # Minimum characters for valid job posting
-MAX_CONTENT_LENGTH_FOR_AI: int = 10000  # AI input limit for performance
+MAX_CONTENT_LENGTH_FOR_AI: int = 50000  # Align with extension cap / cache key normalization
 
 # AI processing parameters
 AI_TEMPERATURE: float = 0.1  # Low temperature for consistent extraction

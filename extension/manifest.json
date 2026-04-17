@@ -14,7 +14,8 @@
   "host_permissions": [
     "https://*.a.run.app/*",
     "http://localhost:8000/*",
-    "https://api.ashbyhq.com/*"
+    "https://api.ashbyhq.com/*",
+    "https://www.linkedin.com/*"
   ],
   "optional_host_permissions": [
     "https://*/*"
@@ -45,6 +46,12 @@
       ],
       "js": ["content/content.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.linkedin.com/jobs/*"],
+      "js": ["lib/linkedin-voyager-hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
     }
   ]
 }

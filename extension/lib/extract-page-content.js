@@ -12,6 +12,84 @@
   var MIN_JSON_LD_CHARS = 180;
   var MAX_EXTRACT_CHARS = 50000;
 
+  /** Bump when extractor behavior changes (shown in diagnostics to confirm reload). */
+  var EXTRACTOR_BUILD_ID = 'li-guest-api-v5';
+
+  /** Last LinkedIn jobs-guest attempt (shown in diagnostics when debug on). */
+  var lastLinkedInGuestApiDiag = null;
+
+  /** Set by LinkedIn DOM resolution; read when `jaa_debug_extract` / `__JAA_EXTRACT_DEBUG` is on. */
+  var lastLinkedInRootPath = null;
+  var lastLinkedInDetailRootHint = '';
+
+  function noteLinkedInRoot(el, pathKey) {
+    lastLinkedInRootPath = pathKey || null;
+    try {
+      lastLinkedInDetailRootHint =
+        el && el.tagName ? el.tagName + ' ' + String(el.className || '').slice(0, 160) : '';
+    } catch (e) {
+      lastLinkedInDetailRootHint = '';
+    }
+  }
+
+  function attachExtractDiagnostics(out) {
+    if (!out || typeof out !== 'object') return out;
+    /* Page-console localStorage often does NOT apply here: chrome.scripting runs in an isolated world. */
+    var enabled = false;
+    try {
+      enabled = typeof window !== 'undefined' && window.__JAA_EXTRACT_DEBUG === true;
+    } catch (e0) {
+      enabled = false;
+    }
+    if (!enabled) {
+      try {
+        enabled = typeof localStorage !== 'undefined' && localStorage.getItem('jaa_debug_extract') === '1';
+      } catch (e1) {
+        enabled = false;
+      }
+    }
+    if (!enabled) return out;
+    try {
+      var c = String(out.content || '');
+      out.diagnostics = {
+        extractorBuild: EXTRACTOR_BUILD_ID,
+        url: String(window.location.href || ''),
+        hostPath: String(window.location.hostname || '') + String(window.location.pathname || '').slice(0, 120),
+        currentJobId: linkedInUrlJobId(),
+        linkedInRootPath: lastLinkedInRootPath,
+        linkedInRootHint: lastLinkedInDetailRootHint,
+        source: out.source,
+        confidence: out.confidence,
+        contentLength: c.length,
+        contentHead: c.slice(0, 1800),
+        contentTail: c.length > 2000 ? c.slice(-900) : ''
+      };
+      try {
+        if (/linkedin\.com/i.test(String(window.location.hostname || ''))) {
+          var vk = [];
+          var si;
+          for (si = 0; si < sessionStorage.length; si++) {
+            var sk = sessionStorage.key(si);
+            if (sk && sk.indexOf('jaa_li_vp_') === 0) vk.push(sk);
+          }
+          out.diagnostics.voyagerSessionKeys = vk;
+        }
+      } catch (eVk) {
+        /* ignore */
+      }
+      try {
+        if (lastLinkedInGuestApiDiag && typeof lastLinkedInGuestApiDiag === 'object') {
+          out.diagnostics.linkedinGuestApi = lastLinkedInGuestApiDiag;
+        }
+      } catch (eGa) {
+        /* ignore */
+      }
+    } catch (e2) {
+      /* skip */
+    }
+    return out;
+  }
+
   /**
    * Hostname → extra root selectors for known career sites / ATS boards.
    * Maintained as URLs/DOM change; fall back to generic scoring if no match.
@@ -269,7 +347,10 @@
    */
   function isInsideSearchResultsRail(el) {
     if (!el || !el.closest) return false;
-    if (el.closest('[class*="jobs-search-results"]')) return true;
+    /* Do NOT use bare `[class*="jobs-search-results"]` — LinkedIn wraps the whole split view (list + detail)
+     * in shells like `jobs-search-results-*`, which would mark the real job-detail pane as "rail" and skip it. */
+    if (el.closest('[class*="jobs-search-results__list"]')) return true;
+    if (el.closest('[class*="jobs-search-results-list"]')) return true;
     if (el.closest('[class*="search-results__list-item"]')) return true;
     if (el.closest('[class*="scaffold-layout__list"]')) return true;
     if (el.closest('[class*="jobs-feed-card-list"]')) return true;
@@ -341,6 +422,7 @@
         if (mustMatch && !blobMatchesLinkedInJobNeedles(blob, needles)) continue;
         t = (el.innerText || '').trim();
         if (t.length < MIN_CANDIDATE_CHARS) continue;
+        if (looksLikeLinkedInHomeJobsRail(t.slice(0, 1600))) continue;
         try {
           rect = el.getBoundingClientRect();
         } catch (e2) {
@@ -387,6 +469,7 @@
         if (isInsideSearchResultsRail(el) || isInsideCompactListJobCard(el)) continue;
         t = (el.innerText || '').trim();
         if (t.length < MIN_CANDIDATE_CHARS) continue;
+        if (looksLikeLinkedInHomeJobsRail(t.slice(0, 1600))) continue;
         blob = (el.innerHTML || '') + (el.outerHTML || '').slice(0, 60000) + t;
         var score = t.length;
         if (jid && blobMatchesLinkedInJobNeedles(blob, linkedInJobPostingNeedles(jid))) {
@@ -440,6 +523,7 @@
             continue;
           }
           txt = (r.innerText || '').trim();
+          if (looksLikeLinkedInHomeJobsRail(txt.slice(0, 1600))) continue;
           if (txt.length >= MIN_CANDIDATE_CHARS && txt.length > bestLen) {
             bestLen = txt.length;
             best = r;
@@ -485,7 +569,12 @@
           '.jobs-search__job-details-body, article.jobs-description__container, [class*="jobs-details__main-content"]'
         );
         var tInner = inner ? (inner.innerText || '').trim() : '';
-        if (inner && tInner.length >= MIN_CANDIDATE_CHARS && tInner.length > bestInnerLen) {
+        if (
+          inner &&
+          tInner.length >= MIN_CANDIDATE_CHARS &&
+          !looksLikeLinkedInHomeJobsRail(tInner.slice(0, 1600)) &&
+          tInner.length > bestInnerLen
+        ) {
           bestInnerLen = tInner.length;
           bestInner = inner;
         }
@@ -504,7 +593,7 @@
         w = wnodes[wj];
         if (isInsideSearchResultsRail(w) || isInsideCompactListJobCard(w)) continue;
         var tWrap = (w.innerText || '').trim();
-        if (tWrap.length >= MIN_CANDIDATE_CHARS) return w;
+        if (tWrap.length >= MIN_CANDIDATE_CHARS && !looksLikeLinkedInHomeJobsRail(tWrap.slice(0, 1600))) return w;
       }
     }
 
@@ -535,6 +624,1036 @@
       if (blob.indexOf(needles[i]) !== -1) return true;
     }
     return false;
+  }
+
+  function isElementVisiblyRendered(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (el.hasAttribute && el.hasAttribute('hidden')) return false;
+    if (el.getAttribute('aria-hidden') === 'true') return false;
+    try {
+      var st = window.getComputedStyle(el);
+      if (st.display === 'none' || st.visibility === 'hidden' || parseFloat(st.opacity) < 0.03) return false;
+      var r = el.getBoundingClientRect();
+      if (r.width < 24 || r.height < 24) return false;
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
+   * Full right-hand job pane: title, comp, location, "About the job", bullets, qualifications.
+   * The inner `.jobs-search__job-details-body` / `article.jobs-description__container` nodes are often only
+   * part of the story; structured fields in the dashboard go sparse if we clip to that subtree alone.
+   */
+  function getLinkedInVisibleJobDetailsWrapper() {
+    if (!isLinkedInJobsPage() || !linkedInUrlJobId()) return null;
+    var vw = Math.max(window.innerWidth || document.documentElement.clientWidth || 800, 320);
+    var wrapperSelectors = [
+      '[class*="scaffold-layout__detail"]',
+      '.jobs-search__job-details--wrapper',
+      '[class*="jobs-search__job-details--wrapper"]',
+      '[class*="jobs-search-two-pane__details"]',
+      '[class*="jobs-details-serp-page__job-details"]',
+      '[class*="jobs-unified-structure"]',
+      '[class*="jobs-search-job-details"]',
+      '[class*="jobs-details-two-column"]'
+    ];
+    function pickWithMinLeft(minLeftPx) {
+      var best = null;
+      var bestLen = 0;
+      var si;
+      var ni;
+      var nodes;
+      var el;
+      var t;
+      var r;
+      for (si = 0; si < wrapperSelectors.length; si++) {
+        try {
+          nodes = document.querySelectorAll(wrapperSelectors[si]);
+        } catch (e) {
+          nodes = [];
+        }
+        for (ni = 0; ni < nodes.length; ni++) {
+          el = nodes[ni];
+          if (isInsideSearchResultsRail(el) || isInsideCompactListJobCard(el)) continue;
+          if (!isElementVisiblyRendered(el)) continue;
+          try {
+            r = el.getBoundingClientRect();
+          } catch (e2) {
+            continue;
+          }
+          if (r.left < minLeftPx) continue;
+          t = (el.innerText || '').trim();
+          if (t.length < MIN_CANDIDATE_CHARS) continue;
+          /* Outer shells (e.g. jobs-unified-structure) can span list + feed + detail — longest text wins the wrong node. */
+          if (looksLikeLinkedInHomeJobsRail(t.slice(0, 1600))) continue;
+          if (t.length > bestLen) {
+            bestLen = t.length;
+            best = el;
+          }
+        }
+      }
+      return best;
+    }
+    /* Prefer right column first; never minLeft 0 on desktop — that re-introduces whole-page shells. */
+    var fractions = [0.38, 0.28, 0.2, 0.14, 0.08];
+    if (vw < 768) {
+      fractions.push(0);
+    }
+    var fi;
+    var w;
+    for (fi = 0; fi < fractions.length; fi++) {
+      w = pickWithMinLeft(vw * fractions[fi]);
+      if (w) return w;
+    }
+    return null;
+  }
+
+  /** Opening text of the homepage / jobs-activity rail (not the focused job-detail column). */
+  function looksLikeLinkedInHomeJobsRail(text) {
+    var h = (text || '').slice(0, 1400);
+    return (
+      /Jobs based on your activity/i.test(h) ||
+      /Show your interest in these companies/i.test(h) ||
+      /Recent job searches/i.test(h) ||
+      /Reactivate Premium/i.test(h) ||
+      /Jobs where you('|’)re more likely to hear back/i.test(h)
+    );
+  }
+
+  /**
+   * Same approach as common MIT-style extensions (e.g. GitHub "LinkedIn-Job-Extractor"):
+   * wait for stable job-description / top-card nodes — not inference from `<main>` text.
+   */
+  function tryLinkedInJobsSearchCompositeText() {
+    if (!isLinkedInJobsPage() || !linkedInUrlJobId()) return '';
+
+    function longestAcross(selectorsCsv) {
+      var parts = selectorsCsv.split(',');
+      var si;
+      var pi;
+      var nodes;
+      var best = '';
+      var t;
+      for (si = 0; si < parts.length; si++) {
+        try {
+          nodes = document.querySelectorAll(parts[si].trim());
+        } catch (e) {
+          nodes = [];
+        }
+        for (pi = 0; pi < nodes.length; pi++) {
+          t = (nodes[pi].innerText || '').trim();
+          if (t.length > best.length) best = t;
+        }
+      }
+      return best;
+    }
+
+    function firstNonEmpty(selectorsCsv) {
+      var parts = selectorsCsv.split(',');
+      var si;
+      var el;
+      var t;
+      for (si = 0; si < parts.length; si++) {
+        try {
+          el = document.querySelector(parts[si].trim());
+        } catch (e2) {
+          el = null;
+        }
+        if (!el) continue;
+        t = (el.innerText || '').trim();
+        if (t) return t;
+      }
+      return '';
+    }
+
+    var title = firstNonEmpty(
+      '.jobs-unified-top-card__job-title, .job-details-jobs-unified-top-card__job-title, .jobs-details-top-card__job-title, h1[class*="job-title"]'
+    );
+    var company = firstNonEmpty(
+      '.jobs-unified-top-card__company-name, .job-details-jobs-unified-top-card__company-name, [class*="jobs-unified-top-card__company-name"], [class*="jobs-details-top-card__company-name"]'
+    );
+    var desc = longestAcross(
+      '.jobs-description-content__text, .jobs-box__html-content, .jobs-search__job-details-body, article.jobs-description__container, .jobs-description__container, [class*="jobs-description-content"], [class*="jobs-details__main-content"], [class*="job-details-body"]'
+    );
+
+    var chunks = [];
+    if (title) chunks.push(title);
+    if (company) chunks.push('Company: ' + company);
+    if (desc) {
+      chunks.push('');
+      chunks.push(desc);
+    }
+    return chunks.join('\n').trim();
+  }
+
+  /**
+   * MAIN-world hook (`linkedin-voyager-hook.js`) writes parsed posting text to sessionStorage per job id.
+   * Same tab storage is visible here (isolated-world extractor).
+   */
+  function tryLinkedInVoyagerSessionStorage() {
+    var jid = linkedInUrlJobId();
+    if (!jid) return '';
+    try {
+      var raw = sessionStorage.getItem('jaa_li_vp_' + jid);
+      if (!raw) return '';
+      var o = JSON.parse(raw);
+      var desc = o.desc ? String(o.desc).trim() : '';
+      if (!desc || desc.length < 80) return '';
+      var parts = [];
+      if (o.title) parts.push(String(o.title).trim());
+      if (o.company) parts.push('Company: ' + String(o.company).trim());
+      parts.push('');
+      parts.push(desc);
+      var out = parts.join('\n').trim();
+      var head = out.slice(0, 1800);
+      if (looksLikeLinkedInHomeJobsRail(head)) return '';
+      return out;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function linkedInGuestExtractLongestBody(obj) {
+    var best = '';
+    function walk(x, depth) {
+      if (!x || depth > 48) return;
+      if (typeof x === 'string') {
+        if (x.length > best.length && x.length >= 160 && x.split(/\s+/).length >= 14) best = x;
+        return;
+      }
+      if (typeof x !== 'object') return;
+      var k;
+      for (k in x) {
+        if (!Object.prototype.hasOwnProperty.call(x, k)) continue;
+        var kl = k.toLowerCase();
+        if (typeof x[k] === 'string' && /descrip|snippet|sanitized|formatted|plaintext|criteria/i.test(kl)) {
+          if (x[k].length > best.length) best = x[k];
+        }
+        walk(x[k], depth + 1);
+      }
+    }
+    walk(obj, 0);
+    return best;
+  }
+
+  function linkedInPageCsrfToken() {
+    try {
+      var m = document.querySelector('meta[name="csrf-token"]');
+      if (m) return (m.getAttribute('content') || '').trim();
+    } catch (e) {
+      /* ignore */
+    }
+    return '';
+  }
+
+  /** Voyager-style envelopes nest the posting under `included` / `data`. */
+  function unwindGuestJobPayload(data, jid) {
+    if (!data || typeof data !== 'object') return data;
+    var needle = 'jobPosting:' + jid;
+
+    var inc = data.included;
+    if (Array.isArray(inc)) {
+      var i;
+      var row;
+      for (i = 0; i < inc.length; i++) {
+        row = inc[i];
+        if (!row || typeof row !== 'object') continue;
+        var urn = String(row.entityUrn || row.trackingUrn || '');
+        if (urn.indexOf(needle) !== -1) return row;
+      }
+      for (i = 0; i < inc.length; i++) {
+        row = inc[i];
+        if (!row || typeof row !== 'object') continue;
+        var blob = '';
+        try {
+          blob = JSON.stringify(row);
+        } catch (e2) {
+          blob = '';
+        }
+        if (
+          jid &&
+          blob.indexOf(jid) !== -1 &&
+          (row.description || row.title || row.jobPostingTitle || row.formattedDescription)
+        ) {
+          return row;
+        }
+      }
+    }
+
+    var d = data.data;
+    if (d && typeof d === 'object') {
+      if (d.jobPosting && typeof d.jobPosting === 'object') return d.jobPosting;
+      if (Array.isArray(d.elements) && d.elements[0]) return d.elements[0];
+    }
+    return data;
+  }
+
+  /**
+   * jobs-guest often returns HTTP 200 with an HTML fragment (not JSON). Parse JSON-LD JobPosting + description DOM.
+   */
+  function extractJobPostingFromGuestHtml(htmlStr, jid) {
+    if (!htmlStr || htmlStr.length < 80) return null;
+    try {
+      var parser = new DOMParser();
+      var doc = parser.parseFromString(htmlStr, 'text/html');
+      if (!doc || !doc.body) return null;
+
+      var needles = jid ? linkedInJobPostingNeedles(jid) : [];
+
+      var scripts = doc.querySelectorAll('script[type="application/ld+json"]');
+      var postings = [];
+      var si;
+      for (si = 0; si < scripts.length; si++) {
+        try {
+          var ldData = JSON.parse(scripts[si].textContent || '');
+          collectJobPostingObjects(ldData, postings);
+        } catch (e0) {
+          /* skip invalid */
+        }
+      }
+
+      function postingMatchesBlob(job) {
+        if (!jid || !needles.length) return true;
+        var blob = '';
+        try {
+          blob = JSON.stringify(job);
+        } catch (e1) {
+          return false;
+        }
+        var ni;
+        for (ni = 0; ni < needles.length; ni++) {
+          if (blob.indexOf(needles[ni]) !== -1) return true;
+        }
+        return false;
+      }
+
+      var filtered = postings.filter(postingMatchesBlob);
+      var useList = filtered.length ? filtered : postings;
+
+      var bestLd = '';
+      var pi;
+      for (pi = 0; pi < useList.length; pi++) {
+        var formatted = formatOneJobPosting(useList[pi]);
+        if (formatted.length > bestLd.length) bestLd = formatted;
+      }
+
+      if (
+        bestLd.length >= MIN_CANDIDATE_CHARS &&
+        !looksLikeLinkedInHomeJobsRail(bestLd.slice(0, 1700))
+      ) {
+        return {
+          text: bestLd,
+          titleLen: 0,
+          descLen: bestLd.length,
+          htmlSource: 'jsonld'
+        };
+      }
+
+      var descCandidates = [];
+      var selectors = [
+        '.description__text',
+        '.show-more-less-html__markup',
+        '.jobs-description-content__text',
+        '.jobs-box__html-content',
+        '[class*="description-content"]',
+        '[class*="jobs-description"]',
+        '[class*="job-details"]'
+      ];
+      var sj;
+      for (sj = 0; sj < selectors.length; sj++) {
+        try {
+          doc.querySelectorAll(selectors[sj]).forEach(function (el) {
+            var inner = (el.innerText || '').trim();
+            if (inner.length > 200) descCandidates.push(inner);
+          });
+        } catch (e2) {
+          /* skip */
+        }
+      }
+      descCandidates.sort(function (a, b) {
+        return b.length - a.length;
+      });
+      var bodyText = descCandidates.length ? descCandidates[0] : '';
+
+      var titleText = '';
+      try {
+        var h = doc.querySelector(
+          'h1.top-card-layout__title, h1[class*="job-title"], .job-details-jobs-unified-top-card__job-title, h1'
+        );
+        if (h) titleText = (h.innerText || '').trim().split('\n')[0].trim();
+      } catch (e3) {
+        /* skip */
+      }
+
+      var companyText = '';
+      try {
+        var ca = doc.querySelector(
+          'a.topcard__org-name-link, .jobs-unified-top-card__company-name a, [class*="top-card"] a[data-tracking-control-name]'
+        );
+        if (ca) companyText = (ca.innerText || '').trim();
+      } catch (e4) {
+        /* skip */
+      }
+
+      var assembled = '';
+      if (titleText) assembled += titleText + '\n';
+      if (companyText) assembled += 'Company: ' + companyText + '\n';
+      if (bodyText) {
+        if (assembled) assembled += '\n';
+        assembled += bodyText;
+      }
+
+      assembled = assembled.trim();
+      if (
+        assembled.length >= MIN_CANDIDATE_CHARS &&
+        !looksLikeLinkedInHomeJobsRail(assembled.slice(0, 1700))
+      ) {
+        return {
+          text: assembled,
+          htmlSource: 'dom',
+          titleLen: titleText.length,
+          descLen: bodyText.length
+        };
+      }
+
+      return null;
+    } catch (e5) {
+      return null;
+    }
+  }
+
+  function parseGuestJobPostingPayload(txt, jid) {
+    if (!txt || txt.length < 20) return null;
+    var t = String(txt).trim();
+    if (t.charAt(0) === '<' || /^\s*<!DOCTYPE/i.test(t)) {
+      return extractJobPostingFromGuestHtml(t, jid);
+    }
+
+    var data = null;
+    try {
+      data = JSON.parse(t);
+    } catch (e0) {
+      var i = t.indexOf('{');
+      while (i !== -1) {
+        try {
+          data = JSON.parse(t.slice(i));
+          break;
+        } catch (e1) {
+          i = t.indexOf('{', i + 1);
+        }
+      }
+    }
+    if (!data || typeof data !== 'object') return null;
+
+    var row = unwindGuestJobPayload(data, jid);
+
+    var title =
+      row.title ||
+      row.jobTitle ||
+      (row.jobPostingTitle && (row.jobPostingTitle.text || row.jobPostingTitle)) ||
+      '';
+    if (typeof title === 'object' && title !== null)
+      title = title.text || title.name || '';
+
+    var company = '';
+    if (typeof row.companyName === 'string') company = row.companyName;
+    else if (row.company && typeof row.company === 'string') company = row.company;
+    else if (row.company && row.company.name) company = String(row.company.name);
+
+    var desc = '';
+    if (typeof row.description === 'string') desc = row.description;
+    else if (row.description && typeof row.description.text === 'string') desc = row.description.text;
+    else if (typeof row.descriptionHtml === 'string') desc = htmlToPlainText(row.descriptionHtml);
+    else if (row.description && typeof row.description === 'object') {
+      desc =
+        row.description.text ||
+        row.description.plain ||
+        row.description.combined ||
+        row.description.attributes ||
+        '';
+      if (typeof desc !== 'string') desc = '';
+    }
+    if (row.formattedDescription && typeof row.formattedDescription === 'string') {
+      desc = desc || htmlToPlainText(row.formattedDescription);
+    }
+    if (!desc || desc.length < 60) {
+      desc = linkedInGuestExtractLongestBody(row);
+    }
+
+    title = String(title || '').trim();
+    company = String(company || '').trim();
+    desc = String(desc || '').trim();
+
+    var chunks = [];
+    if (title) chunks.push(title);
+    if (company) chunks.push('Company: ' + company);
+    if (desc) {
+      chunks.push('');
+      chunks.push(desc);
+    }
+    var out = chunks.join('\n').trim();
+    if (!out) return null;
+    return { text: out, titleLen: title.length, descLen: desc.length };
+  }
+
+  /**
+   * Public jobs-guest JSON by posting id — prefers MAIN prefetch in sessionStorage (see linkedin-guest-prefetch.js).
+   */
+  async function tryLinkedInGuestApiJobPostingText() {
+    var jid = linkedInUrlJobId();
+    if (!jid || !isLinkedInJobsPage()) {
+      lastLinkedInGuestApiDiag = { skip: true, reason: 'no_jid_or_not_jobs' };
+      return '';
+    }
+
+    var url =
+      'https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/' +
+      encodeURIComponent(jid);
+
+    var txt = '';
+    var source = '';
+    var meta = null;
+
+    try {
+      var rawBody = sessionStorage.getItem('jaa_li_guest_body_' + jid);
+      var rawMeta = sessionStorage.getItem('jaa_li_guest_meta_' + jid);
+      var rawErr = sessionStorage.getItem('jaa_li_guest_err_' + jid);
+      if (rawMeta) {
+        try {
+          meta = JSON.parse(rawMeta);
+        } catch (em) {
+          meta = null;
+        }
+      }
+      if (rawBody && rawBody.length > 20) {
+        txt = rawBody;
+        source = 'prefetch_sessionStorage';
+      }
+    } catch (eS) {
+      /* ignore */
+    }
+
+    if (!txt) {
+      try {
+        var hdr = {
+          Accept: 'application/json,text/plain,*/*',
+          Referer: typeof location !== 'undefined' ? location.href : 'https://www.linkedin.com/jobs/'
+        };
+        var csrf = linkedInPageCsrfToken();
+        if (csrf) hdr['csrf-token'] = csrf;
+
+        var res = await fetch(url, {
+          credentials: 'include',
+          cache: 'no-store',
+          mode: 'cors',
+          headers: hdr
+        });
+
+        meta = { status: res.status, ok: res.ok, len: 0 };
+        txt = await res.text();
+        meta.len = txt ? txt.length : 0;
+        source = 'isolated_fetch';
+      } catch (e2) {
+        lastLinkedInGuestApiDiag = {
+          source: source || 'none',
+          error: String(e2 && e2.message ? e2.message : e2),
+          meta: meta
+        };
+        return '';
+      }
+    }
+
+    var parsed = parseGuestJobPostingPayload(txt, jid);
+
+    if (!parsed || !parsed.text) {
+      lastLinkedInGuestApiDiag = {
+        source: source,
+        meta: meta,
+        fail: 'parse_or_empty',
+        bodyLen: txt ? txt.length : 0,
+        bodyHead: txt ? String(txt).slice(0, 280) : ''
+      };
+      return '';
+    }
+
+    var out = parsed.text;
+    if (out.length < MIN_CANDIDATE_CHARS) {
+      lastLinkedInGuestApiDiag = {
+        source: source,
+        meta: meta,
+        fail: 'short_text',
+        outLen: out.length,
+        titleLen: parsed.titleLen,
+        descLen: parsed.descLen
+      };
+      return '';
+    }
+    if (looksLikeLinkedInHomeJobsRail(out.slice(0, 1800))) {
+      lastLinkedInGuestApiDiag = {
+        source: source,
+        meta: meta,
+        fail: 'looks_like_feed_rail'
+      };
+      return '';
+    }
+
+    lastLinkedInGuestApiDiag = {
+      source: source,
+      meta: meta,
+      ok: true,
+      outLen: out.length,
+      htmlSource: parsed.htmlSource || undefined
+    };
+    return out;
+  }
+
+  /**
+   * LinkedIn A/B tests often ship hashed class names — no `[class*="jobs-…"]` hooks match.
+   * Sample pixels in the likely detail column and score ancestors (geometry + URL job id in HTML).
+   */
+  function getLinkedInDetailRootFromViewportSample() {
+    if (!isLinkedInJobsPage() || !linkedInUrlJobId()) return null;
+    var vw = Math.max(window.innerWidth || document.documentElement.clientWidth || 800, 320);
+    var vh = Math.max(window.innerHeight || document.documentElement.clientHeight || 500, 400);
+    if (vw < 480) return null;
+
+    var jidNeedles = linkedInJobPostingNeedles(linkedInUrlJobId());
+    /* ~0.40 was too strict: a wide left list pushes the detail pane to < 40% vw; then no node passes. */
+    var minLeftPx = Math.max(200, vw * 0.28);
+
+    function bestAncestorAlongChain(hitEl) {
+      if (!hitEl || hitEl.nodeType !== 1) return null;
+      var q = hitEl;
+      var depth = 0;
+      var bestEl = null;
+      var bestScore = -Infinity;
+      while (q && depth < 34) {
+        if (q.nodeType === 1) {
+          var tag = q.tagName ? q.tagName.toUpperCase() : '';
+          if (tag !== 'HTML' && tag !== 'BODY') {
+            if (!/^HEADER$|^FOOTER$|^NAV$|^ASIDE$/i.test(tag)) {
+              if (!isInsideSearchResultsRail(q) && !isInsideCompactListJobCard(q)) {
+                var r;
+                try {
+                  r = q.getBoundingClientRect();
+                } catch (eR) {
+                  q = q.parentElement;
+                  depth++;
+                  continue;
+                }
+                if (r.width >= 72 && r.height >= 48 && r.left >= minLeftPx) {
+                  var t = (q.innerText || '').trim();
+                  if (t.length >= MIN_CANDIDATE_CHARS && !looksLikeLinkedInHomeJobsRail(t.slice(0, 1600))) {
+                    var blob = (q.innerHTML || '').slice(0, 120000);
+                    var score = Math.min(t.length, 24000) + r.left * 0.14 + Math.min(r.width, 920) * 0.06;
+                    if (jidNeedles.length && blobMatchesLinkedInJobNeedles(blob, jidNeedles)) score += 520000;
+                    if (/About the job|Job description|Qualificat|Responsibilit|Easy Apply|Posted \d+/i.test(t))
+                      score += 12000;
+                    if (score > bestScore) {
+                      bestScore = score;
+                      bestEl = q;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        q = q.parentElement;
+        depth++;
+      }
+      if (!bestEl) return null;
+      return { el: bestEl, score: bestScore };
+    }
+
+    var xi;
+    var yi;
+    var xCoords = [
+      Math.min(vw * 0.88, vw - 10),
+      Math.min(vw * 0.78, vw - 16),
+      Math.min(vw * 0.65, vw - 16),
+      Math.min(vw * 0.52, vw - 16),
+      Math.min(vw * 0.42, vw - 12)
+    ];
+    var yCoords = [vh * 0.18, vh * 0.3, vh * 0.42, vh * 0.55, vh * 0.68];
+    var globalBest = null;
+    var globalScore = -Infinity;
+
+    /* vx/vy always main-viewport coords so nested iframe piercing stays consistent */
+    function scoreStackElements(stack, vx, vy) {
+      if (!stack || !stack.length) return;
+      var ki;
+      for (ki = 0; ki < Math.min(stack.length, 34); ki++) {
+        var elHit = stack[ki];
+        if (elHit && elHit.tagName === 'IFRAME' && elHit.contentDocument) {
+          try {
+            var br = elHit.getBoundingClientRect();
+            var ix = vx - br.left;
+            var iy = vy - br.top;
+            if (ix >= 0 && iy >= 0 && ix <= br.width && iy <= br.height) {
+              var inner = elHit.contentDocument.elementsFromPoint(ix, iy);
+              scoreStackElements(inner, vx, vy);
+            }
+          } catch (eIf) {
+            /* cross-origin iframe */
+          }
+          continue;
+        }
+        var pair = bestAncestorAlongChain(elHit);
+        if (pair && pair.score > globalScore) {
+          globalScore = pair.score;
+          globalBest = pair.el;
+        }
+      }
+    }
+
+    for (yi = 0; yi < yCoords.length; yi++) {
+      for (xi = 0; xi < xCoords.length; xi++) {
+        var px = xCoords[xi];
+        var py = yCoords[yi];
+        var stack;
+        try {
+          stack = document.elementsFromPoint(px, py);
+        } catch (eP) {
+          continue;
+        }
+        scoreStackElements(stack, px, py);
+      }
+    }
+    return globalBest;
+  }
+
+  /**
+   * Full enumeration of `<main>` subtrees whose layout box sits right of the list column — no pointer hit-testing.
+   * Covers cases where `elementsFromPoint` misses (overlays, shadow, split compositor quirks).
+   */
+  function getLinkedInGeometricRightBandPane() {
+    if (!isLinkedInJobsPage() || !linkedInUrlJobId()) return null;
+    var scope = document.querySelector('main');
+    if (!scope) scope = document.body;
+    if (!scope) return null;
+
+    var vw = Math.max(window.innerWidth || document.documentElement.clientWidth || 800, 320);
+    var jidNeedles = linkedInJobPostingNeedles(linkedInUrlJobId());
+    /* ~33% vw is usually past the narrow job-card list on desktop */
+    var minLeftPx = Math.max(Math.round(vw * 0.33), 200);
+
+    var nodes;
+    try {
+      nodes = scope.querySelectorAll('div, section, article, aside');
+    } catch (eN) {
+      nodes = [];
+    }
+
+    var bestEl = null;
+    var bestScore = -Infinity;
+    var ni;
+    var el;
+    var r;
+    var t;
+    var blob;
+    var head;
+
+    for (ni = 0; ni < nodes.length; ni++) {
+      el = nodes[ni];
+      if (isInsideCompactListJobCard(el)) continue;
+      if (isInsideSearchResultsRail(el)) continue;
+      try {
+        r = el.getBoundingClientRect();
+      } catch (eR) {
+        continue;
+      }
+      if (r.width < 150 || r.height < 64) continue;
+      if (r.left < minLeftPx) continue;
+      t = (el.innerText || '').trim();
+      if (t.length < MIN_CANDIDATE_CHARS) continue;
+      head = t.slice(0, 1700);
+      if (looksLikeLinkedInHomeJobsRail(head)) continue;
+      blob = (el.innerHTML || '').slice(0, 120000);
+      var score = Math.min(t.length, 28000) + r.left * 0.07 + Math.min(r.width, 980) * 0.045;
+      if (jidNeedles.length && blobMatchesLinkedInJobNeedles(blob, jidNeedles)) score += 520000;
+      if (/About the job|Job description|Qualificat|Responsibilit|Easy Apply|Posted on|yr ·|employees ·/i.test(t))
+        score += 16000;
+      if (score > bestScore) {
+        bestScore = score;
+        bestEl = el;
+      }
+    }
+    return bestEl;
+  }
+
+  /**
+   * Climb from any link that references `currentJobId` to a large ancestor in the detail column.
+   * Works when class names are fully hashed (no stable "job-details" substring).
+   */
+  function getLinkedInPaneFromJobIdLinks() {
+    var jid = linkedInUrlJobId();
+    if (!jid || !isLinkedInJobsPage()) return null;
+    var jidNeedles = linkedInJobPostingNeedles(jid);
+    var vw = Math.max(window.innerWidth || document.documentElement.clientWidth || 800, 320);
+    var scored = [];
+    try {
+      document.querySelectorAll('a[href*="' + jid + '"]').forEach(function (a) {
+        var linkPos;
+        try {
+          linkPos = a.getBoundingClientRect();
+        } catch (eLink) {
+          return;
+        }
+        /* List-column job cards use the same currentJobId in href; climbing yields <main> + feed text. */
+        if (vw >= 640 && linkPos.left < vw * 0.28) {
+          return;
+        }
+        var p = a;
+        var depth = 0;
+        while (p && depth < 22) {
+          var t = (p.innerText || '').trim();
+          var r = p.getBoundingClientRect();
+          if (t.length > 420 && r.width > 110 && r.height > 70 && r.left > 120) {
+            var head = t.slice(0, 1200);
+            if (!looksLikeLinkedInHomeJobsRail(head)) {
+              var blob = (p.innerHTML || '').slice(0, 120000);
+              var score =
+                Math.min(t.length, 18000) +
+                Math.min(r.left, 1600) * 0.45 +
+                Math.min(r.width, 1400) * 0.08;
+              if (jidNeedles.length && blobMatchesLinkedInJobNeedles(blob, jidNeedles)) score += 900000;
+              if (/About the job|Job description|What you|Responsibilit|Qualificat/i.test(t)) score += 12000;
+              scored.push({ el: p, score: score });
+            }
+          }
+          p = p.parentElement;
+          depth++;
+        }
+      });
+    } catch (e) {
+      /* skip */
+    }
+    if (scored.length === 0) return null;
+    scored.sort(function (a, b) {
+      return b.score - a.score;
+    });
+    return scored[0].el;
+  }
+
+  /**
+   * Walk `main` / `[role="main"]` for large right-column blocks whose opening text is not the activity rail.
+   */
+  function getLinkedInDomWalkDetailPane() {
+    if (!isLinkedInJobsPage() || !linkedInUrlJobId()) return null;
+    var jidNeedles = linkedInJobPostingNeedles(linkedInUrlJobId());
+    var vw = Math.max(window.innerWidth || document.documentElement.clientWidth || 900, 600);
+    var roots = [];
+    try {
+      if (document.querySelector('main')) roots.push(document.querySelector('main'));
+      document.querySelectorAll('[role="main"]').forEach(function (n) {
+        roots.push(n);
+      });
+    } catch (e) {
+      /* skip */
+    }
+    var seen = [];
+    var best = null;
+    var bestScore = -Infinity;
+    var ri;
+    var root;
+    var nodes;
+    var ni;
+    var el;
+    var r;
+    var t;
+    var blob;
+    var head;
+    var score;
+
+    for (ri = 0; ri < roots.length; ri++) {
+      root = roots[ri];
+      if (!root || seen.indexOf(root) !== -1) continue;
+      seen.push(root);
+      try {
+        nodes = root.querySelectorAll('div, section, article, aside');
+      } catch (e2) {
+        nodes = [];
+      }
+      for (ni = 0; ni < nodes.length; ni++) {
+        el = nodes[ni];
+        if (isInsideCompactListJobCard(el)) continue;
+        if (isInsideSearchResultsRail(el)) continue;
+        try {
+          r = el.getBoundingClientRect();
+        } catch (e3) {
+          continue;
+        }
+        if (r.width < 95 || r.height < 65) continue;
+        if (r.left < (vw >= 880 ? vw * 0.33 : vw >= 640 ? vw * 0.2 : vw * 0.06)) continue;
+        t = (el.innerText || '').trim();
+        if (t.length < MIN_CANDIDATE_CHARS) continue;
+        head = t.slice(0, 1200);
+        if (looksLikeLinkedInHomeJobsRail(head)) continue;
+        blob = (el.innerHTML || '').slice(0, 120000);
+        score = Math.min(t.length, 20000) + r.left * 0.35 + r.width * 0.06;
+        if (jidNeedles.length && blobMatchesLinkedInJobNeedles(blob, jidNeedles)) score += 900000;
+        if (/About the job|Job description|Easy Apply|What you|Responsibilit/i.test(t)) score += 8000;
+        if (score > bestScore) {
+          bestScore = score;
+          best = el;
+        }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Last resort when LinkedIn renames classes: score broad detail-region selectors by width + URL job id match.
+   * Avoids falling through to `<main>` (feed + "Jobs based on your activity" + promoted listings).
+   */
+  function getLinkedInBroadDetailFallback() {
+    if (!isLinkedInJobsPage() || !linkedInUrlJobId()) return null;
+    var jidNeedles = linkedInJobPostingNeedles(linkedInUrlJobId());
+    var broadSelectors = [
+      '[class*="scaffold-layout__detail"]',
+      '[class*="jobs-search__job-details--wrapper"]',
+      '[class*="jobs-search-two-pane__details"]',
+      '[class*="jobs-details-serp-page__job-details"]',
+      '[class*="jobs-unified-structure"]',
+      '[class*="jobs-search-job-details"]',
+      '[class*="jobs-details-two-column"]',
+      '[class*="job-details-main"]'
+    ];
+    var scored = [];
+    var si;
+    var ni;
+    var nodes;
+    var el;
+    var r;
+    var t;
+    var blob;
+    var vw = Math.max(window.innerWidth || document.documentElement.clientWidth || 800, 320);
+
+    function isLeftListOnlyRail(el) {
+      if (!el || !el.closest) return false;
+      if (el.closest('[class*="jobs-search__right-rail"]')) return false;
+      if (el.closest('[class*="scaffold-layout__detail"]')) return false;
+      if (el.closest('[class*="jobs-search__job-details"]')) return false;
+      return !!el.closest('[class*="scaffold-layout__list"]');
+    }
+
+    for (si = 0; si < broadSelectors.length; si++) {
+      try {
+        nodes = document.querySelectorAll(broadSelectors[si]);
+      } catch (e) {
+        nodes = [];
+      }
+      for (ni = 0; ni < nodes.length; ni++) {
+        el = nodes[ni];
+        if (isInsideCompactListJobCard(el)) continue;
+        if (isLeftListOnlyRail(el)) continue;
+        try {
+          r = el.getBoundingClientRect();
+        } catch (e2) {
+          continue;
+        }
+        if (r.width < 50 || r.height < 60) continue;
+        try {
+          var st = window.getComputedStyle(el);
+          if (st.display === 'none' || st.visibility === 'hidden') continue;
+        } catch (e3) {
+          continue;
+        }
+        t = (el.innerText || '').trim();
+        if (t.length < 80) continue;
+        if (looksLikeLinkedInHomeJobsRail(t.slice(0, 1400))) continue;
+        blob = (el.innerHTML || '') + (el.outerHTML || '').slice(0, 90000);
+        var score = Math.min(t.length, 25000) + Math.min(r.left, vw) * 0.5 + Math.min(r.width, vw) * 0.15;
+        if (jidNeedles.length && blobMatchesLinkedInJobNeedles(blob, jidNeedles)) score += 500000;
+        scored.push({ el: el, score: score });
+      }
+    }
+    if (scored.length === 0) return null;
+    scored.sort(function (a, b) {
+      return b.score - a.score;
+    });
+    return scored[0].el;
+  }
+
+  /**
+   * The focused job's `data-job-id` is often ONLY on the left list row — the detail pane may not repeat it.
+   * URN strings may also be absent from description innerHTML. What always matches the user's focus is the
+   * visible description block in the split-view **detail column** (right side), not list cards or cached nodes.
+   */
+  function getLinkedInVisibleDetailColumnBody() {
+    if (!isLinkedInJobsPage() || !linkedInUrlJobId()) return null;
+    var vw = Math.max(window.innerWidth || document.documentElement.clientWidth || 800, 320);
+    var selectors = [
+      '.jobs-search__job-details-body',
+      'article.jobs-description__container',
+      '[class*="jobs-details__main-content"]',
+      '[class*="job-details-body"]',
+      '[class*="jobs-description-content"]',
+      '[class*="jobs-box__html-content"]'
+    ];
+    function pickBodiesWithMinLeft(minLeftPx) {
+      var best = null;
+      var bestLen = 0;
+      var si;
+      var ni;
+      var nodes;
+      var el;
+      var t;
+      var r;
+      for (si = 0; si < selectors.length; si++) {
+        try {
+          nodes = document.querySelectorAll(selectors[si]);
+        } catch (e) {
+          nodes = [];
+        }
+        for (ni = 0; ni < nodes.length; ni++) {
+          el = nodes[ni];
+          if (isInsideSearchResultsRail(el) || isInsideCompactListJobCard(el)) continue;
+          if (!isElementVisiblyRendered(el)) continue;
+          try {
+            r = el.getBoundingClientRect();
+          } catch (e2) {
+            continue;
+          }
+          if (r.left < minLeftPx) continue;
+          t = (el.innerText || '').trim();
+          if (t.length < MIN_CANDIDATE_CHARS) continue;
+          if (looksLikeLinkedInHomeJobsRail(t.slice(0, 1600))) continue;
+          if (t.length > bestLen) {
+            bestLen = t.length;
+            best = el;
+          }
+        }
+      }
+      return best;
+    }
+    var fractions = [0.38, 0.28, 0.2, 0.14, 0.08];
+    if (vw < 768) {
+      fractions.push(0);
+    }
+    var fi;
+    var picked;
+    for (fi = 0; fi < fractions.length; fi++) {
+      picked = pickBodiesWithMinLeft(vw * fractions[fi]);
+      if (picked) return picked;
+    }
+    return null;
+  }
+
+  /** If an inner description node matched, upgrade to the parent wrapper when it contains substantially more text. */
+  function expandLinkedInDetailRootIfRicher(innerEl) {
+    if (!innerEl || !isLinkedInJobsPage()) return innerEl;
+    var wrap = innerEl.closest(
+      '[class*="jobs-search__job-details--wrapper"], [class*="jobs-search-two-pane__details"], [class*="jobs-details-serp-page__job-details"]'
+    );
+    if (!wrap || wrap === innerEl) return innerEl;
+    var a = ((innerEl.innerText || '').trim()).length;
+    var b = ((wrap.innerText || '').trim()).length;
+    if (b >= a + 100) return wrap;
+    return innerEl;
   }
 
   /**
@@ -578,7 +1697,7 @@
         }
       }
     }
-    return best;
+    return best ? expandLinkedInDetailRootIfRicher(best) : null;
   }
 
   function getLinkedInRootMatchingUrlJobId() {
@@ -619,16 +1738,23 @@
 
     for (i = 0; i < candidates.length; i++) {
       el = candidates[i];
-      /* Left-list rows also carry data-job-id — ignore unless we're in the detail column. */
-      if (el.closest('[class*="jobs-search-results"]') && !el.closest(detailColSelector)) continue;
+      /* Left-list rows also carry data-job-id — ignore markers that sit only in the list column. */
+      if (el.closest('[class*="scaffold-layout__list"]') && !el.closest(detailColSelector)) continue;
       detail = el.closest(detailColSelector + ', article.jobs-description__container');
       if (!detail) {
         detail = el.closest('[class*="jobs-search__job-details"], [class*="jobs-unified"]');
       }
       if (!detail) continue;
-      detail =
-        detail.querySelector('.jobs-search__job-details-body, article.jobs-description__container') ||
-        detail;
+      var wrapLevel = el.closest(
+        '[class*="jobs-search__job-details--wrapper"], [class*="jobs-search-two-pane__details"], [class*="jobs-details-serp-page__job-details"]'
+      );
+      if (wrapLevel && ((wrapLevel.innerText || '').trim()).length >= MIN_CANDIDATE_CHARS) {
+        detail = wrapLevel;
+      } else {
+        detail =
+          detail.querySelector('.jobs-search__job-details-body, article.jobs-description__container') ||
+          detail;
+      }
       td = (detail.innerText || '').trim();
       if (td.length >= MIN_CANDIDATE_CHARS && td.length > bestLen) {
         bestLen = td.length;
@@ -639,21 +1765,77 @@
   }
 
   function getBestSplitViewDetailRoot() {
+    lastLinkedInRootPath = null;
+    lastLinkedInDetailRootHint = '';
+
     if (isLinkedInJobsPage()) {
+      /* Whole right-hand job pane — not only the inner description div (misses sections + skills). */
+      var wrapperPane = getLinkedInVisibleJobDetailsWrapper();
+      if (wrapperPane) {
+        noteLinkedInRoot(wrapperPane, 'linkedIn:wrapperPane');
+        return wrapperPane;
+      }
+      /* Visible detail column: list rows hold data-job-id; detail often does not; URNs may be missing from HTML. */
+      var visibleDetail = getLinkedInVisibleDetailColumnBody();
+      if (visibleDetail) {
+        noteLinkedInRoot(visibleDetail, 'linkedIn:visibleDetailColumnBody');
+        return visibleDetail;
+      }
       /* URL wins: focused job is tied to currentJobId / urn:li:jobPosting — not max width or max length. */
       var urlMatchedBody = findLinkedInDetailBodyMatchingUrlJobId();
-      if (urlMatchedBody) return urlMatchedBody;
+      if (urlMatchedBody) {
+        noteLinkedInRoot(urlMatchedBody, 'linkedIn:urlUrnMatch');
+        return urlMatchedBody;
+      }
       var linkedInId = getLinkedInRootMatchingUrlJobId();
-      if (linkedInId) return linkedInId;
+      if (linkedInId) {
+        noteLinkedInRoot(linkedInId, 'linkedIn:dataJobIdOrEntityUrn');
+        return linkedInId;
+      }
       var anchored = getLinkedInAnchoredDetailRoot();
-      if (anchored) return anchored;
-      var rightmost = getLinkedInRightmostDetailBody(true);
-      if (!rightmost) rightmost = getLinkedInRightmostDetailBody(false);
-      if (rightmost) return rightmost;
+      if (anchored) {
+        noteLinkedInRoot(anchored, 'linkedIn:anchoredScore');
+        return anchored;
+      }
+      var rmFiltered = getLinkedInRightmostDetailBody(true);
+      var rightmostRm = rmFiltered || getLinkedInRightmostDetailBody(false);
+      if (rightmostRm) {
+        noteLinkedInRoot(rightmostRm, rmFiltered ? 'linkedIn:rightmostJobIdFiltered' : 'linkedIn:rightmostUnfiltered');
+        return rightmostRm;
+      }
+      var paneFromLinks = getLinkedInPaneFromJobIdLinks();
+      if (paneFromLinks) {
+        noteLinkedInRoot(paneFromLinks, 'linkedIn:paneFromJobIdLinks');
+        return paneFromLinks;
+      }
+      var domWalkPane = getLinkedInDomWalkDetailPane();
+      if (domWalkPane) {
+        noteLinkedInRoot(domWalkPane, 'linkedIn:domWalkDetailPane');
+        return domWalkPane;
+      }
+      var broadFb = getLinkedInBroadDetailFallback();
+      if (broadFb) {
+        noteLinkedInRoot(broadFb, 'linkedIn:broadDetailFallback');
+        return broadFb;
+      }
+      var geometricPane = getLinkedInGeometricRightBandPane();
+      if (geometricPane) {
+        noteLinkedInRoot(geometricPane, 'linkedIn:geometricRightBand');
+        return geometricPane;
+      }
+      var viewportPane = getLinkedInDetailRootFromViewportSample();
+      if (viewportPane) {
+        noteLinkedInRoot(viewportPane, 'linkedIn:viewportPointSample');
+        return viewportPane;
+      }
+      noteLinkedInRoot(null, 'linkedIn:splitStrategiesMissed');
     }
 
     var linkedInRail = getLinkedInOpenJobPaneRoot();
-    if (linkedInRail) return linkedInRail;
+    if (linkedInRail) {
+      noteLinkedInRoot(linkedInRail, 'linkedIn:openJobPaneRail');
+      return linkedInRail;
+    }
 
     var selectors = [
       '.jobs-search__job-details-body',
@@ -675,6 +1857,7 @@
           if (isInsideSearchResultsRail(el)) continue;
           if (isInsideCompactListJobCard(el)) continue;
           var t = (el.innerText || '').trim();
+          if (looksLikeLinkedInHomeJobsRail(t.slice(0, 1600))) continue;
           if (t.length >= MIN_CANDIDATE_CHARS && t.length > bestLen) {
             bestLen = t.length;
             best = el;
@@ -683,6 +1866,9 @@
       } catch (e) {
         /* skip */
       }
+    }
+    if (best && isLinkedInJobsPage()) {
+      noteLinkedInRoot(best, 'linkedIn:longestGlobDetailSelector');
     }
     return best;
   }
@@ -773,12 +1959,43 @@
       if (el.tagName === 'MAIN' && document.querySelector('[class*="jobs-search-results"]')) {
         sc -= 300;
       }
+      if (
+        el.tagName === 'MAIN' &&
+        isLinkedInJobsPage() &&
+        linkedInUrlJobId() &&
+        document.querySelector(
+          '[class*="jobs-search-two-pane"], [class*="jobs-split-view"], [class*="scaffold-layout__list-container"]'
+        )
+      ) {
+        sc -= 900;
+      }
       if (sc > bestScore) {
         bestScore = sc;
         best = el;
       }
     }
-    return best || document.body;
+    var pickedRoot = best || document.body;
+    if (isLinkedInJobsPage() && linkedInUrlJobId()) {
+      var rescuePane =
+        getLinkedInGeometricRightBandPane() ||
+        getLinkedInDetailRootFromViewportSample() ||
+        getLinkedInPaneFromJobIdLinks() ||
+        getLinkedInDomWalkDetailPane() ||
+        getLinkedInBroadDetailFallback();
+      if (
+        rescuePane &&
+        (pickedRoot.tagName === 'MAIN' ||
+          pickedRoot === document.body ||
+          pickedRoot === document.documentElement)
+      ) {
+        noteLinkedInRoot(rescuePane, 'linkedIn:rescueFromMainComposite');
+        return rescuePane;
+      }
+    }
+    if (isLinkedInJobsPage()) {
+      noteLinkedInRoot(pickedRoot, 'linkedIn:candidateScore_' + (pickedRoot.tagName || '?'));
+    }
+    return pickedRoot;
   }
 
   function removeSplitViewListRails(node) {
@@ -929,6 +2146,13 @@
       if (len < 400) return 'low';
       return 'medium';
     }
+    if (source === 'linkedin-guest-api') {
+      if (len < 350) return 'low';
+      /* Guest HTML is job-scoped (currentJobId) and rail-filtered before this source is set. */
+      /* Dense JDs often have few newlines — do not require lines >= 8 when text is already long. */
+      if (len >= 1000 || (len >= 700 && lines >= 8)) return 'high';
+      return 'medium';
+    }
     if (source === 'selection') return 'high';
     if (!c) return 'low';
     if (source === 'json-ld' || source === 'json-ld+dom') {
@@ -1038,6 +2262,37 @@
       return finalizeExtractResult(result);
     }
 
+    if (isLinkedInJobsPage() && linkedInUrlJobId()) {
+      var liVoyager = tryLinkedInVoyagerSessionStorage();
+      if (
+        liVoyager &&
+        liVoyager.length >= MIN_CANDIDATE_CHARS &&
+        !looksLikeLinkedInHomeJobsRail(liVoyager.slice(0, 1700))
+      ) {
+        noteLinkedInRoot(null, 'linkedIn:voyagerSessionStorage');
+        result.content = maybeAppendMetaDescription(capContent(cleanText(liVoyager)));
+        result.source = 'dom';
+        return finalizeExtractResult(result);
+      }
+
+      var liStructured = tryLinkedInJobsSearchCompositeText();
+      var liHead = liStructured ? liStructured.slice(0, 1700) : '';
+      if (
+        liStructured &&
+        liStructured.length >= MIN_CANDIDATE_CHARS &&
+        !looksLikeLinkedInHomeJobsRail(liHead)
+      ) {
+        var diagEl =
+          document.querySelector(
+            '.jobs-description-content__text, .jobs-box__html-content, article.jobs-description__container'
+          ) || document.querySelector('[class*="jobs-description-content"]');
+        noteLinkedInRoot(diagEl || document.querySelector('main'), 'linkedIn:structuredSelectors');
+        result.content = maybeAppendMetaDescription(capContent(cleanText(liStructured)));
+        result.source = 'dom';
+        return finalizeExtractResult(result);
+      }
+    }
+
     var ldText = shouldSkipJsonLdForLinkedInJobs() ? '' : extractJobPostingFromJsonLd();
     var domText = buildDomExtractedText();
 
@@ -1080,9 +2335,53 @@
   window.__jaaExtractPageContentAsync = async function () {
     var ashbyApiText = await tryAshbyPublicPostingFromEmbedPage();
 
+    if (isLinkedInJobsPage() && linkedInUrlJobId()) {
+      var guestTxt = await tryLinkedInGuestApiJobPostingText();
+      if (
+        guestTxt &&
+        guestTxt.length >= MIN_CANDIDATE_CHARS &&
+        !looksLikeLinkedInHomeJobsRail(guestTxt.slice(0, 1800))
+      ) {
+        noteLinkedInRoot(null, 'linkedIn:guestJobPostingApi');
+        return attachExtractDiagnostics(
+          finalizeExtractResult({
+            content: maybeAppendMetaDescription(capContent(cleanText(guestTxt))),
+            title: document.title || '',
+            source: 'linkedin-guest-api'
+          })
+        );
+      }
+    }
+
+    /* SPA + network: DOM selectors often miss; Voyager JSON lands on fetch/XHR — poll both */
+    if (isLinkedInJobsPage() && linkedInUrlJobId()) {
+      var pollDeadline = Date.now() + 8000;
+      while (Date.now() < pollDeadline) {
+        var vz = tryLinkedInVoyagerSessionStorage();
+        if (
+          vz &&
+          vz.length >= MIN_CANDIDATE_CHARS &&
+          !looksLikeLinkedInHomeJobsRail(vz.slice(0, 1700))
+        ) {
+          break;
+        }
+        var trial = tryLinkedInJobsSearchCompositeText();
+        if (
+          trial &&
+          trial.length >= MIN_CANDIDATE_CHARS &&
+          !looksLikeLinkedInHomeJobsRail(trial.slice(0, 1700))
+        ) {
+          break;
+        }
+        await new Promise(function (r) {
+          setTimeout(r, 200);
+        });
+      }
+    }
+
     var first = extractPageContent();
     if (first && first.source === 'selection' && (first.content || '').length >= MIN_SELECTION_CHARS) {
-      return first;
+      return attachExtractDiagnostics(first);
     }
 
     await new Promise(function (resolve) {
@@ -1090,7 +2389,7 @@
     });
     var second = extractPageContent();
     if (second && second.source === 'selection' && (second.content || '').length >= MIN_SELECTION_CHARS) {
-      return second;
+      return attachExtractDiagnostics(second);
     }
 
     var a = (first && first.content) || '';
@@ -1098,13 +2397,19 @@
     var domBest = b.length > a.length + 120 ? second : first;
 
     if (ashbyApiText && ashbyApiText.length > (domBest.content || '').length + 50) {
-      return finalizeExtractResult({
-        content: capContent(cleanText(ashbyApiText)),
-        title: document.title || '',
-        source: 'ashby-api'
-      });
+      return attachExtractDiagnostics(
+        finalizeExtractResult({
+          content: capContent(cleanText(ashbyApiText)),
+          title: document.title || '',
+          source: 'ashby-api'
+        })
+      );
     }
-    return domBest;
+    return attachExtractDiagnostics(domBest);
+  };
+
+  window.__jaaPeekLinkedInExtractDebug = function () {
+    return { linkedInRootPath: lastLinkedInRootPath, linkedInRootHint: lastLinkedInDetailRootHint };
   };
 
   window.__jaaExtractPageContent = extractPageContent;

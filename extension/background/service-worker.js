@@ -28,6 +28,9 @@ const CONFIG = {
 
 /** Same injected script as `popup.js` — generic page extraction + selection override. */
 const JAA_EXTRACT_FILE = 'lib/extract-page-content.js';
+/** MAIN world hook for LinkedIn Voyager responses (job search JSON). */
+const JAA_LI_MAIN_HOOK_FILE = 'lib/linkedin-voyager-hook.js';
+const JAA_LI_GUEST_PREFETCH_FILE = 'lib/linkedin-guest-prefetch.js';
 
 // =============================================================================
 // STATE
@@ -419,13 +422,46 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     
     // Execute shared extractor (same logic as popup — selection-first, generic DOM scoring)
     try {
+      let forceDiag = IS_DEV;
+      try {
+        const st = await chrome.storage.local.get(['extract_diagnostics']);
+        if (st.extract_diagnostics === true) forceDiag = true;
+      } catch (e) {
+        /* ignore */
+      }
+
+      try {
+        if (tab.url && /linkedin\.com\/jobs/i.test(tab.url)) {
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: [JAA_LI_MAIN_HOOK_FILE],
+            world: 'MAIN'
+          });
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: [JAA_LI_GUEST_PREFETCH_FILE],
+            world: 'MAIN'
+          });
+          await new Promise(function (r) {
+            setTimeout(r, 750);
+          });
+        }
+      } catch (eHook) {
+        /* ignore */
+      }
+
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         files: [JAA_EXTRACT_FILE]
       });
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: async () => {
+        func: async (forceDiag) => {
+          try {
+            if (forceDiag) window.__JAA_EXTRACT_DEBUG = true;
+          } catch (e) {
+            /* ignore */
+          }
           const runAsync = window.__jaaExtractPageContentAsync;
           let r;
           if (typeof runAsync === 'function') {
@@ -447,13 +483,19 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
             content: r.content,
             title: r.title,
             company: '',
-            url: window.location.href
+            url: window.location.href,
+            diagnostics: r.diagnostics
           };
-        }
+        },
+        args: [forceDiag]
       });
       
       if (results && results[0] && results[0].result) {
         const data = results[0].result;
+
+        if (data.diagnostics) {
+          console.info('[JAA] extract diagnostics', data.diagnostics);
+        }
 
         if (data.error || !data.content || data.content.length < 100) {
           chrome.notifications.create({
