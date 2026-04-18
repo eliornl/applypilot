@@ -66,7 +66,7 @@ class TestWorkflowStart:
     @pytest.mark.asyncio
     async def test_rate_limited_returns_429(self, authed_client):
         from utils.cache import RateLimitResult
-        blocked = RateLimitResult(allowed=False, limit=10, remaining=0, reset_seconds=3600)
+        blocked = RateLimitResult(allowed=False, limit=30, remaining=0, reset_seconds=3600)
         with patch("api.workflow.check_rate_limit_with_headers",
                    AsyncMock(return_value=blocked)):
             resp = await authed_client.post(

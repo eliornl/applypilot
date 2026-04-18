@@ -581,10 +581,11 @@ async def start_workflow(
     try:
         user_id = get_user_uuid(current_user)
         
-        # Rate limiting: 10 workflows per hour per user (with headers)
+        # Rate limiting: 30 workflows per hour per user (with headers).
+        # Identifier includes policy version so Redis counters reset when the limit changes.
         rate_result = await check_rate_limit_with_headers(
-            identifier=f"{user_id}:workflow_start",
-            limit=10,
+            identifier=f"{user_id}:workflow_start:30ph",
+            limit=30,
             window_seconds=3600,  # 1 hour
         )
         
@@ -593,7 +594,7 @@ async def start_workflow(
             response.headers[header] = value
         
         if not rate_result.allowed:
-            raise rate_limit_error(f"Rate limit exceeded. Maximum 10 workflows per hour. Resets in {rate_result.reset_seconds} seconds.")
+            raise rate_limit_error(f"Rate limit exceeded. Maximum 30 workflows per hour. Resets in {rate_result.reset_seconds} seconds.")
 
         # Concurrency guard: prevent two simultaneous start_workflow calls for the
         # same user (would create duplicate sessions and consume double LLM credits).
