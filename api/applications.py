@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, status, Response
 from utils.logging_config import get_structured_logger, mask_email
 from pydantic import BaseModel, Field, validator
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, func, and_, case, or_
+from sqlalchemy import select, update, func, and_, case, or_, exists
 
 from utils.auth import get_current_user_with_complete_profile
 from utils.database import get_database
@@ -102,14 +102,23 @@ def _dashboard_application_visibility_filter(user_id: uuid.UUID):
     already ``failed`` (race or before ``_update_job_application_with_final_state``). The
     formatter maps that to ``failed`` for the client — exclude those rows here so failed
     analyses never appear as cards.
+
+    Implemented with ``EXISTS`` instead of ``LEFT JOIN workflow_sessions`` so pagination
+    never sees duplicated ``job_applications`` rows if more than one joined row could match.
     """
+    workflow_failed = exists(
+        select(WorkflowSession.session_id).where(
+            WorkflowSession.session_id == JobApplication.session_id,
+            WorkflowSession.workflow_status == WorkflowStatusEnum.FAILED.value,
+        )
+    )
     return and_(
         JobApplication.user_id == user_id,
         JobApplication.deleted_at.is_(None),
         JobApplication.status != ApplicationStatus.FAILED.value,
         or_(
-            WorkflowSession.workflow_status.is_(None),
-            WorkflowSession.workflow_status != WorkflowStatusEnum.FAILED.value,
+            JobApplication.session_id.is_(None),
+            ~workflow_failed,
         ),
     )
 
@@ -220,15 +229,9 @@ async def list_applications(
     try:
         user_id = get_user_uuid(current_user)
 
-        # Build query — exclude soft-deleted, DB-failed, and workflow-failed rows
-        query = (
-            select(JobApplication)
-            .outerjoin(
-                WorkflowSession,
-                JobApplication.session_id == WorkflowSession.session_id,
-            )
-            .where(_dashboard_application_visibility_filter(user_id))
-        )
+        # Build query — exclude soft-deleted, DB-failed, and workflow-failed rows (no JOIN —
+        # visibility uses EXISTS so OFFSET/LIMIT cannot duplicate rows).
+        query = select(JobApplication).where(_dashboard_application_visibility_filter(user_id))
 
         # Add status filter if specified (case-insensitive)
         if status_filter:
@@ -261,15 +264,17 @@ async def list_applications(
         total_result = await db.execute(count_query)
         total = total_result.scalar() or 0
 
-        # Apply sort order
+        # Apply sort order. Secondary sort by primary key makes OFFSET/LIMIT pagination stable
+        # when many rows share the same timestamp or title — without it, PostgreSQL may reorder
+        # ties arbitrarily across requests, producing duplicate rows on "load more".
         sort_map = {
-            "created_asc":  JobApplication.created_at.asc(),
-            "updated_desc": JobApplication.updated_at.desc(),
-            "company_asc":  func.lower(JobApplication.company_name).asc(),
-            "title_asc":    func.lower(JobApplication.job_title).asc(),
+            "created_asc":  (JobApplication.created_at.asc(), JobApplication.id.asc()),
+            "updated_desc": (JobApplication.updated_at.desc(), JobApplication.id.desc()),
+            "company_asc":  (func.lower(JobApplication.company_name).asc(), JobApplication.id.asc()),
+            "title_asc":    (func.lower(JobApplication.job_title).asc(), JobApplication.id.asc()),
         }
-        order_clause = sort_map.get(sort or "", JobApplication.created_at.desc())
-        query = query.order_by(order_clause)
+        order_clauses = sort_map.get(sort or "", (JobApplication.created_at.desc(), JobApplication.id.desc()))
+        query = query.order_by(*order_clauses)
         query = query.offset((page - 1) * per_page).limit(per_page)
 
         # Execute query
@@ -505,10 +510,6 @@ async def get_application_stats(
                 ).label("responses"),
             )
             .select_from(JobApplication)
-            .outerjoin(
-                WorkflowSession,
-                JobApplication.session_id == WorkflowSession.session_id,
-            )
             .where(_dashboard_application_visibility_filter(user_id))
         )
         row = stats_result.one()

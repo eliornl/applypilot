@@ -364,6 +364,46 @@
         }
     }
 
+    /**
+     * Stable unique list by application id (API page may rarely overlap across OFFSET pages).
+     * @param {Record<string,unknown>[]} apps
+     * @returns {Record<string,unknown>[]}
+     */
+    function dedupeApplicationsById(apps) {
+        const seen = new Set();
+        /** @type {Record<string,unknown>[]} */
+        const out = [];
+        for (const a of apps) {
+            const id = String(a['id'] ?? '');
+            if (!id || seen.has(id)) continue;
+            seen.add(id);
+            out.push(a);
+        }
+        return out;
+    }
+
+    /**
+     * Append only ids not already present — keeps DOM and `_loadedApps` aligned.
+     * @param {Record<string,unknown>[]} existing
+     * @param {Record<string,unknown>[]} incoming
+     * @returns {{ merged: Record<string,unknown>[], appended: Record<string,unknown>[] }}
+     */
+    function mergeApplicationsPage(existing, incoming) {
+        const seen = new Set(existing.map(a => String(a['id'] ?? '')));
+        /** @type {Record<string,unknown>[]} */
+        const appended = [];
+        for (const a of incoming) {
+            const id = String(a['id'] ?? '');
+            if (!id || seen.has(id)) continue;
+            seen.add(id);
+            appended.push(a);
+        }
+        return {
+            merged: appended.length ? [...existing, ...appended] : existing,
+            appended,
+        };
+    }
+
     // =============================================================================
     // SKELETON / LOADING
     // =============================================================================
@@ -445,8 +485,11 @@
     // RENDER — list
     // =============================================================================
 
-    /** @param {boolean} reset — true = replace list, false = append */
-    function renderApplications(reset) {
+    /**
+     * @param {boolean} reset — true = replace list from `_loadedApps`, false = append only `pageChunk`
+     * @param {Record<string,unknown>[]} [pageChunk] — apps from this fetch (append path only)
+     */
+    function renderApplications(reset, pageChunk) {
         const list = document.getElementById('applicationsList');
         if (!list) return;
 
@@ -460,11 +503,12 @@
             return;
         }
 
-        const html = _loadedApps.map(renderCard).join('');
         if (reset) {
-            list.innerHTML = html;
+            list.innerHTML = _loadedApps.map(renderCard).join('');
         } else {
-            list.insertAdjacentHTML('beforeend', html);
+            const chunk = pageChunk || [];
+            const html = chunk.map(renderCard).join('');
+            if (html) list.insertAdjacentHTML('beforeend', html);
         }
     }
 
@@ -595,12 +639,16 @@
             if (response.ok) {
                 const data = await response.json();
                 _totalCount = data.total || 0;
-                _loadedApps = reset
-                    ? (data.applications || [])
-                    : [..._loadedApps, ...(data.applications || [])];
+                const pageApps = dedupeApplicationsById(data.applications || []);
+                if (reset) {
+                    _loadedApps = pageApps;
+                    renderApplications(true);
+                } else {
+                    const { merged, appended } = mergeApplicationsPage(_loadedApps, pageApps);
+                    _loadedApps = merged;
+                    renderApplications(false, appended);
+                }
                 _nextPage++;
-
-                renderApplications(reset);
                 syncProcessingApps();
                 if (_firstLoad) _firstLoad = false;
                 updateResultsCount();
