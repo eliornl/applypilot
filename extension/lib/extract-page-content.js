@@ -13,7 +13,7 @@
   var MAX_EXTRACT_CHARS = 50000;
 
   /** Bump when extractor behavior changes (shown in diagnostics to confirm reload). */
-  var EXTRACTOR_BUILD_ID = 'li-guest-api-v11';
+  var EXTRACTOR_BUILD_ID = 'li-guest-api-v12';
 
   /** Last LinkedIn jobs-guest attempt (shown in diagnostics when debug on). */
   var lastLinkedInGuestApiDiag = null;
@@ -205,6 +205,52 @@
     }
   }
 
+  /**
+   * Schema.org JobPosting.baseSalary is often MonetaryAmount with value as QuantitativeValue
+   * (minValue / maxValue / unitText). Ashby and other ATS pages use this shape; String(obj) is wrong.
+   */
+  function formatJsonLdSalaryField(obj) {
+    if (obj == null) return '';
+    if (typeof obj === 'number' && !isNaN(obj)) return String(obj);
+    if (typeof obj === 'string') return obj.trim();
+    if (typeof obj !== 'object') return '';
+
+    var currency = String(obj.currency || obj.salaryCurrency || '')
+      .trim()
+      .toUpperCase();
+
+    function quantitativeToText(q) {
+      if (q == null) return '';
+      if (typeof q === 'number' && !isNaN(q)) return String(q);
+      if (typeof q === 'string') return q.trim();
+      if (typeof q !== 'object') return '';
+      var minV = q.minValue;
+      var maxV = q.maxValue;
+      var single = q.value;
+      var span = '';
+      if (minV != null && maxV != null && String(minV) !== String(maxV)) {
+        span = String(minV) + ' – ' + String(maxV);
+      } else if (single != null && single !== '') {
+        span = typeof single === 'object' ? quantitativeToText(single) : String(single).trim();
+      } else if (minV != null) {
+        span = String(minV);
+      } else if (maxV != null) {
+        span = String(maxV);
+      }
+      if (!span) return '';
+      var ut = q.unitText || q.unitCode;
+      if (ut) span += ' (' + String(ut).trim() + ')';
+      return span;
+    }
+
+    var inner =
+      obj.value != null && obj.value !== ''
+        ? quantitativeToText(obj.value)
+        : quantitativeToText(obj);
+    if (!inner) return '';
+    return inner + (currency ? ' ' + currency : '');
+  }
+
   function formatOneJobPosting(job) {
     var lines = [];
     if (job.title) lines.push(String(job.title).trim());
@@ -237,10 +283,11 @@
       if (locStr) lines.push('Location: ' + locStr.trim());
     }
     if (job.baseSalary) {
-      var bs = job.baseSalary;
-      if (typeof bs === 'object' && bs.value) {
-        lines.push('Salary: ' + String(bs.value) + (bs.currency ? ' ' + bs.currency : ''));
-      }
+      var sal = formatJsonLdSalaryField(job.baseSalary);
+      if (sal) lines.push('Salary: ' + sal);
+    } else if (job.estimatedSalary) {
+      var es = formatJsonLdSalaryField(job.estimatedSalary);
+      if (es) lines.push('Salary: ' + es);
     }
     if (job.skills) {
       var sk = job.skills;
