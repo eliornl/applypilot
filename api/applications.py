@@ -183,7 +183,13 @@ class ApplicationStatsResponse(BaseModel):
     interviews: int = Field(
         ..., description="Number of applications with 'interview' status"
     )
-    response_rate: float = Field(..., description="Response rate percentage (0-100)")
+    response_rate: float = Field(
+        ...,
+        description=(
+            "Percentage (0-100) of applications in interview, offer (accepted), "
+            "or rejected — excludes 'applied' and analysis-only statuses"
+        ),
+    )
 
 
 class StatusUpdateRequest(BaseModel):
@@ -479,8 +485,9 @@ async def get_application_stats(
     try:
         user_id = get_user_uuid(current_user)
 
+        # "Response" = user recorded employer-side movement (not merely submitted).
+        # Applied stays in the separate `applied` counter only.
         response_statuses = [
-            ApplicationStatus.APPLIED.value,
             ApplicationStatus.INTERVIEW.value,
             ApplicationStatus.ACCEPTED.value,
             ApplicationStatus.REJECTED.value,
