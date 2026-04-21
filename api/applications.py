@@ -190,8 +190,9 @@ class ApplicationStatsResponse(BaseModel):
     response_rate: float = Field(
         ...,
         description=(
-            "Percentage (0-100) of applications in interview, offer (accepted), "
-            "or rejected — excludes 'applied' and analysis-only statuses"
+            "Percentage (0-100): (interview + offer + rejected) divided by "
+            "all tracked funnel rows (applied + interview + offer + rejected). "
+            "Analysis-only rows (e.g. completed) are excluded from denominator."
         ),
     )
 
@@ -538,13 +539,16 @@ async def get_application_stats(
         interviews: int = row.interviews or 0
         responses: int = row.responses or 0
 
-        total_applications: int = total if total > 0 else 1
-        response_rate: float = (
-            (responses / total_applications * 100) if total_applications > 0 else 0.0
-        )
+        # Of tracked funnel apps only — not diluted by analysis-only "completed" rows.
+        tracked: int = applied
+        if tracked > 0:
+            response_rate: float = (responses / tracked) * 100
+        else:
+            response_rate = 0.0
 
         logger.info(
-            f"Stats generated for user {user_id}: total={total}, applied={applied}, interviews={interviews}"
+            f"Stats generated for user {user_id}: total={total}, applied={applied}, "
+            f"interviews={interviews}, responses={responses}, response_rate={response_rate:.1f}%"
         )
 
         return ApplicationStatsResponse(
