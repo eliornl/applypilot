@@ -178,7 +178,11 @@ class ApplicationStatsResponse(BaseModel):
 
     total: int = Field(..., description="Total number of applications")
     applied: int = Field(
-        ..., description="Number of applications with 'applied' status"
+        ...,
+        description=(
+            "Applications past analysis with any user tracking stage "
+            "(applied, interview, offer, or rejected — all imply a submission)"
+        ),
     )
     interviews: int = Field(
         ..., description="Number of applications with 'interview' status"
@@ -486,8 +490,14 @@ async def get_application_stats(
         user_id = get_user_uuid(current_user)
 
         # "Response" = user recorded employer-side movement (not merely submitted).
-        # Applied stays in the separate `applied` counter only.
         response_statuses = [
+            ApplicationStatus.INTERVIEW.value,
+            ApplicationStatus.ACCEPTED.value,
+            ApplicationStatus.REJECTED.value,
+        ]
+        # "Applied" card = any funnel stage (submitted / progressed / closed).
+        applied_tracking_statuses = [
+            ApplicationStatus.APPLIED.value,
             ApplicationStatus.INTERVIEW.value,
             ApplicationStatus.ACCEPTED.value,
             ApplicationStatus.REJECTED.value,
@@ -499,7 +509,10 @@ async def get_application_stats(
                 func.count().label("total"),
                 func.sum(
                     case(
-                        (JobApplication.status == ApplicationStatus.APPLIED.value, 1),
+                        (
+                            JobApplication.status.in_(applied_tracking_statuses),
+                            1,
+                        ),
                         else_=0,
                     )
                 ).label("applied"),
