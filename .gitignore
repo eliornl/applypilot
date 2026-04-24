@@ -99,3 +99,6 @@ e2e/playwright-report/
 e2e/test-results/
 e2e/playwright/.auth/
 e2e/dist/
+
+# Local Just/Docker sandbox experiments (see `just sandbox-for-testing`)
+sandbox-just-test/

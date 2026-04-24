@@ -83,7 +83,7 @@ cd applypilot
 make start
 ```
 
-**Windows** — install [just](https://just.systems) (`winget install Casey.Just`) instead of `make`. It works natively in PowerShell and cmd — no WSL2 needed:
+**Windows** — install [just](https://just.systems) (`winget install Casey.Just`) instead of `make`. It works natively in PowerShell and cmd — no WSL2 needed, and **no Git for Windows / `cygpath` required** for `just start` (only Docker Desktop + `just`).
 
 ```powershell
 git clone https://github.com/eliornl/applypilot.git
