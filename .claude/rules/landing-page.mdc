@@ -17,7 +17,7 @@ The landing page lives at `ui/index.html` and uses `ui/static/css/landing.css` +
 | ↓ section arrow | `.section-arrow` | Between each subsequent section pair |
 | Problem | `#problem` `.section-problem` | 118-application stat + time comparison cards |
 | Features | `#features` `.section-features` | 6 AI agent feature cards (`.features-grid`) |
-| Chrome Extension | `#extension` `.section-extension` | Extension popup mockup |
+| Chrome Extension | `#extension` `.section-extension` | Copy covers **Analyze This Job** + **Match Form To Profile**; hero and `#features` agent cards stay posting/workflow-focused |
 | Career Tools | `#tools` `.section-tools` | 6 tool cards in Bootstrap rows |
 | **Screenshot Showcase** | `#example` `.section-example` | Real app screenshots — see below |
 | Pricing / CTA | `#pricing` `.section-pricing` | BYOK / open-source CTA |

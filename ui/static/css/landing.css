@@ -2690,18 +2690,23 @@ section {
     font-size: 0.95rem;
 }
 
-/* Extension Section */
+/* Extension Section — headline/body hierarchy matches `.hero-title` / `.hero-subtitle` */
 .section-extension {
     padding: 8rem 0;
     background: var(--bg-primary);
 }
 
-/* Lead copy + bullets: higher contrast than global .section-subtitle / .text-secondary */
+.section-extension .section-title {
+    font-weight: 800;
+    line-height: 1.15;
+}
+
 .section-extension .section-subtitle {
-    color: rgba(255, 255, 255, 0.92);
-    font-weight: 500;
-    line-height: 1.65;
-    max-width: 36rem;
+    font-size: 1.2rem;
+    font-weight: 400;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    max-width: 560px;
 }
 
 .extension-features {
@@ -2717,9 +2722,9 @@ section {
 }
 
 .section-extension .ext-feature {
-    color: rgba(255, 255, 255, 0.92);
-    font-weight: 600;
-    font-size: 1.0625rem;
+    font-size: 1.2rem;
+    font-weight: 400;
+    color: var(--text-secondary);
 }
 
 .ext-feature i {

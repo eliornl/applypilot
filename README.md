@@ -214,14 +214,14 @@ AI features require a key from Google AI Studio.
 
 ## Chrome Extension
 
-Extract any job posting with one click — works on any job site or company careers page.
+**Analyze This Job** and **Match Form To Profile** in one click, one Chrome extension—any job site.
 
 1. Open **chrome://extensions** in Chrome
 2. Enable **Developer Mode** (toggle, top-right corner)
 3. Click **Load unpacked**
 4. Select the `extension/` folder from this repo
 
-The extension appears in your Chrome toolbar. Navigate to any job posting and click it — the role is extracted and sent to ApplyPilot automatically.
+The extension appears in your Chrome toolbar. Browse jobs naturally. When you find one you like, use **Analyze This Job** to send the posting to your dashboard for the full AI workflow, or use **Match Form To Profile** to suggest values into open fields.
 
 ---
 

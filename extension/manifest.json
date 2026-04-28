@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "ApplyPilot",
   "short_name": "ApplyPilot",
-  "description": "Extract any job posting and get AI-powered analysis, resume tips, cover letters, and interview prep on ApplyPilot.",
+  "description": "Send job postings to ApplyPilot for full AI analysis, or match application forms to your profile for suggested field values.",
   "version": "1.1.1",
   "permissions": [
     "activeTab",

@@ -1,18 +1,18 @@
 # ApplyPilot Chrome Extension
 
-A Chrome extension that lets you extract any job posting with one click and analyze it with AI-powered assistance through your ApplyPilot account.
+A Chrome extension that connects your browsing to ApplyPilot in two ways: **Analyze This Job** sends a posting to your dashboard for the full multi-agent workflow, and **Match Form To Profile** suggests field values from your profile (via LLM) on application pages for you to review before you submit.
 
 ## Current Version
 
-**v1.1.0** — redesigned popup UI matching the main app's design system.
+**v1.1.1** — popup UI aligned with the main app; form match uses `lib/form-autofill.js` + `POST /api/v1/extension/autofill/map`.
 
 ## Features
 
-- Extract job postings from any website with one click
-- AI-powered analysis: match score, resume tips, cover letter, and interview prep
-- Seamless integration with your ApplyPilot account
+- **Analyze This Job** — extract a posting from almost any job page and run dashboard AI analysis
+- **Match Form To Profile** — profile-aware suggestions on visible apply forms (main document MVP)
+- Same account, tokens, and API base URL as the web app
 - Quick access to Dashboard, Settings, Help, and Logout
-- Smart job-page detection with informative status indicator
+- Job-page detection with a clear status row in the popup
 
 ## Installation (Development)
 
@@ -36,10 +36,16 @@ A Chrome extension that lets you extract any job posting with one click and anal
 
 ## Usage
 
-1. Click the extension icon while viewing any job posting page.
-2. The popup shows a "Job detected" row if it recognises the page.
-3. Click **Analyze This Job** — the page content is extracted and sent to the AI.
-4. View the full analysis in your dashboard.
+**Analyze a posting**
+
+1. Open a job posting page and click the extension icon.
+2. If the popup shows a job-detected row, click **Analyze This Job** to extract and send it to the API.
+3. Open your dashboard to see the full workflow results.
+
+**Match an application form**
+
+1. Open a normal tab with a visible application form (main page only; no iframes in the MVP).
+2. Click **Match Form To Profile** — fields are serialized, mapped with your profile server-side, then values are applied on the page for you to check before you submit.
 
 ## Supported Sites
 
@@ -76,11 +82,12 @@ chrome.storage.local.set({ jaa_api_url: 'http://localhost:8000/api/v1' })
 extension/
 ├── manifest.json           # Manifest V3 — version, permissions, metadata
 ├── lib/
-│   └── extract-page-content.js  # Injected extractor (JSON-LD, connectors, DOM)
+│   ├── extract-page-content.js  # Injected extractor (JSON-LD, connectors, DOM)
+│   └── form-autofill.js         # Serialize + apply form fields (autofill MVP)
 ├── popup/
 │   ├── popup.html          # Popup UI — Font Awesome icons, app font/colors
 │   ├── popup.css           # Mirrors main app's CSS variables & design system
-│   └── popup.js            # Auth, job detection, extraction, API calls
+│   └── popup.js            # Auth, job detection, extraction, autofill API calls
 ├── content/
 │   ├── content.js          # Injected into job pages to extract content
 │   └── content.css
@@ -121,6 +128,6 @@ The popup is pixel-matched to the main app:
 
 ## Privacy & Security
 
-- The extension only accesses page content when you click "Analyze This Job"
+- Page content is only read when you click **Analyze This Job** or **Match Form To Profile**
 - Auth tokens are stored in Chrome's secure local storage (`chrome.storage.local`)
 - Content is sent only to your configured API endpoint — no third parties
