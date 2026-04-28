@@ -3,7 +3,7 @@
   "name": "ApplyPilot",
   "short_name": "ApplyPilot",
   "description": "Extract any job posting and get AI-powered analysis, resume tips, cover letters, and interview prep on ApplyPilot.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "permissions": [
     "activeTab",
     "storage",

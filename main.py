@@ -35,6 +35,7 @@ from api.workflow import router as workflow_router
 from api.websocket import router as websocket_router
 from api.interview_prep import router as interview_prep_router
 from api.tools import router as tools_router
+from api.extension_autofill import router as extension_autofill_router
 from api.admin import router as admin_router
 from workflows.job_application_workflow import get_initialized_workflow
 from utils.json_utils import serialize_object_for_json
@@ -606,6 +607,11 @@ def include_routers(app: FastAPI):
     app.include_router(
         tools_router, prefix=f"{API_V1_PREFIX}/tools", tags=["Career Tools"]
     )
+    app.include_router(
+        extension_autofill_router,
+        prefix=f"{API_V1_PREFIX}/extension",
+        tags=["Extension"],
+    )
     app.include_router(websocket_router, prefix=f"{API_V1_PREFIX}", tags=["WebSocket"])
     app.include_router(admin_router, prefix=f"{API_V1_PREFIX}", tags=["Admin"])
 
@@ -622,6 +628,12 @@ def include_routers(app: FastAPI):
     )
     app.include_router(
         tools_router, prefix="/api/tools", tags=["Career Tools (Legacy)"], include_in_schema=False
+    )
+    app.include_router(
+        extension_autofill_router,
+        prefix="/api/extension",
+        tags=["Extension (Legacy)"],
+        include_in_schema=False,
     )
     app.include_router(websocket_router, prefix="/api", tags=["WebSocket (Legacy)"], include_in_schema=False)
     

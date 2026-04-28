@@ -146,6 +146,12 @@ The popup and context menu inject **`lib/extract-page-content.js`**, then call *
 
 **Confidence + UX:** `extractPageContent` sets **`confidence`**: `high` | `medium` | `low`. After a successful analyze, **`popup.js`** may show a longer **info** toast suggesting the user **select the job description** if confidence is not high (last-mile support, not a hard error).
 
+## Form autofill — `extension/lib/form-autofill.js` + `POST /api/v1/extension/autofill/map`
+
+- **Popup:** **Match form to profile** injects `lib/form-autofill.js`, calls `window.__jaaSerializeAutofillFields()`, then POSTs JSON `{ fields, page_url }` with `Authorization: Bearer`. On success, response `assignments` are applied immediately via `window.__jaaApplyAutofillAssignments()` (script re-injected as needed); the user reviews and submits on the host page.
+- **MVP scope:** main `document` only (no iframes/shadow roots). The popup does not send **`extras`**; `POST /extension/autofill/map` still accepts optional **`extras`** for other clients or future profile-backed fields.
+- **Errors:** treat `CFG_6001` like other extension flows (Settings → AI Setup). **403** → finish profile setup on the dashboard.
+
 ## Submitting to Backend
 
 The extension POSTs `FormData` with only `job_text` — never `detected_title` or `detected_company`:

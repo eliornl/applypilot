@@ -73,48 +73,62 @@
         </div>
       </div>
 
-      <!-- Job Detection -->
-      <div id="jobDetection" class="job-detection">
-        <i class="fas fa-briefcase detection-icon"></i>
-        <span class="detection-label">Job detected on</span>
-        <span id="detectedSource" class="detection-source">this page</span>
-      </div>
+      <div id="authMainFlow">
+        <!-- Job Detection -->
+        <div id="jobDetection" class="job-detection">
+          <i class="fas fa-briefcase detection-icon"></i>
+          <span class="detection-label">Job detected on</span>
+          <span id="detectedSource" class="detection-source">this page</span>
+        </div>
 
-      <!-- Actions -->
-      <div class="actions">
-        <div class="action-row">
-          <button id="extractBtn" class="btn btn-primary btn-lg action-main">
-            <i class="fas fa-bolt btn-icon"></i>
-            <span class="btn-text">Analyze This Job</span>
+        <div id="primaryActionsBlock">
+          <!-- Actions -->
+          <div class="actions">
+            <div class="action-row">
+              <button id="extractBtn" class="btn btn-primary btn-lg action-main">
+                <i class="fas fa-bolt btn-icon"></i>
+                <span class="btn-text">Analyze This Job</span>
+              </button>
+            </div>
+            <p class="action-hint">Extracts page content and sends it to AI for analysis</p>
+          </div>
+
+          <div id="autofillSection" class="autofill-section">
+            <button type="button" id="matchProfileBtn" class="btn btn-outline-primary btn-lg btn-block autofill-match-btn">
+              <i class="fas fa-wand-magic-sparkles btn-icon"></i>
+              <span class="btn-text">Match form to profile</span>
+            </button>
+            <p class="autofill-hint">
+              Uses an LLM to propose values from your profile.
+            </p>
+          </div>
+        </div>
+
+        <!-- Extraction Status -->
+        <div id="extractionStatus" class="extraction-status hidden">
+          <div class="status-spinner"></div>
+          <span id="statusText">Extracting content...</span>
+        </div>
+
+        <!-- Success Message -->
+        <div id="successMessage" class="success-message hidden">
+          <i class="fas fa-circle-check success-icon"></i>
+          <h4>Job Sent for Analysis!</h4>
+          <p>Check your dashboard for results.</p>
+          <button id="openDashboardBtn" class="btn btn-primary btn-block">
+            Open Dashboard
           </button>
         </div>
-        <p class="action-hint">Extracts page content and sends it to AI for analysis</p>
-      </div>
 
-      <!-- Extraction Status -->
-      <div id="extractionStatus" class="extraction-status hidden">
-        <div class="status-spinner"></div>
-        <span id="statusText">Extracting content...</span>
-      </div>
-
-      <!-- Success Message -->
-      <div id="successMessage" class="success-message hidden">
-        <i class="fas fa-circle-check success-icon"></i>
-        <h4>Job Sent for Analysis!</h4>
-        <p>Check your dashboard for results.</p>
-        <button id="openDashboardBtn" class="btn btn-primary btn-block">
-          Open Dashboard
-        </button>
-      </div>
-
-      <!-- Error Message -->
-      <div id="errorMessage" class="error-message hidden">
-        <i class="fas fa-circle-xmark error-icon"></i>
-        <h4 id="errorTitle">Extraction Failed</h4>
-        <p id="errorText">Please try again or paste the job content manually.</p>
-        <button id="retryBtn" class="btn btn-secondary btn-block">
-          Try Again
-        </button>
+        <!-- Error Message -->
+        <div id="errorMessage" class="error-message hidden">
+          <i class="fas fa-circle-xmark error-icon"></i>
+          <h4 id="errorTitle">Extraction Failed</h4>
+          <p id="errorText">Please try again or paste the job content manually.</p>
+          <button id="retryBtn" class="btn btn-secondary btn-block">
+            Try Again
+          </button>
+        </div>
       </div>
 
       <!-- Quick Links -->
@@ -140,7 +154,7 @@
 
     <!-- Footer -->
     <footer class="popup-footer">
-      <span>v1.1.0</span>
+      <span>v1.1.1</span>
     </footer>
   </div>
 

@@ -26,6 +26,8 @@ const CONFIG = {
 
 /** Injected into the page tab; shared with the background context menu path. */
 const JAA_EXTRACT_FILE = 'lib/extract-page-content.js';
+/** Form field serialize + apply (main document MVP). */
+const JAA_FORM_AUTOFILL_FILE = 'lib/form-autofill.js';
 /** MAIN world: hooks fetch/XHR on job search so Voyager JSON can be cached for extraction */
 const JAA_LI_MAIN_HOOK_FILE = 'lib/linkedin-voyager-hook.js';
 /** MAIN world: prefetch jobs-guest API body into sessionStorage (isolated extractor reads it). */
@@ -103,6 +105,50 @@ async function runExtractPageContent(tabId, options = {}) {
   return exec.result;
 }
 
+/**
+ * @param {number} tabId
+ * @returns {Promise<{ fields: Array<Record<string, unknown>>, page_url: string, warnings?: string[] }>}
+ */
+async function runSerializeAutofill(tabId) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: [JAA_FORM_AUTOFILL_FILE]
+  });
+  const [exec] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      if (typeof window.__jaaSerializeAutofillFields === 'function') {
+        return window.__jaaSerializeAutofillFields();
+      }
+      return { fields: [], page_url: String(location.href || ''), warnings: ['Serializer not loaded'] };
+    }
+  });
+  return exec.result;
+}
+
+/**
+ * @param {number} tabId
+ * @param {Array<{ field_uid: string, value: string }>} assignments
+ * @returns {Promise<{ applied: number, failed: number }>}
+ */
+async function runApplyAutofill(tabId, assignments) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: [JAA_FORM_AUTOFILL_FILE]
+  });
+  const [exec] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (payload) => {
+      if (typeof window.__jaaApplyAutofillAssignments === 'function') {
+        return window.__jaaApplyAutofillAssignments(payload.assignments);
+      }
+      return { applied: 0, failed: 0 };
+    },
+    args: [{ assignments: assignments }]
+  });
+  return exec.result;
+}
+
 // =============================================================================
 // DOM ELEMENTS
 // =============================================================================
@@ -151,7 +197,11 @@ const elements = {
   settingsLink: document.getElementById('settingsLink'),
   logoutLink: document.getElementById('logoutLink'),
   helpLink: document.getElementById('helpLink'),
-  helpLinkFooter: document.getElementById('helpLinkFooter')
+  helpLinkFooter: document.getElementById('helpLinkFooter'),
+
+  authMainFlow: document.getElementById('authMainFlow'),
+  primaryActionsBlock: document.getElementById('primaryActionsBlock'),
+  matchProfileBtn: document.getElementById('matchProfileBtn')
 };
 
 // =============================================================================
@@ -165,7 +215,8 @@ let state = {
   currentTab: null,
   detectedJob: null,
   isExtracting: false,
-  isLoggingIn: false
+  isLoggingIn: false,
+  isAutofillScanning: false
 };
 
 // =============================================================================
@@ -396,9 +447,117 @@ function getInitials(name) {
   return (name[0] || '?').toUpperCase();
 }
 
+function exitAutofillPreview() {
+  state.isAutofillScanning = false;
+  if (elements.matchProfileBtn) elements.matchProfileBtn.disabled = false;
+}
+
+/**
+ * Writes LLM assignments into the active tab (re-injects `form-autofill.js` as needed).
+ * @param {number} tabId
+ * @param {Array<{ field_uid: string, value: string, label_text?: string }>} mapped
+ * @returns {Promise<void>}
+ */
+async function applyAutofillAssignmentsToTab(tabId, mapped) {
+  const mapFn = mapped.map(function (a) {
+    return { field_uid: a.field_uid, value: a.value };
+  });
+  const result = await runApplyAutofill(tabId, mapFn);
+  const n = result && typeof result.applied === 'number' ? result.applied : 0;
+  const f = result && typeof result.failed === 'number' ? result.failed : 0;
+  let msg =
+    'Filled ' + n + ' field(s). Check the page before you submit or leave.';
+  if (f > 0) {
+    msg += ' ' + f + ' could not be filled (fields may have changed).';
+  }
+  showToast(msg, f > 0 ? 'info' : 'success', 8000);
+}
+
+async function matchFormToProfile() {
+  if (!state.token || state.isExtracting || state.isAutofillScanning) return;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab || tab.id == null) {
+    showToast('No active tab found.', 'error');
+    return;
+  }
+  const u = tab.url || '';
+  if (u.startsWith('chrome://') || u.startsWith('chrome-extension://') || u.startsWith('edge://')) {
+    showToast('Open a job or careers page in a normal browser tab first.', 'info');
+    return;
+  }
+
+  state.isAutofillScanning = true;
+  if (elements.matchProfileBtn) elements.matchProfileBtn.disabled = true;
+
+  try {
+    const serialized = await runSerializeAutofill(tab.id);
+    const fields = serialized && serialized.fields ? serialized.fields : [];
+    if (!fields.length) {
+      showToast(
+        'No fillable fields found on this page. If the form is inside a frame, open the apply step in the main page.',
+        'info',
+        8000
+      );
+      return;
+    }
+
+    const res = await fetch(`${CONFIG.API_BASE_URL}/extension/autofill/map`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + state.token,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        fields: fields,
+        page_url: serialized.page_url || u
+      })
+    });
+
+    const data = await res.json().catch(() => (/** @type {Record<string, any>} */ ({})));
+    if (!res.ok) {
+      if (res.status === 401) {
+        showToast('Session expired. Sign in again from the extension.', 'info', 8000);
+        return;
+      }
+      if (data.error_code === 'CFG_6001') {
+        showToast('Add your API key under Settings → AI Setup, then try again.', 'info', 8000);
+        return;
+      }
+      if (res.status === 403) {
+        showToast(data.message || 'Finish your profile setup on the dashboard first.', 'info', 8000);
+        return;
+      }
+      throw new Error(data.message || data.detail || 'Autofill request failed');
+    }
+
+    const assignments = Array.isArray(data.assignments) ? data.assignments : [];
+    if (!assignments.length) {
+      showToast('No suggestions returned. Try a different step of the form or update your profile.', 'info', 7000);
+      return;
+    }
+
+    const mapped = assignments.map(function (x) {
+      return { field_uid: x.field_uid, value: x.value, label_text: x.label_text };
+    });
+    try {
+      await applyAutofillAssignmentsToTab(tab.id, mapped);
+    } catch (applyErr) {
+      console.error('Autofill apply failed:', applyErr);
+      showToast('Could not fill fields on this page.', 'error', 5000);
+    }
+  } catch (err) {
+    console.error('Autofill match failed:', err);
+    showToast(err.message || 'Could not get suggestions.', 'error', 5000);
+  } finally {
+    state.isAutofillScanning = false;
+    if (elements.matchProfileBtn) elements.matchProfileBtn.disabled = false;
+  }
+}
+
 function showExtracting() {
   elements.extractBtn.disabled = true;
   if (elements.copyBtn) elements.copyBtn.disabled = true;
+  if (elements.matchProfileBtn) elements.matchProfileBtn.disabled = true;
   elements.extractionStatus.classList.remove('hidden');
   elements.successMessage.classList.add('hidden');
   elements.errorMessage.classList.add('hidden');
@@ -408,6 +567,7 @@ function showExtracting() {
 function hideExtracting() {
   elements.extractBtn.disabled = false;
   if (elements.copyBtn) elements.copyBtn.disabled = false;
+  if (elements.matchProfileBtn) elements.matchProfileBtn.disabled = false;
   elements.extractionStatus.classList.add('hidden');
   state.isExtracting = false;
 }
@@ -415,14 +575,14 @@ function hideExtracting() {
 function showSuccess() {
   hideExtracting();
   elements.successMessage.classList.remove('hidden');
-  // Hide the entire actions section and job detection
-  const actionsSection = elements.extractBtn.closest('.actions');
-  if (actionsSection) actionsSection.classList.add('hidden');
+  const primary = elements.primaryActionsBlock;
+  if (primary) primary.classList.add('hidden');
   elements.jobDetection.classList.add('hidden');
 }
 
 function showError(title, message) {
   hideExtracting();
+  exitAutofillPreview();
   elements.errorTitle.textContent = title;
   elements.errorText.textContent = message;
   elements.errorMessage.classList.remove('hidden');
@@ -432,9 +592,10 @@ function resetView() {
   hideExtracting();
   elements.successMessage.classList.add('hidden');
   elements.errorMessage.classList.add('hidden');
-  const actionsSection = elements.extractBtn.closest('.actions');
-  if (actionsSection) actionsSection.classList.remove('hidden');
+  const primary = elements.primaryActionsBlock;
+  if (primary) primary.classList.remove('hidden');
   elements.jobDetection.classList.remove('hidden');
+  exitAutofillPreview();
 }
 
 let _notifTimer = null;
@@ -709,6 +870,10 @@ function setupEventListeners() {
       e.preventDefault();
       chrome.tabs.create({ url: `${CONFIG.APP_URL}/help` });
     });
+  }
+
+  if (elements.matchProfileBtn) {
+    elements.matchProfileBtn.addEventListener('click', () => matchFormToProfile());
   }
 }
 

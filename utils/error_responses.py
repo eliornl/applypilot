@@ -185,11 +185,13 @@ class APIError(HTTPException):
 
     def to_response(self) -> JSONResponse:
         """Convert to standardized JSON response."""
+        hdrs = getattr(self, "headers", None)
         return create_error_response(
             error_code=self.error_code,
             message=self.message,
             status_code=self.status_code,
             details=self.details,
+            headers=dict(hdrs) if hdrs else None,
         )
 
 
