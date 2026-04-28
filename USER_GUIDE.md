@@ -166,7 +166,7 @@ The AI extracts the company name, job title, and all requirements from the text 
 
 **Duplicate job** — If you already have an application for the same role at the same employer, the app will not add a second copy. You might see this immediately when submitting, or as a dashboard notification (**Duplicate job — not added**) if the overlap is detected after the job title and company are inferred from the description.
 
-> **Tip:** The Chrome Extension lets you extract a job description from any website with one click, without opening this form. See the [Chrome Extension](#chrome-extension) section below.
+> **Tip:** The Chrome extension can **Analyze This Job** from a posting page (one click, no paste step) or **Match Form To Profile** on an application form. See the [Chrome Extension](#chrome-extension) section below.
 
 ### The Analysis Process
 
@@ -212,7 +212,7 @@ The **Cover Letter** tab has a **Copy** button. The Cover Letter, Resume, and In
 
 ## Chrome Extension
 
-The Chrome extension lets you extract job postings from **any website** with one click.
+The extension adds two actions from your toolbar: **Analyze This Job** sends the visible posting to your dashboard for the full AI workflow, and **Match Form To Profile** suggests values into open fields from your profile (you review before submitting). Both work while browsing job pages and company careers sites.
 
 ### Installation
 
@@ -225,23 +225,30 @@ The extension loads directly from this repository — no app store required.
 
 After any code change, click the ↺ refresh icon on the extension card.
 
-### Using the Extension
+### Using the Extension — Analyze This Job
 
-1. Browse to any job posting page
+1. Browse to a job posting page (detail view with the description visible)
 2. Click the ApplyPilot icon in the toolbar
-3. The popup shows the current page's domain and an **Analyze This Job** button
-4. Click **Analyze This Job** — the page content is extracted and sent for analysis
-5. When complete, click **Open Dashboard** to see the results
+3. Click **Analyze This Job** — the page content is extracted and sent for analysis
+4. When complete, use **Open Dashboard** in the popup to see the results
+
+### Using the Extension — Match Form To Profile
+
+1. Browse to an application form with visible fields (main page only in the current release)
+2. Click the ApplyPilot icon in the toolbar
+3. Click **Match Form To Profile** — field labels and values are sent to the server with your profile; suggested values are applied on the page for you to edit before you submit
+4. Requires the same login, completed profile, and API access as dashboard analyses
 
 ### Supported Sites
 
-The extension has optimized content selectors for most major ATS platforms and job boards. For any unrecognized site it falls back to the page's main content area — this works on virtually any company careers page.
+The extension has optimized content selectors for many ATS platforms and generic job pages. For any unrecognized site it falls back to the page's main content area — this works on virtually any company careers page.
 
 ### Tips
 
 - If extraction fails, try navigating directly to the job description page before clicking the icon
 - You must be logged into the web app for the extension to work — it uses the same account
 - Analyzed jobs appear in your dashboard immediately
+- **Match Form To Profile** runs on the main document only; nested iframes are not scanned in the current release
 
 ---
 

@@ -11,11 +11,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Chrome Extension — Form autofill ("Match Form To Profile")
+
+**`POST /api/v1/extension/autofill/map`** returns profile-backed field mappings for visible forms. New **`form-autofill.js`** content script (serialize + apply), popup **Match Form To Profile** flow, API integration tests in **`tests/test_api/`**, and rate-limit header forwarding on **`APIError.to_response`**. Extension popup and landing mockup copy polish; device-local extras UI removed from the popup.
+
+#### Chrome Extension — Shared page content extraction
+
+Injectable **`extension/lib/extract-page-content.js`**: selection, JSON-LD, site connectors, split-view heuristics. Large **jobs listing** pages (e.g. **`/jobs`** UIs): skip feed JSON-LD, prefer the detail pane, two-pass async extract. **Ashby** marketing embeds (query params such as **`ashby_jid`** on third-party career pages): resolve posting text via Ashby's public posting API when the slug is known. Popup and context menu use the async extractor; **`extension/lib/`** is tracked in git (`.gitignore` exception); manifest adds Ashby API host permission. README and **`.cursor`/`.claude`** chrome-extension rules updated.
+
 #### New Application — Word (.docx) job file upload
 
 The **Upload File** tab on `/dashboard/new-application` accepts **`.docx`** in addition to **`.pdf`** and **`.txt`** (still **5 MB** max). The API (`POST /api/v1/workflow/start`, `job_file`) validates ZIP magic bytes for DOCX and extracts text with `extract_text_from_docx()` (`docx2txt`), same approach as resume uploads. Legacy binary **`.doc`** (Word 97–2003) is not supported.
 
 ### Changed
+
+#### Dashboard — funnel statistics (Applied card and response rate)
+
+- **Applied** stats card counts **Applied**, **Interview**, **Offer** (accepted), and **Rejected** so the card reflects submissions and funnel progress (not Applied-only).
+- **Response rate** uses only user-tracked funnel rows: **(Interview + Offer + Rejected) / (Applied + Interview + Offer + Rejected)** — analysis-only rows no longer dilute the denominator. The numerator counts employer-side outcomes (**Interview**, **Offer**, **Rejected**) only; **Applied** is excluded from the rate and remains its own stat. API field descriptions and stats logging updated.
+
+#### Workflow — `POST /api/v1/workflow/start` rate limit
+
+Raised to **30 requests per hour** per user with a reset counter key for the limiter.
+
+#### Documentation — extension copy alignment (landing, Help, README)
+
+Landing extension headline/subtitle/bullets and hero typography parity; Help Chrome quick link and Match Form FAQ as numbered steps; README Chrome blurb aligned with landing; extension README, manifest, and popup label casing; **`.claude`** chrome-extension and landing-page rule notes. **USER_GUIDE**, **Terms**, **Privacy**, **New Application** tip, and Help FAQ updated for **Analyze This Job** + **Match Form To Profile**.
+
+#### Dev — Justfile on Windows (no cygpath / Git Bash requirement)
+
+Shebang-based recipes that broke on Windows without **cygpath** were replaced: **`docker info`** instead of a shell helper for Docker checks; **`_create-env`** split (Unix uses a Python script, Windows uses PowerShell); **`run_alembic.py`** for **`just migrate`** / **`just migrate-status`** (fixes temp cwd shadowing); **`make_just_test_sandbox.py`** and **`just sandbox-for-testing`**; README clarifies Docker path setup; **`sandbox-just-test/`** gitignored.
 
 #### BYOK / `GEMINI_API_KEY` — relaxed format validation
 
@@ -26,6 +51,18 @@ Google rotates Gemini API key shapes (not only the legacy `AIza…` prefix). The
 When the job analyzer omits an employer or returns placeholder text (for example `—`, `-`, `N/A`, or `unknown`), **`dashboard-home.js`** and **`application-detail.js`** treat those values as missing via **`isPlaceholderCompanyName()`** and show the label **Unknown** on cards and in the application header. Completion toasts and polling metadata use **`displayCompanyNameOrUnknown()`** so the same rules apply. The Company tab uses **About this opportunity** when there is no real employer name. **`agents/company_research.py`** — **`_has_usable_company_name()`** — rejects dash-only strings so backend “unnamed posting” research aligns with the UI.
 
 ### Fixed
+
+#### Dashboard — duplicate application rows on "Load more"
+
+Applications list API uses **`EXISTS`** for workflow-session visibility instead of **`LEFT JOIN`**, so **OFFSET** pagination cannot return duplicate **`job_applications`** rows. Stable **`ORDER BY`** with an **`id`** tie-breaker. **`dashboard-home.js`** dedupes merged pages by **`id`** as a client-side safeguard.
+
+#### Chrome Extension — JSON-LD `JobPosting` salary fields
+
+Schema.org **`MonetaryAmount.value`** is often a **`QuantitativeValue`** object (**`minValue`** / **`maxValue`** / **`unitText`**). Stringifying it produced **`[object Object]`** in extracted text on Ashby and similar ATS pages. **`formatJsonLdSalaryField`** formats **`baseSalary`** and **`estimatedSalary`**; extractor build version bumped.
+
+#### Chrome Extension — jobs listing extraction reliability
+
+Extraction is anchored to the **current job id** and **`jobPosting` URN** (prefer detail HTML that references **`urn:li:jobPosting:{id}`** before geometry heuristics; resolve **`data-job-id`** / **`data-entity-urn`**; filter side-rail candidates by URL job id when present). **Guest** listing HTML: parse JSON-LD + DOM when the API returns HTML instead of JSON; MAIN-world prefetch and service-worker/popup orchestration; higher confidence when extracted text is long; backend **Job Analyzer** **`MAX_CONTENT_LENGTH_FOR_AI`** aligned with the extension extract cap. Header merge path and resilient list fields: normalize LLM string vs list shapes for responsibilities (and related fields), **application-detail** filtering, unit tests for **`_normalize_string_list`**.
 
 #### Profile setup — Years of Experience can be zero
 
