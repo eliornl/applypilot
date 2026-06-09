@@ -11,7 +11,6 @@ All agents require a BYOK user API key.
 """
 
 import logging
-import math
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from time import perf_counter
@@ -19,7 +18,6 @@ from typing import Any, Callable, Dict, List, Optional
 
 from agents.hiring_manager import HiringManagerAgent, HiringManagerEvaluation
 from utils.llm_client import get_gemini_client
-from utils.llm_parsing import parse_json_from_llm_response
 from utils.logging_config import get_structured_logger
 
 logger = logging.getLogger(__name__)
@@ -152,7 +150,7 @@ class IterationRecord:
 class OptimizationResult:
     """Full result of the CV optimization loop."""
 
-    status: str  # "completed" | "failed"
+    status: str = "completed"
     started_at: str
     completed_at: str
     stop_reason: str
@@ -572,8 +570,8 @@ class CVOptimizationOrchestrator:
                 break
 
             if previous_score is not None:
-                delta = abs(evaluation.score - previous_score)
-                if delta <= SCORE_PLATEAU_TOLERANCE:
+                delta = evaluation.score - previous_score
+                if delta < SCORE_PLATEAU_TOLERANCE:
                     plateau_count += 1
                     if plateau_count >= SCORE_PLATEAU_ITERATIONS:
                         stop_reason = "score_plateau"
@@ -609,8 +607,8 @@ class CVOptimizationOrchestrator:
             user_api_key=user_api_key,
         )
 
-        # --- Compute gap analysis: gaps from final evaluation ---
-        gap_analysis = self._compute_gap_analysis(iteration_history)
+        # --- Compute gap analysis: gaps from the best iteration's evaluation ---
+        gap_analysis = self._compute_gap_analysis(iteration_history, best_iteration)
 
         completed_at = datetime.now(timezone.utc).isoformat()
 
@@ -636,14 +634,15 @@ class CVOptimizationOrchestrator:
             gap_analysis=gap_analysis,
         )
 
-    def _compute_gap_analysis(self, history: List[IterationRecord]) -> List[str]:
+    def _compute_gap_analysis(
+        self, history: List[IterationRecord], best_iteration_idx: int
+    ) -> List[str]:
         """
-        Return the final iteration's gaps as the persistent gap analysis.
+        Return gaps from the best-scoring iteration as the persistent gap analysis.
 
-        These are gaps that remained after all revision attempts — i.e., issues
-        that cannot be resolved through rephrasing alone (missing experience,
-        missing credentials, etc.).
+        Using the best iteration keeps gap_analysis consistent with the displayed
+        optimized_cv (which is also sourced from the best iteration).
         """
         if not history:
             return []
-        return history[-1].gaps
+        return history[best_iteration_idx].gaps

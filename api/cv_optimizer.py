@@ -20,7 +20,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, status
 from fastapi.exceptions import HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -51,6 +51,7 @@ from utils.cache import (
 )
 from utils.database import get_database, get_session
 from utils.encryption import decrypt_api_key
+from utils.security import sanitize_llm_output
 from utils.error_reporting import report_exception
 from utils.error_responses import (
     APIError,
@@ -70,7 +71,8 @@ logger: logging.Logger = logging.getLogger(__name__)
 settings = get_settings()
 router: APIRouter = APIRouter()
 
-RATE_LIMIT_CV_OPTIMIZER: int = 100
+RATE_LIMIT_CV_OPTIMIZER: int = 5
+RATE_LIMIT_CV_OPTIMIZER_DOWNLOAD: int = 10
 RATE_LIMIT_WINDOW_SECONDS: int = 3600  # 1 hour
 
 MAX_ITERATIONS_LIMIT: int = 7
@@ -236,7 +238,7 @@ async def _markdown_cv_to_odt(cv_markdown: str, user_api_key: Optional[str]) -> 
                         html_path,
                     ],
                     capture_output=True,
-                    timeout=60,
+                    timeout=ODT_LIBREOFFICE_TIMEOUT_SECONDS,
                     env=lo_env,
                 ),
             ),
@@ -257,6 +259,29 @@ async def _markdown_cv_to_odt(cv_markdown: str, user_api_key: Optional[str]) -> 
             return fh.read()
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _synthesize_jd_from_analysis(job_analysis: Dict[str, Any]) -> str:
+    """Build a plain-text job description from structured job_analysis fields.
+
+    Used when raw posting text is unavailable (URL or file-upload inputs).
+    job_analysis is always present before CV optimization can start, so this
+    always yields at least a minimal description.
+    """
+    parts: list[str] = []
+    if title := job_analysis.get("job_title"):
+        parts.append(f"Position: {title}")
+    if company := job_analysis.get("company_name"):
+        parts.append(f"Company: {company}")
+    if reqs := job_analysis.get("required_qualifications"):
+        items = "\n".join(f"- {r}" for r in reqs[:10])
+        parts.append(f"Required qualifications:\n{items}")
+    if prefs := job_analysis.get("preferred_qualifications"):
+        items = "\n".join(f"- {p}" for p in prefs[:10])
+        parts.append(f"Preferred qualifications:\n{items}")
+    if skills := job_analysis.get("required_skills"):
+        parts.append("Required skills: " + ", ".join(skills[:15]))
+    return "\n\n".join(parts)
 
 
 def _get_user_uuid(current_user: Dict[str, Any]) -> uuid.UUID:
@@ -344,9 +369,13 @@ async def start_cv_optimization(
 
         # Resolve API key: prefer BYOK, fall back to server key from .env
         user_api_key = await _get_user_api_key(db, user_id)
-        if not user_api_key and not getattr(settings, "gemini_api_key", None):
+        if (
+            not user_api_key
+            and not getattr(settings, "gemini_api_key", None)
+            and not getattr(settings, "use_vertex_ai", False)
+        ):
             raise no_api_key_error(
-                "CV optimization requires your own Gemini API key. "
+                "No Gemini API key is configured. "
                 "Please add your API key in Settings → AI Setup."
             )
 
@@ -365,33 +394,33 @@ async def start_cv_optimization(
             raise not_found_error("Workflow session not found")
 
         if workflow_session.workflow_status != WorkflowStatusEnum.COMPLETED.value:
-            status = workflow_session.workflow_status or "unknown"
+            wf_status = workflow_session.workflow_status or "unknown"
             # If status is stuck at analysis_complete but both documents are already
             # present, the status column was never updated — heal it and continue.
             if (
-                status == WorkflowStatusEnum.ANALYSIS_COMPLETE.value
+                wf_status == WorkflowStatusEnum.ANALYSIS_COMPLETE.value
                 and workflow_session.resume_recommendations
                 and workflow_session.cover_letter
             ):
                 workflow_session.workflow_status = WorkflowStatusEnum.COMPLETED.value
                 await db.commit()
             else:
-                if status == WorkflowStatusEnum.ANALYSIS_COMPLETE.value:
+                if wf_status == WorkflowStatusEnum.ANALYSIS_COMPLETE.value:
                     detail = (
                         "The job analysis is done but your resume advice and cover letter haven't been generated yet. "
                         "Click the Continue button on this page to finish the workflow first."
                     )
-                elif status == WorkflowStatusEnum.IN_PROGRESS.value:
+                elif wf_status == WorkflowStatusEnum.IN_PROGRESS.value:
                     detail = "The workflow is still running. Please wait for it to finish."
-                elif status == WorkflowStatusEnum.AWAITING_CONFIRMATION.value:
+                elif wf_status == WorkflowStatusEnum.AWAITING_CONFIRMATION.value:
                     detail = (
                         "The workflow is waiting for your confirmation. "
                         "Please review the analysis and confirm to continue."
                     )
-                elif status == WorkflowStatusEnum.FAILED.value:
+                elif wf_status == WorkflowStatusEnum.FAILED.value:
                     detail = "The workflow failed. Please start a new application to use CV optimization."
                 else:
-                    detail = f"The workflow has not completed yet (status: {status.replace('_', ' ')}). Please finish the workflow first."
+                    detail = f"The workflow has not completed yet (status: {wf_status.replace('_', ' ')}). Please finish the workflow first."
                 raise APIError(
                     ErrorCode.VALIDATION_ERROR,
                     detail,
@@ -471,16 +500,7 @@ async def get_cv_optimization(
     try:
         user_id = _get_user_uuid(current_user)
 
-        # Check cache first
-        cached = await get_cached_cv_optimization(session_id)
-        if cached:
-            return CvOptimizationResultResponse(
-                session_id=session_id,
-                has_result=True,
-                result=cached,
-            )
-
-        # Query database
+        # Verify ownership first, then serve from cache if available
         result = await db.execute(
             select(WorkflowSession).where(
                 and_(
@@ -493,6 +513,14 @@ async def get_cv_optimization(
 
         if not workflow_session:
             raise not_found_error("Workflow session not found")
+
+        cached = await get_cached_cv_optimization(session_id)
+        if cached:
+            return CvOptimizationResultResponse(
+                session_id=session_id,
+                has_result=True,
+                result=cached,
+            )
 
         optimization = workflow_session.cv_optimization
 
@@ -600,34 +628,41 @@ async def download_optimized_cv_odt(
     """
     try:
         user_id = _get_user_uuid(current_user)
+
+        is_allowed, _ = await check_rate_limit(
+            identifier=f"{user_id}:cv_optimizer_download",
+            limit=RATE_LIMIT_CV_OPTIMIZER_DOWNLOAD,
+            window_seconds=RATE_LIMIT_WINDOW_SECONDS,
+        )
+        if not is_allowed:
+            raise rate_limit_error(
+                f"Rate limit exceeded. Maximum {RATE_LIMIT_CV_OPTIMIZER_DOWNLOAD} CV downloads per hour."
+            )
+
         user_api_key = await _get_user_api_key(db, user_id)
 
-        # Prefer cache, fall back to DB
-        cached = await get_cached_cv_optimization(session_id)
-        if cached:
-            optimization = cached
-        else:
-            result = await db.execute(
-                select(WorkflowSession).where(
-                    and_(
-                        WorkflowSession.session_id == session_id,
-                        WorkflowSession.user_id == user_id,
-                    )
+        # Verify ownership first, then serve optimization data from cache
+        result = await db.execute(
+            select(WorkflowSession).where(
+                and_(
+                    WorkflowSession.session_id == session_id,
+                    WorkflowSession.user_id == user_id,
                 )
             )
-            workflow_session = result.scalar_one_or_none()
-            if not workflow_session:
-                raise not_found_error("Workflow session not found")
-            optimization = workflow_session.cv_optimization
+        )
+        workflow_session = result.scalar_one_or_none()
+        if not workflow_session:
+            raise not_found_error("Workflow session not found")
+
+        cached = await get_cached_cv_optimization(session_id)
+        optimization = cached if cached else workflow_session.cv_optimization
 
         if not optimization:
             raise not_found_error(
                 "No optimization result found. Run CV optimization first."
             )
 
-        # Support both flat and nested {"data": {...}} shapes
-        opt_data = optimization.get("data") or optimization
-        cv_markdown = opt_data.get("optimized_cv") or ""
+        cv_markdown = optimization.get("optimized_cv") or ""
         if not cv_markdown:
             raise not_found_error("Optimized CV text not found in result")
 
@@ -673,14 +708,6 @@ async def delete_cv_optimization(
     try:
         user_id = _get_user_uuid(current_user)
 
-        running = await is_cv_optimization_running(session_id)
-        if running:
-            raise APIError(
-                ErrorCode.RESOURCE_CONFLICT,
-                "Cannot clear results while optimization is in progress.",
-                status_code=409,
-            )
-
         result = await db.execute(
             select(WorkflowSession).where(
                 and_(
@@ -693,6 +720,14 @@ async def delete_cv_optimization(
 
         if not workflow_session:
             raise not_found_error("Workflow session not found")
+
+        running = await is_cv_optimization_running(session_id)
+        if running:
+            raise APIError(
+                ErrorCode.RESOURCE_CONFLICT,
+                "Cannot clear results while optimization is in progress.",
+                status_code=409,
+            )
 
         workflow_session.cv_optimization = None
         flag_modified(workflow_session, "cv_optimization")
@@ -754,11 +789,17 @@ async def _run_cv_optimization_background(
             user_data = workflow_session.user_data or {}
             initial_cv = _compose_cv_from_profile(user_data)
 
-            # Extract job description text
+            # Extract job description text.
+            # job_input_data keys: input_method, job_input, source_url, detected_title,
+            # detected_company, content_fingerprint.  "job_input" holds real text only for
+            # MANUAL and EXTENSION inputs; URL inputs store the URL string and file uploads
+            # store "[file content]".  For those cases synthesize from job_analysis instead.
             job_input = workflow_session.job_input_data or {}
-            job_description = job_input.get("job_content") or ""
-            if not job_description:
-                job_description = job_input.get("job_url") or ""
+            raw_input = job_input.get("job_input") or ""
+            if raw_input and raw_input != "[file content]" and not raw_input.startswith("http"):
+                job_description = raw_input
+            else:
+                job_description = _synthesize_jd_from_analysis(workflow_session.job_analysis or {})
 
             job_analysis = workflow_session.job_analysis or {}
             company_research = workflow_session.company_research
@@ -788,17 +829,7 @@ async def _run_cv_optimization_background(
                 broadcast_iteration_fn=_broadcast_iteration,
             )
 
-            result_dict = optimization_result.to_dict()
-
-            # Debug: write artifacts to disk so we can inspect them
-            _debug_dir = os.path.join("generated", "cv_optimizer_debug")
-            os.makedirs(_debug_dir, exist_ok=True)
-            _ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-            with open(os.path.join(_debug_dir, f"{_ts}_optimized_cv.txt"), "w") as _f:
-                _f.write(optimization_result.optimized_cv)
-            with open(os.path.join(_debug_dir, f"{_ts}_cover_letter.txt"), "w") as _f:
-                _f.write(optimization_result.cover_letter)
-            logger.info("CV optimizer debug: wrote artifacts to %s/", _debug_dir)
+            result_dict = sanitize_llm_output(optimization_result.to_dict())
 
             workflow_session.cv_optimization = result_dict
             flag_modified(workflow_session, "cv_optimization")

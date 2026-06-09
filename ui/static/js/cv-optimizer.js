@@ -106,6 +106,12 @@
   /** whether the WebSocket listener has been registered */
   let _wsListenerAttached = false;
 
+  /** @type {AbortController|null} cancels the status-poll loop */
+  let _pollAbortController = null;
+
+  /** @type {ReturnType<typeof setTimeout>|null} */
+  let _pollTimeoutId = null;
+
   // =============================================================================
   // DOM HELPERS
   // =============================================================================
@@ -170,6 +176,55 @@
   }
 
   // =============================================================================
+  // POLLING FALLBACK
+  // =============================================================================
+
+  function _stopPolling() {
+    if (_pollAbortController) { _pollAbortController.abort(); _pollAbortController = null; }
+    if (_pollTimeoutId !== null) { clearTimeout(_pollTimeoutId); _pollTimeoutId = null; }
+  }
+
+  function _startPolling() {
+    _stopPolling();
+    _pollAbortController = new AbortController();
+    const signal = _pollAbortController.signal;
+    const maxAttempts = 60;
+    let attempts = 0;
+
+    const poll = async () => {
+      if (signal.aborted || !_sessionId) return;
+      attempts++;
+      try {
+        const res = await fetch(
+          `/api/v1/cv-optimizer/${encodeURIComponent(_sessionId)}/status`,
+          { credentials: 'same-origin', headers: { 'Authorization': `Bearer ${_getAuthToken()}` }, signal }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (data.has_result) {
+            _stopPolling();
+            _state = 'complete';
+            _fetchAndRenderResult();
+            return;
+          }
+          if (!data.is_running) {
+            _stopPolling();
+            _state = 'not_started';
+            _showSection('cvo-setup');
+            return;
+          }
+        }
+      } catch (err) {
+        if (signal.aborted) return;
+      }
+      if (attempts < maxAttempts) {
+        _pollTimeoutId = window.setTimeout(poll, 5000);
+      }
+    };
+    poll();
+  }
+
+  // =============================================================================
   // WEBSOCKET
   // =============================================================================
 
@@ -182,13 +237,16 @@
     if (type === 'cv_optimization_started') {
       _state = 'running';
       _showSection('cvo-progress');
+      _startPolling();
     } else if (type === 'cv_optimization_iteration') {
       const d = msg['data'] || {};
       _updateProgressView(d['iteration'], d['score'], d['strengths'], d['gaps'], d['action_items']);
     } else if (type === 'cv_optimization_complete') {
+      _stopPolling();
       _state = 'complete';
       _fetchAndRenderResult();
     } else if (type === 'cv_optimization_error') {
+      _stopPolling();
       _state = 'error';
       const errMsg = ((msg['data'] || {})['error']) || 'An error occurred during optimization.';
       _showErrorView(errMsg);
@@ -224,6 +282,7 @@
       if (data.is_running) {
         _state = 'running';
         _showSection('cvo-progress');
+        _startPolling();
         return;
       }
 
@@ -254,7 +313,7 @@
 
       const data = await res.json();
       if (data.has_result && data.result) {
-        const result = data.result.data || data.result;
+        const result = data.result;
         _renderResults(result);
       }
     } catch (err) {

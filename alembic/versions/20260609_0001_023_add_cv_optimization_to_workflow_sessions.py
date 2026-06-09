@@ -1,16 +1,16 @@
 """Add cv_optimization JSONB to workflow_sessions.
 
-Revision ID: 20260512_021
-Revises: 20260429_020
-Create Date: 2026-05-12
+Revision ID: 20260609_023
+Revises: 20260518_022
+Create Date: 2026-06-09
 """
 
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
-revision = "20260512_021"
-down_revision = "20260429_020"
+revision = "20260609_023"
+down_revision = "20260518_022"
 branch_labels = None
 depends_on = None
 
