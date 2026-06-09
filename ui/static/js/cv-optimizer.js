@@ -549,18 +549,17 @@
       stopBadge.className = `cvo-stop-badge cvo-stop-${escapeHtml(result.stop_reason || '')}`;
     }
 
-    // Score chart (simple bar chart — heights set via JS, not style= attr, to satisfy CSP)
+    // Score chart — bar height driven by data-score attribute + CSS selectors (style= blocked by CSP)
     const chartEl = _el('cvo-score-chart');
     if (chartEl && Array.isArray(result.iteration_history)) {
       const chart = document.createElement('div');
       chart.className = 'cvo-chart';
       result.iteration_history.forEach(r => {
-        const pct = Math.round((r.score / 10) * 100);
         const wrap = document.createElement('div');
         wrap.className = 'cvo-chart-bar-wrap';
         const bar = document.createElement('div');
         bar.className = `cvo-chart-bar ${_scoreClass(r.score)}`;
-        bar.style.height = `${pct}%`;
+        bar.setAttribute('data-score', String(Math.round(r.score)));
         const label = document.createElement('span');
         label.className = 'cvo-chart-label';
         label.textContent = typeof r.score === 'number' ? r.score.toFixed(1) : '–';

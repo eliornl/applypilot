@@ -150,11 +150,11 @@ class IterationRecord:
 class OptimizationResult:
     """Full result of the CV optimization loop."""
 
-    status: str = "completed"
     started_at: str
     completed_at: str
     stop_reason: str
     config: Dict[str, Any]
+    status: str = "completed"
     iteration_history: List[IterationRecord] = field(default_factory=list)
     best_iteration: int = 0
     best_score: float = 0.0

@@ -963,7 +963,7 @@ async def get_cached_cv_optimization(session_id: str) -> Optional[Dict[str, Any]
     if cached:
         _metrics.record_hit(CACHE_PREFIX_CV_OPTIMIZATION, latency_ms)
         structured_logger.log_cache_hit("cv_optimization", session_id[:8])
-        return cached
+        return cached.get("data") if isinstance(cached, dict) and "data" in cached else cached
     _metrics.record_miss(CACHE_PREFIX_CV_OPTIMIZATION, latency_ms)
     structured_logger.log_cache_miss("cv_optimization", session_id[:8])
     return None

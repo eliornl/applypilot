@@ -831,6 +831,13 @@ async def _run_cv_optimization_background(
 
             result_dict = sanitize_llm_output(optimization_result.to_dict())
 
+            logger.info(
+                "CV optimization storing result session=%s cv_len=%d cl_len=%d",
+                session_id,
+                len(result_dict.get("optimized_cv", "")),
+                len(result_dict.get("cover_letter", "")),
+            )
+
             workflow_session.cv_optimization = result_dict
             flag_modified(workflow_session, "cv_optimization")
             await db.commit()

@@ -3854,11 +3854,23 @@
 
             .cvo-chart-bar {
                 width: 100%;
-                min-height: 4px;
+                height: 4px;
                 border-radius: 4px 4px 0 0;
                 background: var(--accent-primary);
                 transition: height 0.4s ease;
             }
+
+            /* Bar heights driven by data-score attribute (style= attr blocked by CSP) */
+            .cvo-chart-bar[data-score="1"]  { height: 10%; }
+            .cvo-chart-bar[data-score="2"]  { height: 20%; }
+            .cvo-chart-bar[data-score="3"]  { height: 30%; }
+            .cvo-chart-bar[data-score="4"]  { height: 40%; }
+            .cvo-chart-bar[data-score="5"]  { height: 50%; }
+            .cvo-chart-bar[data-score="6"]  { height: 60%; }
+            .cvo-chart-bar[data-score="7"]  { height: 70%; }
+            .cvo-chart-bar[data-score="8"]  { height: 80%; }
+            .cvo-chart-bar[data-score="9"]  { height: 90%; }
+            .cvo-chart-bar[data-score="10"] { height: 100%; }
 
             .cvo-chart-bar.cvo-score-excellent { background: #10b981; }
             .cvo-chart-bar.cvo-score-good      { background: var(--accent-primary); }
