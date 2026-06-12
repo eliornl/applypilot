@@ -10,6 +10,7 @@ Welcome to ApplyPilot! This guide walks you through every feature so you can get
 - [Creating Applications](#creating-applications)
 - [Chrome Extension](#chrome-extension)
 - [Interview Preparation](#interview-preparation)
+- [CV Optimization](#cv-optimization)
 - [Career Tools](#career-tools)
 - [Settings](#settings)
 - [FAQ](#faq)
@@ -201,9 +202,11 @@ After submitting, five AI agents run across four steps with a gate check mid-way
 
 **Optional:** The **Interview Prep** agent runs separately, on demand from the Interview tab. It is not part of the main workflow and does not run automatically.
 
+The **CV Optimizer** also runs on demand from the **Optimize CV** tab after the workflow completes. See [CV Optimization](#cv-optimization).
+
 ### Viewing Results
 
-The application details page opens with a **7-tab layout**:
+The application details page opens with an **8-tab layout**:
 
 | Tab | Content |
 |-----|---------|
@@ -214,6 +217,7 @@ The application details page opens with a **7-tab layout**:
 | **Cover Letter** | Personalized letter ready to copy |
 | **Resume** | 4 sub-tabs: Overview, Experience, Keywords & ATS, Summary |
 | **Interview** | 3 sub-tabs: Process, Questions, Preparation |
+| **Optimize CV** | Iterative AI CV optimization loop — optimized CV, cover letter, gap analysis |
 
 The **Cover Letter** tab has a **Copy** button. The Cover Letter, Resume, and Interview tabs each have a **Regenerate** button (rate limited to 5/hour).
 
@@ -297,6 +301,34 @@ Content is organized across the three sub-tabs:
 **Questions** — behavioral questions with STAR answer frameworks built from your profile, technical and role-specific questions, company-specific questions, and smart questions to ask the interviewer
 
 **Preparation** — quick reference card (elevator pitch, key selling points, salary discussion), how to address employer concerns, logistics (dress code, what to bring, virtual interview tips), a day-before checklist, and confidence boosters
+
+---
+
+## CV Optimization
+
+The **CV Optimizer** runs an iterative AI loop tailored to a specific job application. An AI hiring manager scores your CV against the job description; an AI applicant revises it based on the feedback; the cycle repeats until the fit score converges. When the loop finishes, ApplyPilot generates a final optimized CV and a matching cover letter.
+
+### Accessing CV Optimization
+
+1. Open a **completed** application's detail page (the main workflow must be finished)
+2. Click the **Optimize CV** tab
+3. Choose **Max Iterations** (1–7; default 5) and **Stop at score** (7.0–9.5; default 8.5)
+4. Click **Start Optimization**
+5. Watch live progress — each iteration shows the hiring-manager score and feedback
+6. When complete, review the **Optimized CV**, **Cover Letter**, **Gap Analysis**, and **Iteration History**
+
+### Requirements
+
+- A **Gemini API key** in **Settings → AI Setup**, or a server-configured key if your instance operator provides one
+- A **completed workflow** for that application — if document generation was skipped, finish the workflow from the Cover Letter or Resume tab first
+
+### Output and actions
+
+- **Copy** — optimized CV or cover letter to clipboard
+- **Download ODT** — professionally formatted OpenDocument file (requires LibreOffice on the server for conversion)
+- **Re-run** — clear the current result and start a fresh optimization (not available while a run is in progress)
+
+Rate limits: **5 optimization runs per hour** per user, **10 ODT downloads per hour**. The loop typically takes several minutes depending on iteration count and API latency.
 
 
 ---

@@ -1,0 +1,126 @@
+---
+description: CV Optimizer — iterative hiring-manager loop, background task, Redis lock, application detail tab
+globs: agents/cv_optimizer_loop.py,agents/hiring_manager.py,api/cv_optimizer.py,ui/static/js/cv-optimizer.js
+alwaysApply: false
+---
+
+# CV Optimizer Feature
+
+## Standalone Agents (NOT in LangGraph workflow)
+
+Three agents in `agents/cv_optimizer_loop.py` plus `HiringManagerAgent` in `agents/hiring_manager.py` run **on demand** after a workflow session reaches **`completed`**. They are orchestrated by `CVOptimizationOrchestrator` — never add them to `job_application_workflow.py`.
+
+```
+Hiring Manager (evaluate) → convergence check → CV Optimizer (revise) → repeat
+→ Cover Letter Finalizer → optimized CV + cover letter + gap analysis
+```
+
+Loop stops when: score ≥ threshold, max iterations reached, score decreases vs best, or plateau detected.
+
+Initial CV is composed from the user profile via `_compose_cv_from_profile()`. Job description comes from `job_input_data["job_input"]` with fallback to `_synthesize_jd_from_analysis(job_analysis)` when raw paste text is missing.
+
+## Background Task with Atomic Redis Locking
+
+```python
+from utils.cache import (
+    set_cv_optimization_running,   # Returns False if already locked (409)
+    clear_cv_optimization_running,
+    cache_cv_optimization,
+    get_cached_cv_optimization,    # Unwraps cache_set {"data": ...} wrapper
+    invalidate_cv_optimization,
+    is_cv_optimization_running,
+)
+
+claimed = await set_cv_optimization_running(session_id)
+if not claimed:
+    raise APIError(ErrorCode.RESOURCE_CONFLICT, "CV optimization is already running...", status_code=409)
+
+background_tasks.add_task(_run_cv_optimization_background, session_id=..., user_id=str(user_id), ...)
+```
+
+Always clear the lock in `finally` and broadcast lifecycle events:
+
+```python
+from api.websocket import (
+    broadcast_cv_optimization_started,
+    broadcast_cv_optimization_iteration,
+    broadcast_cv_optimization_complete,
+    broadcast_cv_optimization_error,
+)
+```
+
+Background task uses `get_session()`, not `get_database()`. Top-level `except` must call `await report_exception(exc, user_id=...)` and log with `exc_info=True`.
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/cv-optimizer/{session_id}/start` | Start optimization loop (optional `max_iterations` 1–7, `score_threshold` 7.0–9.5) |
+| `GET` | `/api/v1/cv-optimizer/{session_id}` | Full result (`has_result`, `result`) |
+| `GET` | `/api/v1/cv-optimizer/{session_id}/status` | Running / completed flags |
+| `GET` | `/api/v1/cv-optimizer/{session_id}/download-cv` | ODT download (LibreOffice headless) |
+| `DELETE` | `/api/v1/cv-optimizer/{session_id}` | Clear result (DB + cache); 409 if running |
+
+Rate limits: **5 starts/hour** per user (`{user_id}:cv_optimizer`), **10 ODT downloads/hour** (`{user_id}:cv_optimizer_download`).
+
+## Ownership Before Cache
+
+`get_cv_optimization`, `download_optimized_cv_odt`, and `delete_cv_optimization` **verify `WorkflowSession` ownership in the DB first**, then read cache. Never call `get_cached_cv_optimization()` for a session the user does not own — cached CV/cover letter is PII.
+
+## API Key Gate
+
+Use `no_api_key_error()` (`CFG_6001`) when neither user BYOK nor server `GEMINI_API_KEY` / `use_vertex_ai` is configured:
+
+```python
+server_has_key = bool(getattr(settings, "gemini_api_key", None)) or settings.use_vertex_ai
+if not user_api_key and not server_has_key:
+    raise no_api_key_error(...)
+```
+
+Frontend (`cv-optimizer.js`) shows `#cvo-byok-warning` and links to `/dashboard/settings?tab=ai-setup` on `CFG_6001`.
+
+## Persistence
+
+- JSONB column: `workflow_sessions.cv_optimization` (migration `20260609_023`)
+- Always `flag_modified(workflow_session, "cv_optimization")` on write
+- Redis cache TTL: **24 h** result, **30 min** running lock (`TTL_CV_OPTIMIZATION`, `TTL_CV_OPTIMIZATION_RUNNING`)
+
+## WebSocket Push
+
+Frontend listens on `window` event `applypilot:ws` (same WS as workflow). Polling fallback: status every few seconds while running.
+
+| WS message type | Meaning |
+|---|---|
+| `cv_optimization_started` | Loop began — show progress UI |
+| `cv_optimization_iteration` | One evaluate/revise cycle — update score + iteration log |
+| `cv_optimization_complete` | Result saved — fetch GET result |
+| `cv_optimization_error` | Failed — show error view |
+
+## Application Detail Tab
+
+8th tab: **Optimize CV** (`data-tab="optimize"`, `#pane-optimize`, `#cvOptimizeContent`).
+
+JS: `ui/static/js/cv-optimizer.js` — `window.initCvOptimizerTab(sessionId)` called from `application-detail.js` when the Optimize tab is activated.
+
+| `data-action` | Handler |
+|---|---|
+| `startCvOptimization` | POST `/start` |
+| `clearCvOptimization` | DELETE (re-run) |
+| `resetCvOptimization` | Return to setup after error |
+| `copyOptimizedCv` / `copyCvoCoverLetter` | Clipboard |
+| `downloadOptimizedCvOdt` | GET `/download-cv` blob |
+
+Score progression chart: set **`data-score`** on bar elements, then assign `element.style.width` in JS — never `style="width: X%"` in HTML strings (CSP).
+
+## Prerequisite
+
+`workflow_session.workflow_status` must be **`completed`**. Heal `analysis_complete` → `completed` when both resume and cover letter JSONB are already present.
+
+## Testing
+
+```bash
+pytest tests/test_api/test_cv_optimizer.py -v
+pytest tests/test_agents/test_cv_optimizer_loop.py -v
+```
+
+Ownership-before-cache and cache unwrap regressions live in `tests/test_api/test_cv_optimizer.py`.

@@ -7,7 +7,7 @@ alwaysApply: false
 # Application Detail Page
 
 ## Tab Architecture
-Tab order (left to right): Job Details → Your Fit → Strategy → Company → Cover Letter → Resume → Interview
+Tab order (left to right): Job Details → Your Fit → Strategy → Company → Cover Letter → Resume → Interview → **Optimize CV**
 
 | Tab | Pane ID | Container | Sub-tabs? |
 |-----|---------|-----------|-----------|
@@ -18,8 +18,27 @@ Tab order (left to right): Job Details → Your Fit → Strategy → Company →
 | Cover Letter | `pane-cover` | `#coverContent` | No |
 | Resume | `pane-resume` | `#resumeContent` | **Yes: Overview, Experience, Keywords & ATS, Summary** |
 | Interview | `pane-interview` | `#interviewContent` | Yes: Process, Questions, Preparation |
+| **Optimize CV** | `pane-optimize` | `#cvOptimizeContent` | No — see **`cv-optimizer-feature.mdc`** |
 
 **First active tab is `jobdetails`** (not `company`). `pane-jobdetails` carries the `active` class in HTML.
+
+## CV Optimizer Tab
+
+Standalone on-demand feature — **not** part of the 5-agent LangGraph workflow. Logic lives in `ui/static/js/cv-optimizer.js`; styles in `application.html` `<style>` block (`.cvo-*` classes).
+
+`application-detail.js` calls `window.initCvOptimizerTab(currentSessionId)` when the user switches to `data-tab="optimize"`.
+
+State sections inside `#cvOptimizeContent`: `#cvo-setup`, `#cvo-progress`, `#cvo-results`, `#cvo-error` — toggled via `.is-hidden` + JS `display`.
+
+| `data-action` | Purpose |
+|---|---|
+| `startCvOptimization` | POST `/api/v1/cv-optimizer/{session_id}/start` |
+| `clearCvOptimization` | DELETE result, return to setup |
+| `resetCvOptimization` | Dismiss error view |
+| `copyOptimizedCv` / `copyCvoCoverLetter` | Clipboard |
+| `downloadOptimizedCvOdt` | GET `/download-cv` ODT blob |
+
+Score chart bars: **`data-score`** attribute + JS width assignment — never inline `style="width: …"` in template strings (CSP).
 
 ## Profile Match Corner Widget
 A `position: fixed` widget (`#matchCornerWidget`) lives in the top-right corner. Shows profile match score and **Export PDF** button only. No per-tab copy/export buttons.

@@ -11,7 +11,7 @@ alwaysApply: false
 | Type | Examples | Invocation |
 |------|----------|-----------|
 | **Workflow agents** | `job_analyzer`, `profile_matching`, `company_research`, `cover_letter_writer`, `resume_advisor` | Orchestrated by LangGraph in `job_application_workflow.py` |
-| **Standalone agents** | `interview_prep`, all 6 career tools | Called directly from API endpoint or background task |
+| **Standalone agents** | `interview_prep`, `hiring_manager` + `cv_optimizer_loop` (orchestrator), all 6 career tools | Called directly from API endpoint or background task |
 
 Never add a standalone agent to the LangGraph graph — they run independently.
 

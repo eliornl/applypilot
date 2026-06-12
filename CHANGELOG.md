@@ -39,6 +39,10 @@ Injectable **`extension/lib/extract-page-content.js`**: selection, JSON-LD, site
 
 The **Upload File** tab on `/dashboard/new-application` accepts **`.docx`** in addition to **`.pdf`** and **`.txt`** (still **5 MB** max). The API (`POST /api/v1/workflow/start`, `job_file`) validates ZIP magic bytes for DOCX and extracts text with `extract_text_from_docx()` (`docx2txt`), same approach as resume uploads. Legacy binary **`.doc`** (Word 97–2003) is not supported.
 
+#### CV Optimizer — iterative CV optimization loop
+
+On-demand **Optimize CV** tab on the application detail page (after workflow **`completed`**). **`CVOptimizationOrchestrator`** runs a hiring-manager evaluate → applicant revise loop until score threshold, max iterations, score decrease, or plateau; then generates a tailored cover letter. Agents: **`agents/hiring_manager.py`**, **`agents/cv_optimizer_loop.py`**. API: **`api/cv_optimizer.py`** (`POST /start`, `GET`, `GET /status`, `GET /download-cv`, `DELETE`). Persists to **`workflow_sessions.cv_optimization`** (migration **`20260609_023`**) with Redis cache (**24 h** result, **30 min** running lock). WebSocket events: `cv_optimization_started`, `cv_optimization_iteration`, `cv_optimization_complete`, `cv_optimization_error`. Rate limits: **5 starts/hour**, **10 ODT downloads/hour**. Ownership verified before cache on GET/DELETE/download. Frontend: **`ui/static/js/cv-optimizer.js`**. Tests: **`tests/test_api/test_cv_optimizer.py`**, **`tests/test_agents/test_cv_optimizer_loop.py`**. Docs: **USER_GUIDE**, **Help**, **README**, **`.cursor`/`.claude`** rules.
+
 ### Changed
 
 #### LLM — Gemini model lineup refresh (Gemini 3.5 Flash default)

@@ -34,9 +34,9 @@ Runs on your machine. No subscriptions, no data stored on our servers — just y
 
 ---
 
-## Six AI agents
+## AI agents
 
-Paste a job description and the pipeline runs automatically:
+Paste a job description and five agents run automatically:
 
 | Agent | What it produces |
 |-------|-----------------|
@@ -45,8 +45,13 @@ Paste a job description and the pipeline runs automatically:
 | **Company Research** | Culture, leadership style, interview approach, watch-out notes |
 | **Resume Advisor** | Per-bullet rewrites, ATS alignment score, before-you-submit checklist |
 | **Cover Letter Writer** | Personalized cover letter, regenerate with one click |
-| **Interview Prep** _(standalone)_ | Role-specific questions, model answers, full mock interview session |
-| **CV Optimizer** _(standalone)_ | Iterative evaluate→revise loop: AI hiring manager scores your CV, AI applicant rewrites it, repeats until score threshold or max iterations. Outputs an optimized CV and cover letter. |
+
+Two more agents run **on demand** from the application detail page (after the workflow completes):
+
+| Agent | What it produces |
+|-------|-----------------|
+| **Interview Prep** | Role-specific questions, model answers, full mock interview session |
+| **CV Optimizer** | Iterative evaluate→revise loop: AI hiring manager scores your CV, AI applicant rewrites it, repeats until score threshold or max iterations. Outputs an optimized CV and cover letter. |
 
 ## Six career tools
 
