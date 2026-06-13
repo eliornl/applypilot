@@ -153,6 +153,11 @@ def user_facing_message_from_llm_exception(exc: BaseException) -> str:
     return str(exc)
 
 
+def is_llm_quota_or_rate_limit_exception(exc: BaseException) -> bool:
+    """Return True when an exception looks like Gemini / Google AI quota or rate limiting."""
+    return _text_indicates_gemini_quota_exhausted(_exception_chain_text(exc))
+
+
 # =============================================================================
 # SINGLETON CLIENT CLASS
 # =============================================================================

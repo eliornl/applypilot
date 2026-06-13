@@ -545,8 +545,10 @@
                                 <li>The cycle repeats until the score reaches your threshold, hits the max iteration count, or stops improving</li>
                                 <li>A final <strong>cover letter</strong> is generated to match the best-scoring CV</li>
                             </ol>
-                            <p>You can configure max iterations (1–7) and the score threshold (7.0–9.5) before starting. Results include the optimized CV, cover letter, gap analysis (skills that could not be fixed by rephrasing alone), and a full iteration history. Copy buttons and an ODT download are available when complete.</p>
-                            <p>Requires a Gemini API key (Settings → AI Setup) unless your instance operator provides a server key. Rate limit: <strong>5 optimization runs per hour</strong>, <strong>10 ODT downloads per hour</strong>.</p>
+                            <p>You can configure max iterations (2–7) and the score threshold (7.0–9.5) before starting. When you click <strong>Start Optimization</strong>, the setup panel hides and progress appears. Results include the optimized CV, cover letter, gap analysis (skills that could not be fixed by rephrasing alone), and a full iteration history. Copy buttons and <strong>Download CV</strong> are available when complete.</p>
+                            <p><strong>Download CV</strong> runs on the ApplyPilot server — you do not need LibreOffice on your computer. Docker deployments return a formatted <code>.odt</code> file (Gemini HTML → layout normalizer → LibreOffice). Local dev without LibreOffice returns a Word <code>.docx</code> with proper bullets and section layout. Rate limits and quota errors show as toasts, not as a markdown file download.</p>
+                            <p>If the loop stops early due to API quota, the best CV reached is saved; a banner explains what happened and the cover letter section shows an empty state if it could not be generated.</p>
+                            <p>Requires a Gemini API key (Settings → AI Setup) unless your instance operator provides a server key. Rate limit: <strong>10 optimization runs per hour</strong>, <strong>10 CV downloads per hour</strong>.</p>
                         </div>
                     </div>
 
@@ -742,7 +744,7 @@
                                 <li><strong>Career Tools:</strong> 10 per hour</li>
                                 <li><strong>Cover Letter / Resume regeneration:</strong> 5 per hour per application</li>
                                 <li><strong>Interview Prep generation:</strong> 5 per hour</li>
-                                <li><strong>CV Optimization:</strong> 5 runs per hour, 10 ODT downloads per hour</li>
+                                <li><strong>CV Optimization:</strong> 10 runs per hour, 10 CV downloads per hour</li>
                             </ul>
                             <p>Limits reset on a rolling hourly basis. If you are the instance operator and want to adjust these limits, they are configurable in the backend rate-limit settings.</p>
                         </div>

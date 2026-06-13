@@ -2,6 +2,7 @@
 
 from utils.llm_client import (
     GeminiError,
+    is_llm_quota_or_rate_limit_exception,
     user_facing_message_from_llm_exception,
     _GEMINI_QUOTA_USER_MESSAGE,
 )
@@ -32,3 +33,8 @@ def test_gemini_error_with_original_chain() -> None:
     )
     ge = GeminiError("Generate failed", original_error=inner)
     assert user_facing_message_from_llm_exception(ge) == _GEMINI_QUOTA_USER_MESSAGE
+
+
+def test_is_llm_quota_or_rate_limit_exception() -> None:
+    assert is_llm_quota_or_rate_limit_exception(RuntimeError("429 RESOURCE_EXHAUSTED"))
+    assert not is_llm_quota_or_rate_limit_exception(ValueError("connection reset"))

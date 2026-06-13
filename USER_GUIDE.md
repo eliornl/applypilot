@@ -311,11 +311,13 @@ The **CV Optimizer** runs an iterative AI loop tailored to a specific job applic
 ### Accessing CV Optimization
 
 1. Open a **completed** application's detail page (the main workflow must be finished)
-2. Click the **Optimize CV** tab
-3. Choose **Max Iterations** (1–7; default 5) and **Stop at score** (7.0–9.5; default 8.5)
-4. Click **Start Optimization**
-5. Watch live progress — each iteration shows the hiring-manager score and feedback
+2. Click the **Optimize CV** tab — the setup screen matches the Cover Letter and Resume tabs (centered icon, description, and **Start Optimization** button)
+3. Choose **Max Iterations** (2–7; default 5) and **Stop at score** (7.0–9.5; default 8.5)
+4. Click **Start Optimization** — the setup panel hides and live progress appears
+5. Watch each iteration — hiring-manager score and feedback update in real time
 6. When complete, review the **Optimized CV**, **Cover Letter**, **Gap Analysis**, and **Iteration History**
+
+If the loop stops early because of API quota, ApplyPilot saves the best CV reached so far. A notice banner explains what happened; if the cover letter could not be generated, that section shows a clear empty state instead of error text.
 
 ### Requirements
 
@@ -325,10 +327,34 @@ The **CV Optimizer** runs an iterative AI loop tailored to a specific job applic
 ### Output and actions
 
 - **Copy** — optimized CV or cover letter to clipboard
-- **Download ODT** — professionally formatted OpenDocument file (requires LibreOffice on the server for conversion)
+- **Download CV** — formatted Word (``.docx``) or OpenDocument (``.odt`` when LibreOffice is on the server). Rate limits and API quota errors show as on-screen toasts (not a silent markdown download).
+
+#### CV export — how it works
+
+ApplyPilot converts your optimized CV markdown into a formatted document on the **server**. End users never install anything locally.
+
+| Server setup | Export path | Quality |
+|---|---|---|
+| **LibreOffice installed** (Docker image, most production deploys) | Gemini HTML → HTML normalizer → LibreOffice → **`.odt`** | Best — full layout engine; bullets rendered as paragraph lines to avoid duplicate list items in LibreOffice |
+| **No LibreOffice** (e.g. bare `make dev` on macOS) | Structured **Word `.docx`** (`python-docx`) | Real Word bullets — classic résumé layout |
+
+**Docker / `docker compose up`:** LibreOffice is included automatically (`libreoffice-writer` in the Dockerfile). No extra setup.
+
+**Local dev without Docker:** downloads are **`.docx`** (Word) — same structure as a professional résumé (section headers, title/company lines, bullet lists). For **`.odt`** locally, install LibreOffice:
+
+```bash
+brew install --cask libreoffice   # macOS
+```
+
+Then restart the dev server — downloads use the Gemini + HTML normalizer + LibreOffice path when `soffice` is detected.
+
 - **Re-run** — clear the current result and start a fresh optimization (not available while a run is in progress)
 
-Rate limits: **5 optimization runs per hour** per user, **10 ODT downloads per hour**. The loop typically takes several minutes depending on iteration count and API latency.
+Rate limits: **10 optimization runs per hour** per user, **10 CV downloads per hour**. The loop typically takes several minutes depending on iteration count and API latency.
+
+### Generate Resume Tips (same application page)
+
+From the **Resume** tab, **Generate Resume Tips** runs the Resume Advisor on demand. If generation fails (rate limit, quota, or other API error), ApplyPilot shows a toast and returns to the empty “Generate Resume Tips” screen — it does not display raw error JSON in the tab.
 
 
 ---

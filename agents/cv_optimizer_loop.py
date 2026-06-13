@@ -11,13 +11,14 @@ All agents require a BYOK user API key.
 """
 
 import logging
+import re
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from time import perf_counter
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from agents.hiring_manager import HiringManagerAgent, HiringManagerEvaluation
-from utils.llm_client import get_gemini_client
+from utils.llm_client import get_gemini_client, is_llm_quota_or_rate_limit_exception
 from utils.logging_config import get_structured_logger
 
 logger = logging.getLogger(__name__)
@@ -43,27 +44,34 @@ CV_OPTIMIZER_SYSTEM_CONTEXT: str = """You are an expert CV writer helping a job 
 ## YOUR ROLE
 Revise the candidate's CV to better match the job requirements based on feedback from the hiring manager. You are making the SAME person look more relevant — not creating a different person.
 
+## SOURCE OF TRUTH
+The read-only CANDIDATE PROFILE section in the prompt is the only authoritative record of facts. Every company, role, date, metric, skill, and achievement in your output must be traceable to that profile or to the current CV derived from it.
+
 ## STRICT RULES — NEVER VIOLATE
-1. NEVER fabricate experience, degrees, certifications, skills, or achievements
+1. NEVER fabricate experience, degrees, certifications, skills, metrics, or achievements
 2. NEVER add companies, roles, or dates the candidate did not hold
-3. NEVER change factual information (employment dates, job titles, educational institutions)
-4. If you are uncertain whether something is true, flag it with [NEEDS CLARIFICATION: ...]
-5. Only revise sections mentioned in the action items
+3. NEVER change employment dates, job titles, or educational institutions
+4. NEVER invent numbers (team sizes, transaction volumes, customer counts, percentages) unless that exact figure appears in the profile
+5. NEVER use meta-commentary, editor notes, or bracketed annotations (no [NEEDS CLARIFICATION], no "adjusted date", no internal reasoning)
+6. If a gap cannot be fixed without inventing facts, leave the gap — do not stretch the truth
+7. Only revise sections mentioned in the action items when possible
 
 ## WHAT YOU CAN DO
-- Rephrase bullet points to highlight relevant skills and impact
+- Rephrase bullet points to highlight relevant skills and impact using existing facts only
 - Reorder sections or bullet points for better emphasis
-- Add or expand on skills that ARE listed (if supporting evidence exists in the CV)
+- Add skills to the skills list only when clearly supported by work history in the profile
 - Remove or de-emphasize irrelevant content
-- Strengthen weak or vague language ("worked on" → "led", "helped with" → "implemented")
-- Quantify existing achievements if numbers are implied (e.g. "managed a team" → "managed a team of 6")
-- Improve the professional summary to match the target role
+- Strengthen weak language using verbs that match the candidate's actual scope (do not upgrade "assisted" to "led" unless the profile supports leadership)
+- Improve the professional summary using only facts from the profile
 
 ## OUTPUT FORMAT
-Return the complete revised CV as plain markdown text. Do not include any explanation or commentary — only the CV content.
+Return the complete revised CV as plain markdown text. No explanation, no commentary, no bracketed notes — only CV content the candidate could submit.
 """
 
 CV_OPTIMIZER_PROMPT_TEMPLATE: str = """# CV Revision — Iteration {iteration}
+
+## SOURCE OF TRUTH — CANDIDATE PROFILE (read-only; do not add facts beyond this)
+{profile_source_cv}
 
 ## JOB DESCRIPTION
 {job_description}
@@ -76,17 +84,23 @@ CV_OPTIMIZER_PROMPT_TEMPLATE: str = """# CV Revision — Iteration {iteration}
 ### Specific action items:
 {action_items}
 
-## CURRENT CV
+## CURRENT CV (tailored draft — do not add facts beyond the profile)
 {cv_text}
 
 ## YOUR TASK
-Revise the CV above following your system instructions. Only modify sections relevant to the action items. Return the complete revised CV as markdown text.
+Revise the current CV following your system instructions. Only rephrase, reorder, or emphasize content supported by the profile. Return the complete revised CV as markdown text.
 """
 
 COVER_LETTER_SYSTEM_CONTEXT: str = """You are an expert cover letter writer who creates compelling, authentic applications.
 
 ## YOUR ROLE
-Write a professional cover letter that bridges the candidate's optimized CV with the specific job opportunity.
+Write a professional cover letter grounded in the candidate's verified profile — not in speculative or exaggerated tailoring.
+
+## STRICT FACT RULES — NEVER VIOLATE
+1. Only mention accomplishments, metrics, skills, and tenure supported by the candidate profile source of truth
+2. Do not invent numbers, product details, or responsibilities to match the job posting
+3. Do not treat the tailored CV as authoritative if it claims something absent from the profile
+4. It is fine to acknowledge fit honestly without overstating experience
 
 ## WRITING RULES
 - Address the letter to "Dear Hiring Team," (never "Dear Hiring Manager," or "To Whom It May Concern")
@@ -107,11 +121,14 @@ Company: {company_name}
 
 {company_context_section}
 
-## CANDIDATE'S OPTIMIZED CV
+## SOURCE OF TRUTH — CANDIDATE PROFILE (read-only)
+{profile_source_cv}
+
+## TAILORED CV (for phrasing ideas only — verify every claim against the profile above)
 {optimized_cv}
 
 ## YOUR TASK
-Write a compelling cover letter for this candidate applying to this specific role.
+Write a compelling, factually accurate cover letter for this candidate applying to this specific role.
 Return only the cover letter text — no JSON, no commentary.
 """
 
@@ -125,7 +142,7 @@ Return only the cover letter text — no JSON, no commentary.
 class OptimizationConfig:
     """User-configurable parameters for the optimization loop."""
 
-    max_iterations: int = 5      # 1–7
+    max_iterations: int = 5      # 2–7 (1 evaluates only, never revises)
     score_threshold: float = 8.5  # 7.0–9.5
 
 
@@ -272,6 +289,94 @@ def _compose_cv_from_profile(user_profile: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+_NEEDS_CLARIFICATION_RE = re.compile(r"\[NEEDS\s+CLARIFICATION[^\]]*\]", re.IGNORECASE)
+# Bracketed editor notes the model sometimes emits instead of NEEDS CLARIFICATION
+_EDITOR_NOTE_RE = re.compile(r"\[(?:adjusted|confirm|clarification)[^\]]*\]", re.IGNORECASE)
+
+
+def _strip_editor_annotations(text: str) -> str:
+    """Remove bracketed editor/meta annotations from user-facing CV or cover letter text."""
+    if not text:
+        return text
+    cleaned = _NEEDS_CLARIFICATION_RE.sub("", text)
+    cleaned = _EDITOR_NOTE_RE.sub("", cleaned)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r" +\n", "\n", cleaned)
+    return cleaned.strip()
+
+
+def sanitize_application_text(text: str) -> str:
+    """Public sanitizer for optimized CV / cover letter output."""
+    return _strip_editor_annotations(text)
+
+
+def _profile_date_markers(user_profile: Dict[str, Any]) -> List[str]:
+    """Date substrings from profile work/education that must survive CV revisions."""
+    markers: List[str] = []
+    for role in user_profile.get("work_experience") or []:
+        start = (role.get("start_date") or "").strip()
+        end = (role.get("end_date") or "").strip()
+        if role.get("is_current") and not end:
+            end = "Present"
+        if start:
+            markers.append(start)
+        if end:
+            markers.append(end)
+        if start or end:
+            markers.append(f"{start}–{end}".strip("–"))
+    for edu in user_profile.get("education") or []:
+        start = (edu.get("start_date") or "").strip()
+        end = (edu.get("end_date") or "").strip()
+        if edu.get("is_current") and not end:
+            end = "Present"
+        if start:
+            markers.append(start)
+        if end:
+            markers.append(end)
+        if start or end:
+            markers.append(f"{start}–{end}".strip("–"))
+    return [m for m in markers if m]
+
+
+def _employment_dates_preserved(
+    profile_source_cv: str,
+    revised_cv: str,
+    user_profile: Dict[str, Any],
+) -> bool:
+    """Return False if a profile date marker present in the baseline CV is missing from revision."""
+    markers = _profile_date_markers(user_profile)
+    if not markers:
+        return True
+    baseline_lower = profile_source_cv.lower()
+    revised_lower = revised_cv.lower()
+    for marker in markers:
+        key = marker.lower()
+        if key in baseline_lower and key not in revised_lower:
+            return False
+    return True
+
+
+def _accept_cv_revision(
+    previous_cv: str,
+    revised_cv: str,
+    profile_source_cv: str,
+    user_profile: Dict[str, Any],
+) -> Tuple[str, bool]:
+    """
+    Sanitize and validate a CV revision.
+
+    Returns:
+        Tuple of (cv_to_use, was_accepted). Rejects revisions that drop profile dates.
+    """
+    sanitized = _strip_editor_annotations(revised_cv)
+    if not sanitized:
+        return previous_cv, False
+    if user_profile and profile_source_cv:
+        if not _employment_dates_preserved(profile_source_cv, sanitized, user_profile):
+            return previous_cv, False
+    return sanitized, True
+
+
 # =============================================================================
 # CV OPTIMIZER AGENT
 # =============================================================================
@@ -295,6 +400,8 @@ class CVOptimizerAgent:
         evaluation: HiringManagerEvaluation,
         iteration: int,
         user_api_key: Optional[str] = None,
+        profile_source_cv: str = "",
+        user_profile: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Revise the CV based on hiring manager feedback.
@@ -305,17 +412,22 @@ class CVOptimizerAgent:
             evaluation: HiringManagerEvaluation from the current iteration
             iteration: Current iteration number (1-indexed when used in loop)
             user_api_key: BYOK Gemini API key
+            profile_source_cv: Read-only baseline CV composed from user profile
+            user_profile: Structured profile dict for date validation
 
         Returns:
-            Revised CV as markdown text. Falls back to the original on error.
+            Revised CV as markdown text. Falls back to the original on error or invalid revision.
         """
         self.gemini_client = await get_gemini_client()
+        user_profile = user_profile or {}
 
         gaps_text = "\n".join(f"- {g}" for g in evaluation.gaps)
         action_items_text = "\n".join(f"- {a}" for a in evaluation.action_items)
+        source_cv = profile_source_cv or cv_text
 
         prompt = CV_OPTIMIZER_PROMPT_TEMPLATE.format(
             iteration=iteration,
+            profile_source_cv=source_cv[:10000],
             job_description=job_description[:6000],
             score=evaluation.score,
             gaps=gaps_text,
@@ -351,8 +463,17 @@ class CVOptimizerAgent:
             )
             return cv_text
 
+        accepted_cv, accepted = _accept_cv_revision(
+            cv_text, revised, source_cv, user_profile
+        )
+        if not accepted:
+            logger.warning(
+                "CVOptimizerAgent: invalid revision at iteration %d, keeping previous CV",
+                iteration,
+            )
+
         structured_logger.log_agent_complete("cv_optimizer", None, _dur_ms)
-        return revised
+        return accepted_cv
 
 
 # =============================================================================
@@ -377,6 +498,7 @@ class CoverLetterFinalizer:
         job_analysis: Dict[str, Any],
         company_research: Optional[Dict[str, Any]],
         user_api_key: str,
+        profile_source_cv: str = "",
     ) -> str:
         """
         Generate a cover letter for the optimized CV.
@@ -387,6 +509,7 @@ class CoverLetterFinalizer:
             job_analysis: Structured job analysis (title, company, requirements)
             company_research: Optional company research data for personalization
             user_api_key: BYOK Gemini API key
+            profile_source_cv: Read-only baseline CV composed from user profile
 
         Returns:
             Cover letter as plain text. Returns empty string on failure.
@@ -409,11 +532,14 @@ class CoverLetterFinalizer:
             if culture:
                 company_context_section += f"\n\nCulture: {culture[:500]}"
 
+        source_cv = profile_source_cv or optimized_cv
+
         prompt = COVER_LETTER_PROMPT_TEMPLATE.format(
             job_title=job_title,
             company_name=company_name,
             job_description_section=job_description_section,
             company_context_section=company_context_section,
+            profile_source_cv=source_cv[:8000],
             optimized_cv=optimized_cv[:8000],
         )
 
@@ -435,6 +561,7 @@ class CoverLetterFinalizer:
             return ""
 
         cover_letter = response.get("response", "").strip()
+        cover_letter = _strip_editor_annotations(cover_letter)
         structured_logger.log_agent_complete("cover_letter_finalizer", None, _dur_ms)
         return cover_letter
 
@@ -473,6 +600,7 @@ class CVOptimizationOrchestrator:
         config: OptimizationConfig,
         user_api_key: str,
         broadcast_iteration_fn: Callable,
+        user_profile: Optional[Dict[str, Any]] = None,
     ) -> OptimizationResult:
         """
         Execute the optimization loop.
@@ -487,12 +615,15 @@ class CVOptimizationOrchestrator:
             config: OptimizationConfig (max_iterations, score_threshold)
             user_api_key: BYOK Gemini API key (required)
             broadcast_iteration_fn: Async callable(iteration_record) broadcast per iteration
+            user_profile: Structured profile dict — source of truth for fact validation
 
         Returns:
             OptimizationResult with all artifacts
         """
         started_at = datetime.now(timezone.utc).isoformat()
         iteration_history: List[IterationRecord] = []
+        profile_source_cv = initial_cv
+        user_profile = user_profile or {}
         current_cv = initial_cv
         best_cv = initial_cv
         best_score: float = 0.0
@@ -512,14 +643,27 @@ class CVOptimizationOrchestrator:
             iter_start = perf_counter()
 
             # --- Evaluate ---
-            evaluation = await self._hiring_manager.evaluate(
-                cv_text=current_cv,
-                job_description=job_description,
-                job_analysis=job_analysis,
-                iteration=iteration,
-                previous_score=previous_score,
-                user_api_key=user_api_key,
-            )
+            try:
+                evaluation = await self._hiring_manager.evaluate(
+                    cv_text=current_cv,
+                    job_description=job_description,
+                    job_analysis=job_analysis,
+                    iteration=iteration,
+                    previous_score=previous_score,
+                    user_api_key=user_api_key,
+                )
+            except Exception as exc:
+                if iteration_history and is_llm_quota_or_rate_limit_exception(exc):
+                    stop_reason = "api_rate_limit"
+                    logger.warning(
+                        "CVOptimizationOrchestrator: API rate limit at evaluate iteration %d "
+                        "session=%s — returning partial result (%d iterations)",
+                        iteration,
+                        session_id,
+                        len(iteration_history),
+                    )
+                    break
+                raise
 
             processing_time_ms = (perf_counter() - iter_start) * 1000
 
@@ -590,22 +734,55 @@ class CVOptimizationOrchestrator:
                 break
 
             # --- Revise ---
-            current_cv = await self._cv_optimizer.revise(
-                cv_text=current_cv,
-                job_description=job_description,
-                evaluation=evaluation,
-                iteration=iteration + 1,
-                user_api_key=user_api_key,
-            )
+            try:
+                current_cv = await self._cv_optimizer.revise(
+                    cv_text=current_cv,
+                    job_description=job_description,
+                    evaluation=evaluation,
+                    iteration=iteration + 1,
+                    user_api_key=user_api_key,
+                    profile_source_cv=profile_source_cv,
+                    user_profile=user_profile,
+                )
+            except Exception as exc:
+                if is_llm_quota_or_rate_limit_exception(exc):
+                    stop_reason = "api_rate_limit"
+                    logger.warning(
+                        "CVOptimizationOrchestrator: API rate limit at revise iteration %d "
+                        "session=%s — returning partial result (%d iterations)",
+                        iteration + 1,
+                        session_id,
+                        len(iteration_history),
+                    )
+                    break
+                raise
 
-        # --- Generate cover letter from best CV ---
-        cover_letter = await self._cover_letter_finalizer.generate_cover_letter(
-            optimized_cv=best_cv,
-            job_description=job_description,
-            job_analysis=job_analysis,
-            company_research=company_research,
-            user_api_key=user_api_key,
-        )
+        # --- Generate cover letter from best CV (skip when quota already hit) ---
+        best_cv = _strip_editor_annotations(best_cv)
+        cover_letter = ""
+        if stop_reason != "api_rate_limit":
+            try:
+                cover_letter = await self._cover_letter_finalizer.generate_cover_letter(
+                    optimized_cv=best_cv,
+                    job_description=job_description,
+                    job_analysis=job_analysis,
+                    company_research=company_research,
+                    user_api_key=user_api_key,
+                    profile_source_cv=profile_source_cv,
+                )
+            except Exception as exc:
+                if iteration_history and is_llm_quota_or_rate_limit_exception(exc):
+                    stop_reason = "api_rate_limit"
+                    logger.warning(
+                        "CVOptimizationOrchestrator: API rate limit during cover letter "
+                        "session=%s — returning partial result",
+                        session_id,
+                    )
+                    cover_letter = ""
+                else:
+                    raise
+        else:
+            cover_letter = ""
 
         # --- Compute gap analysis: gaps from the best iteration's evaluation ---
         gap_analysis = self._compute_gap_analysis(iteration_history, best_iteration)
@@ -621,7 +798,7 @@ class CVOptimizationOrchestrator:
         )
 
         return OptimizationResult(
-            status="completed",
+            status="partial" if stop_reason == "api_rate_limit" else "completed",
             started_at=started_at,
             completed_at=completed_at,
             stop_reason=stop_reason,

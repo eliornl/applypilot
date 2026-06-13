@@ -13,7 +13,10 @@ from agents.cv_optimizer_loop import (
     CVOptimizationOrchestrator,
     OptimizationConfig,
     OptimizationResult,
+    _accept_cv_revision,
     _compose_cv_from_profile,
+    _employment_dates_preserved,
+    sanitize_application_text,
 )
 
 
@@ -147,6 +150,70 @@ class TestComposeCvFromProfile:
 
 
 # =============================================================================
+# Factuality guardrails
+# =============================================================================
+
+
+class TestSanitizeApplicationText:
+    def test_strips_needs_clarification_markers(self):
+        raw = "Built systems [NEEDS CLARIFICATION: confirm team size] for clients."
+        cleaned = sanitize_application_text(raw)
+        assert "NEEDS CLARIFICATION" not in cleaned
+        assert "Built systems" in cleaned
+        assert "for clients" in cleaned
+
+    def test_strips_adjusted_date_editor_notes(self):
+        raw = "*2020-12–Present*\n[Adjusted start date to meet requirement]"
+        cleaned = sanitize_application_text(raw)
+        assert "Adjusted start date" not in cleaned
+        assert "2020-12" in cleaned
+
+
+class TestEmploymentDatesPreserved:
+    def test_detects_removed_profile_date(self):
+        profile = {
+            "work_experience": [
+                {"title": "Engineer", "company": "Co", "start_date": "2020-12", "is_current": True},
+            ],
+        }
+        baseline = _compose_cv_from_profile(profile)
+        revised = baseline.replace("2020-12", "2020-02")
+        assert not _employment_dates_preserved(baseline, revised, profile)
+
+    def test_accepts_rephrase_with_same_dates(self):
+        profile = {
+            "work_experience": [
+                {"title": "Engineer", "company": "Co", "start_date": "2020-12", "is_current": True},
+            ],
+        }
+        baseline = _compose_cv_from_profile(profile)
+        revised = baseline + "\n- Highlighted relevant backend work"
+        assert _employment_dates_preserved(baseline, revised, profile)
+
+
+class TestAcceptCvRevision:
+    def test_rejects_revision_that_changes_dates(self):
+        profile = {
+            "work_experience": [
+                {"title": "Engineer", "company": "Co", "start_date": "2020-12", "is_current": True},
+            ],
+        }
+        baseline = _compose_cv_from_profile(profile)
+        bad = baseline.replace("2020-12", "2019-01")
+        result, accepted = _accept_cv_revision(baseline, bad, baseline, profile)
+        assert not accepted
+        assert result == baseline
+
+    def test_sanitizes_and_accepts_valid_revision(self):
+        profile = {"full_name": "Bob", "summary": "Engineer"}
+        baseline = _compose_cv_from_profile(profile)
+        revised = baseline + "\n[NEEDS CLARIFICATION: extra detail]"
+        result, accepted = _accept_cv_revision(baseline, revised, baseline, profile)
+        assert accepted
+        assert "NEEDS CLARIFICATION" not in result
+
+
+# =============================================================================
 # CVOptimizerAgent
 # =============================================================================
 
@@ -210,6 +277,52 @@ class TestCVOptimizerAgent:
             )
         call_kwargs = client.generate.call_args.kwargs
         assert call_kwargs.get("user_api_key") == "byok-key"
+
+    @pytest.mark.asyncio
+    async def test_revise_rejects_date_change_from_profile(self):
+        profile = {
+            "full_name": "Jane",
+            "work_experience": [
+                {"title": "Engineer", "company": "ACME", "start_date": "2020-12", "is_current": True},
+            ],
+        }
+        baseline = _compose_cv_from_profile(profile)
+        bad_revision = baseline.replace("2020-12", "2018-01")
+
+        client = AsyncMock()
+        client.generate.return_value = {"response": bad_revision, "filtered": False}
+        agent = CVOptimizerAgent()
+        with patch("agents.cv_optimizer_loop.get_gemini_client", return_value=client):
+            result = await agent.revise(
+                cv_text=baseline,
+                job_description=SAMPLE_JD,
+                evaluation=SAMPLE_EVALUATION,
+                iteration=1,
+                profile_source_cv=baseline,
+                user_profile=profile,
+            )
+        assert result == baseline
+        assert "2018-01" not in result
+
+    @pytest.mark.asyncio
+    async def test_revise_strips_needs_clarification_from_output(self):
+        profile = {"full_name": "Jane", "summary": "Engineer"}
+        baseline = _compose_cv_from_profile(profile)
+        revised = baseline + "\nSkill [NEEDS CLARIFICATION: confirm Golang depth]"
+
+        client = AsyncMock()
+        client.generate.return_value = {"response": revised, "filtered": False}
+        agent = CVOptimizerAgent()
+        with patch("agents.cv_optimizer_loop.get_gemini_client", return_value=client):
+            result = await agent.revise(
+                cv_text=baseline,
+                job_description=SAMPLE_JD,
+                evaluation=SAMPLE_EVALUATION,
+                iteration=1,
+                profile_source_cv=baseline,
+                user_profile=profile,
+            )
+        assert "NEEDS CLARIFICATION" not in result
 
 
 # =============================================================================
@@ -431,6 +544,133 @@ class TestCVOptimizationOrchestratorConvergence:
         )
 
         assert len(broadcasts) == 3
+
+
+# =============================================================================
+# API rate limit — partial results
+# =============================================================================
+
+
+class TestCVOptimizerRateLimitPartial:
+    @pytest.mark.asyncio
+    async def test_evaluate_quota_mid_run_returns_partial(self):
+        """After at least one iteration, evaluate quota should save partial progress."""
+        quota_exc = RuntimeError("429 RESOURCE_EXHAUSTED. You exceeded your current quota")
+        hm = AsyncMock()
+        hm.evaluate = AsyncMock(side_effect=[SAMPLE_EVALUATION, quota_exc])
+
+        orchestrator = CVOptimizationOrchestrator()
+        orchestrator._hiring_manager = hm
+        orchestrator._cv_optimizer = _make_cv_optimizer_mock()
+        cover_letter_mock = _make_cover_letter_mock()
+        orchestrator._cover_letter_finalizer = cover_letter_mock
+
+        config = OptimizationConfig(max_iterations=5, score_threshold=9.5)
+        result = await orchestrator.run(
+            session_id="test-session",
+            user_id="test-user",
+            initial_cv=SAMPLE_CV,
+            job_description=SAMPLE_JD,
+            job_analysis=SAMPLE_JOB_ANALYSIS,
+            company_research=None,
+            config=config,
+            user_api_key="test-key",
+            broadcast_iteration_fn=_noop_broadcast,
+        )
+
+        assert result.status == "partial"
+        assert result.stop_reason == "api_rate_limit"
+        assert len(result.iteration_history) == 1
+        assert result.best_score == pytest.approx(7.0)
+        cover_letter_mock.generate_cover_letter.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_revise_quota_mid_run_returns_partial(self):
+        """Revise quota after a completed iteration should save partial progress."""
+        quota_exc = RuntimeError("429 RESOURCE_EXHAUSTED. quota exceeded")
+        cv_optimizer = AsyncMock()
+        cv_optimizer.revise = AsyncMock(side_effect=quota_exc)
+
+        orchestrator = CVOptimizationOrchestrator()
+        orchestrator._hiring_manager = _make_hiring_manager_mock([SAMPLE_EVALUATION])
+        orchestrator._cv_optimizer = cv_optimizer
+        cover_letter_mock = _make_cover_letter_mock()
+        orchestrator._cover_letter_finalizer = cover_letter_mock
+
+        config = OptimizationConfig(max_iterations=5, score_threshold=9.5)
+        result = await orchestrator.run(
+            session_id="test-session",
+            user_id="test-user",
+            initial_cv=SAMPLE_CV,
+            job_description=SAMPLE_JD,
+            job_analysis=SAMPLE_JOB_ANALYSIS,
+            company_research=None,
+            config=config,
+            user_api_key="test-key",
+            broadcast_iteration_fn=_noop_broadcast,
+        )
+
+        assert result.status == "partial"
+        assert result.stop_reason == "api_rate_limit"
+        assert len(result.iteration_history) == 1
+        cover_letter_mock.generate_cover_letter.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cover_letter_quota_returns_partial_with_cv(self):
+        """Cover letter quota after a successful loop should still return optimized CV."""
+        quota_exc = RuntimeError("429 RESOURCE_EXHAUSTED. You exceeded your current quota")
+        cover_letter_mock = AsyncMock()
+        cover_letter_mock.generate_cover_letter = AsyncMock(side_effect=quota_exc)
+
+        orchestrator = CVOptimizationOrchestrator()
+        orchestrator._hiring_manager = _make_hiring_manager_mock([HIGH_SCORE_EVALUATION])
+        orchestrator._cv_optimizer = _make_cv_optimizer_mock()
+        orchestrator._cover_letter_finalizer = cover_letter_mock
+
+        config = OptimizationConfig(max_iterations=5, score_threshold=8.5)
+        result = await orchestrator.run(
+            session_id="test-session",
+            user_id="test-user",
+            initial_cv=SAMPLE_CV,
+            job_description=SAMPLE_JD,
+            job_analysis=SAMPLE_JOB_ANALYSIS,
+            company_research=None,
+            config=config,
+            user_api_key="test-key",
+            broadcast_iteration_fn=_noop_broadcast,
+        )
+
+        assert result.status == "partial"
+        assert result.stop_reason == "api_rate_limit"
+        assert len(result.iteration_history) == 1
+        assert result.optimized_cv
+        assert result.cover_letter == ""
+
+    @pytest.mark.asyncio
+    async def test_first_evaluate_quota_still_raises(self):
+        """Quota on the first evaluate (no progress) must propagate — no partial result."""
+        quota_exc = RuntimeError("429 RESOURCE_EXHAUSTED. quota exceeded")
+        hm = AsyncMock()
+        hm.evaluate = AsyncMock(side_effect=quota_exc)
+
+        orchestrator = CVOptimizationOrchestrator()
+        orchestrator._hiring_manager = hm
+        orchestrator._cv_optimizer = _make_cv_optimizer_mock()
+        orchestrator._cover_letter_finalizer = _make_cover_letter_mock()
+
+        config = OptimizationConfig(max_iterations=5, score_threshold=9.5)
+        with pytest.raises(RuntimeError, match="RESOURCE_EXHAUSTED"):
+            await orchestrator.run(
+                session_id="test-session",
+                user_id="test-user",
+                initial_cv=SAMPLE_CV,
+                job_description=SAMPLE_JD,
+                job_analysis=SAMPLE_JOB_ANALYSIS,
+                company_research=None,
+                config=config,
+                user_api_key="test-key",
+                broadcast_iteration_fn=_noop_broadcast,
+            )
 
 
 # =============================================================================

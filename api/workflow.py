@@ -41,6 +41,11 @@ from utils.cloud_tasks import (
     enqueue_continue_workflow_task,
     verify_cloud_tasks_secret,
 )
+from utils.llm_client import (
+    is_llm_quota_or_rate_limit_exception,
+    user_facing_message_from_llm_exception,
+    _GEMINI_QUOTA_USER_MESSAGE,
+)
 from config.settings import get_settings
 from utils.cache import (
     get_cached_workflow_state,
@@ -184,15 +189,58 @@ def _job_text_from_uploaded_file(file_content: bytes, matched_ext: str) -> str:
     raise validation_error(f"Unsupported job file type: {matched_ext}")
 
 
-def _safe_error_msg(exc: Exception, debug: bool = False) -> str:
+def _agent_error_message(exc: Exception, fallback: str, *, debug: bool = False) -> str:
     """
-    Return a client-safe error message from an exception.
-    In debug mode returns the raw str(exc); in production returns a generic
-    message so internal details (SQL errors, file paths, etc.) are not exposed.
+    User-safe agent failure text; surfaces Gemini quota copy when applicable.
     """
     if debug:
         return str(exc)
-    return "Workflow processing failed due to an internal error. Please try again."
+    friendly = user_facing_message_from_llm_exception(exc)
+    if friendly == _GEMINI_QUOTA_USER_MESSAGE:
+        return friendly
+    return fallback
+
+
+def _raise_if_agent_soft_failure(payload: Dict[str, Any]) -> None:
+    """
+    Raise when an agent returned an error blob (quota, timeout, etc.) instead of real output.
+
+    Prevents persisting fallback JSON that the dashboard would render as partial resume tips.
+    """
+    if not isinstance(payload, dict):
+        return
+
+    check: Dict[str, Any] = payload
+    nested = payload.get("comprehensive_advice")
+    if isinstance(nested, dict):
+        check = nested
+
+    if not (check.get("error") or check.get("parse_error")):
+        return
+
+    raw = str(check.get("error_message") or "Generation failed")
+    exc = Exception(raw)
+    message = user_facing_message_from_llm_exception(exc)
+    if is_llm_quota_or_rate_limit_exception(exc):
+        raise rate_limit_error(message)
+    raise APIError(
+        ErrorCode.EXTERNAL_SERVICE_ERROR,
+        message,
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
+
+
+def _safe_error_msg(exc: Exception, debug: bool = False) -> str:
+    """
+    Return a client-safe error message from an exception.
+    In debug mode returns the raw str(exc); in production returns Gemini quota
+    guidance when applicable, otherwise a generic retry message.
+    """
+    return _agent_error_message(
+        exc,
+        "Workflow processing failed due to an internal error. Please try again.",
+        debug=debug,
+    )
 
 
 async def _soft_delete_job_application_for_failed_workflow(
@@ -1159,7 +1207,9 @@ async def regenerate_cover_letter(
         raise
     except Exception as e:
         logger.error(f"Failed to regenerate cover letter: {e}", exc_info=True)
-        raise internal_error("Failed to regenerate cover letter")
+        raise internal_error(
+            _agent_error_message(e, "Failed to regenerate cover letter", debug=settings.debug)
+        )
 
 
 @router.post("/regenerate-resume/{session_id}", response_model=RegenerateAgentResponse)
@@ -1244,6 +1294,7 @@ async def regenerate_resume(
 
         # Sanitize before persisting and returning to prevent XSS from LLM output
         new_resume = sanitize_llm_output(new_resume)
+        _raise_if_agent_soft_failure(new_resume)
 
         from sqlalchemy.orm.attributes import flag_modified
         workflow_session.resume_recommendations = new_resume
@@ -1262,7 +1313,11 @@ async def regenerate_resume(
         raise
     except Exception as e:
         logger.error(f"Failed to regenerate resume: {e}", exc_info=True)
-        raise internal_error("Failed to regenerate resume recommendations")
+        raise internal_error(
+            _agent_error_message(
+                e, "Failed to regenerate resume recommendations", debug=settings.debug
+            )
+        )
 
 
 @router.post("/generate-interview-prep/{session_id}", response_model=RegenerateAgentResponse)
@@ -1440,7 +1495,9 @@ Generate 4-6 interview stages, 8-10 likely questions with personalized suggested
         raise
     except Exception as e:
         logger.error(f"Failed to generate interview prep: {e}", exc_info=True)
-        raise internal_error("Failed to generate interview preparation")
+        raise internal_error(
+            _agent_error_message(e, "Failed to generate interview preparation", debug=settings.debug)
+        )
 
 
 @router.post("/continue/{session_id}", response_model=WorkflowContinueResponse)

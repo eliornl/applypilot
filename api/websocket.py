@@ -773,7 +773,7 @@ async def broadcast_cv_optimization_complete(
         user_id: User ID to notify
         session_id: Workflow session ID
         final_score: Best score achieved across all iterations
-        stop_reason: Why the loop stopped (score_threshold/score_decrease/score_plateau/max_iterations)
+        stop_reason: Why the loop stopped (score_threshold/score_decrease/score_plateau/max_iterations/api_rate_limit)
         iteration_count: Total number of iterations run
     """
     payload = {

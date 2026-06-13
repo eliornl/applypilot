@@ -24,21 +24,32 @@ Tab order (left to right): Job Details → Your Fit → Strategy → Company →
 
 ## CV Optimizer Tab
 
-Standalone on-demand feature — **not** part of the 5-agent LangGraph workflow. Logic lives in `ui/static/js/cv-optimizer.js`; styles in `application.html` `<style>` block (`.cvo-*` classes).
+Standalone on-demand feature — **not** part of the 5-agent LangGraph workflow. Logic lives in `ui/static/js/cv-optimizer.js`; styles in `application.html` `<style>` block (`.cvo-*` classes). Full export + loop details: **`cv-optimizer-feature.mdc`**.
 
 `application-detail.js` calls `window.initCvOptimizerTab(currentSessionId)` when the user switches to `data-tab="optimize"`.
 
-State sections inside `#cvOptimizeContent`: `#cvo-setup`, `#cvo-progress`, `#cvo-results`, `#cvo-error` — toggled via `.is-hidden` + JS `display`.
+State sections inside `#cvOptimizeContent`: `#cvo-setup`, `#cvo-progress`, `#cvo-results` — only one visible at a time via `.is-hidden`. **`#cvo-setup.cvo-setup-empty.is-hidden { display: none; }`** required (setup uses `display: flex`; global `.is-hidden` alone is insufficient).
+
+Setup UI matches Cover Letter / Resume empty states (centered icon, `empty-state-title`, `regen-btn`). Shared empty-state layout tokens in `:root`: `--tab-empty-padding-x`, `--tab-empty-min-height`. Page tab bar uses **8-column CSS grid** for equal tab widths.
 
 | `data-action` | Purpose |
 |---|---|
-| `startCvOptimization` | POST `/api/v1/cv-optimizer/{session_id}/start` |
+| `startCvOptimization` | POST `/api/v1/cv-optimizer/{session_id}/start` — hides setup, shows progress |
 | `clearCvOptimization` | DELETE result, return to setup |
-| `resetCvOptimization` | Dismiss error view |
 | `copyOptimizedCv` / `copyCvoCoverLetter` | Clipboard |
-| `downloadOptimizedCvOdt` | GET `/download-cv` ODT blob |
+| `downloadOptimizedCvOdt` | GET `/download-cv` — 429/`RATE_4001` → toast, not markdown fallback |
 
 Score chart bars: **`data-score`** attribute + JS width assignment — never inline `style="width: …"` in template strings (CSP).
+
+## Generate Resume Tips / Cover Letter (analysis_complete)
+
+`generateSingle('cover'|'resume', btn)` in `application-detail.js` POSTs to `/workflow/regenerate-cover-letter` or `/workflow/regenerate-resume`.
+
+**On any failure (429, quota, other):** show toast (`formatWorkflowFailureDetail` / `apiErrorMessage`), restore **empty-state UI** (photo-2 screen) — **never** render agent error blobs in tab content.
+
+Resume empty state: `_renderResumeTipsEmptyState()`. Treat missing or failed data via `_resumeTipsHasFailure(resume)` — checks `resume.error`, `comprehensive_advice.error`, and `parse_error`.
+
+Backend: `POST /workflow/regenerate-resume` calls `_raise_if_agent_soft_failure()` in `api/workflow.py` before commit — agent fallback JSON with `comprehensive_advice.error` becomes **429/503**, not persisted partial tips.
 
 ## Profile Match Corner Widget
 A `position: fixed` widget (`#matchCornerWidget`) lives in the top-right corner. Shows profile match score and **Export PDF** button only. No per-tab copy/export buttons.

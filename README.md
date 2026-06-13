@@ -51,7 +51,7 @@ Two more agents run **on demand** from the application detail page (after the wo
 | Agent | What it produces |
 |-------|-----------------|
 | **Interview Prep** | Role-specific questions, model answers, full mock interview session |
-| **CV Optimizer** | Iterative evaluate→revise loop: AI hiring manager scores your CV, AI applicant rewrites it, repeats until score threshold or max iterations. Outputs an optimized CV and cover letter. |
+| **CV Optimizer** | Iterative evaluate→revise loop: AI hiring manager scores your CV, AI applicant rewrites it, repeats until score threshold or max iterations. Outputs an optimized CV, cover letter, and **Download CV** (`.odt` via LibreOffice + HTML normalizer on server when available, else `.docx`; see [USER_GUIDE.md](USER_GUIDE.md#cv-optimization)). |
 
 ## Six career tools
 

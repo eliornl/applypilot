@@ -5,6 +5,7 @@ Endpoints:
   POST   /api/v1/cv-optimizer/{session_id}/start
   GET    /api/v1/cv-optimizer/{session_id}
   GET    /api/v1/cv-optimizer/{session_id}/status
+  GET    /api/v1/cv-optimizer/{session_id}/download-cv
   DELETE /api/v1/cv-optimizer/{session_id}
 """
 
@@ -136,6 +137,13 @@ class TestStartCvOptimization:
             )
         # Will fail at session lookup — 404 is expected; what we test is NOT 422 from validation
         assert resp.status_code not in (422,) or resp.json().get("error_code") == "CFG_6001"
+
+    async def test_max_iterations_below_minimum_returns_422(self, authed_client):
+        resp = await authed_client.post(
+            f"{BASE}/{SESSION_ID}/start",
+            json={"max_iterations": 1, "score_threshold": 8.0},
+        )
+        assert resp.status_code == 422
 
     @pytest.mark.asyncio
     async def test_invalid_max_iterations_returns_422(self, authed_client):
@@ -320,3 +328,73 @@ class TestDeleteCvOptimization:
         with patch("api.cv_optimizer.is_cv_optimization_running", AsyncMock(return_value=True)):
             resp = await authed_client_with_user.delete(f"{BASE}/{session_id}")
         assert resp.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# GET /{session_id}/download-cv
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadOptimizedCv:
+    """GET /api/v1/cv-optimizer/{session_id}/download-cv"""
+
+    @pytest.mark.asyncio
+    async def test_no_auth_returns_401_or_403(self, api_client):
+        resp = await api_client.get(f"{BASE}/{SESSION_ID}/download-cv")
+        assert resp.status_code in (401, 403)
+
+    @pytest.mark.asyncio
+    async def test_rate_limited_returns_429(self, authed_client):
+        with patch(
+            "api.cv_optimizer.check_rate_limit",
+            AsyncMock(return_value=(False, 0)),
+        ):
+            resp = await authed_client.get(f"{BASE}/{SESSION_ID}/download-cv")
+        assert resp.status_code == 429
+        data = resp.json()
+        assert data.get("error_code") == "RATE_4001"
+        assert "message" in data
+
+    @pytest.mark.asyncio
+    async def test_gemini_quota_returns_429_not_500(self, authed_client_with_user):
+        token = authed_client_with_user.headers["Authorization"].split(" ", 1)[1]
+        sec = get_security_settings()
+        payload = jwt.decode(
+            token,
+            sec.jwt_config["secret_key"],
+            algorithms=[sec.jwt_config["algorithm"]],
+        )
+        uid = uuid.UUID(payload["sub"])
+        session_id = str(uuid.uuid4())
+
+        async with _NullSessionLocal() as db:
+            db.add(
+                WorkflowSession(
+                    id=uuid.uuid4(),
+                    session_id=session_id,
+                    user_id=uid,
+                    cv_optimization={"optimized_cv": "# Jane Smith\n\nExperience"},
+                )
+            )
+            await db.commit()
+
+        quota_exc = Exception("429 RESOURCE_EXHAUSTED: exceeded your current quota")
+
+        with (
+            patch("api.cv_optimizer.check_rate_limit", AsyncMock(return_value=(True, 60))),
+            patch("api.cv_optimizer._get_user_api_key", AsyncMock(return_value="test-key")),
+            patch(
+                "api.cv_optimizer.get_cached_cv_optimization",
+                AsyncMock(return_value={"optimized_cv": "# Jane Smith\n\nExperience"}),
+            ),
+            patch(
+                "api.cv_optimizer._export_optimized_cv_file",
+                AsyncMock(side_effect=quota_exc),
+            ),
+        ):
+            resp = await authed_client_with_user.get(f"{BASE}/{session_id}/download-cv")
+
+        assert resp.status_code == 429
+        data = resp.json()
+        assert data.get("error_code") == "RATE_4001"
+        assert "quota" in data.get("message", "").lower()

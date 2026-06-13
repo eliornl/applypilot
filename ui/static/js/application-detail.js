@@ -107,6 +107,9 @@
     let _toastOutTimer = /** @type {number|null} */ (null);
     /** @type {number|null} */
     let _toastRemoveTimer = /** @type {number|null} */ (null);
+    /** Auto-dismiss: errors/warnings stay longer so quota copy is readable */
+    const TOAST_DISMISS_MS_SUCCESS = 4000;
+    const TOAST_DISMISS_MS_ERROR = 8000;
     /** In-flight guards prevent duplicate concurrent API calls */
     let _regeneratingCoverLetter = false;
     let _regeneratingResume = false;
@@ -1238,8 +1241,45 @@
         if (cltEl) cltEl.textContent = decodeEntities(letter);
     }
 
+    /**
+     * @param {any} resume
+     * @returns {boolean}
+     */
+    function _resumeTipsHasFailure(resume) {
+        if (!resume || typeof resume !== 'object' || Object.keys(resume).length === 0) {
+            return true;
+        }
+        const advice = resume.comprehensive_advice || resume;
+        return !!(resume.error || advice.error || advice.parse_error);
+    }
+
+    function _renderResumeTipsEmptyState() {
+        const subTabsEl = /** @type {HTMLElement|null} */ (document.querySelector('.sub-tabs[data-parent="resume"]'));
+        if (subTabsEl) subTabsEl.style.display = 'none';
+        document.querySelectorAll('#pane-resume .sub-pane').forEach(p => p.classList.remove('active'));
+        const overviewPane = document.getElementById('sub-resume-overview');
+        if (!overviewPane) return;
+        overviewPane.classList.add('active');
+        overviewPane.innerHTML = `<div class="empty-state">
+                    <i class="fas fa-file-alt empty-state-icon"></i>
+                    <p class="empty-state-title">Resume Tips</p>
+                    <p class="empty-state-desc">Get targeted resume improvements, ATS keyword optimization, and formatting advice for this specific role.</p>
+                    ${currentSessionId ? `<button class="regen-btn" id="generateResumeBtn">
+                        <span class="spinner"></span>
+                        <span class="btn-text">Generate Resume Tips</span>
+                    </button>` : ''}
+                </div>`;
+        const genBtn2 = /** @type {HTMLButtonElement|null} */ (document.getElementById('generateResumeBtn'));
+        if (genBtn2) genBtn2.addEventListener('click', () => generateSingle('resume', genBtn2));
+    }
+
     /** @param {any} resume */
     function renderResumeTips(resume) {
+        if (_resumeTipsHasFailure(resume)) {
+            _renderResumeTipsEmptyState();
+            return;
+        }
+
         const advice = resume.comprehensive_advice || resume;
         const quickWins = ensureArray(advice.quick_wins || resume.quick_wins);
         const strategic = advice.strategic_assessment || resume.strategic_assessment || {};
@@ -1263,30 +1303,6 @@
         const rolesToMinimize = ensureArray(expOpt.roles_to_minimize);
 
         const subTabsEl = /** @type {HTMLElement|null} */ (document.querySelector('.sub-tabs[data-parent="resume"]'));
-
-        if (!resume || Object.keys(resume).length === 0 || resume.error) {
-            if (subTabsEl) subTabsEl.style.display = 'none';
-            document.querySelectorAll('#pane-resume .sub-pane').forEach(p => p.classList.remove('active'));
-            const overviewPane = document.getElementById('sub-resume-overview');
-            if (overviewPane) {
-                overviewPane.classList.add('active');
-                const resumeErrMsg = resume?.error_message || '';
-                overviewPane.innerHTML = resumeErrMsg
-                    ? `<div class="empty-state"><i class="fas fa-file-alt"></i><p>${escapeHtml(resumeErrMsg)}</p></div>`
-                    : `<div class="empty-state">
-                    <i class="fas fa-file-alt empty-state-icon"></i>
-                    <p class="empty-state-title">Resume Tips</p>
-                    <p class="empty-state-desc">Get targeted resume improvements, ATS keyword optimization, and formatting advice for this specific role.</p>
-                    ${currentSessionId ? `<button class="regen-btn" id="generateResumeBtn">
-                        <span class="spinner"></span>
-                        <span class="btn-text">Generate Resume Tips</span>
-                    </button>` : ''}
-                </div>`;
-                const genBtn2 = /** @type {HTMLButtonElement|null} */ (document.getElementById('generateResumeBtn'));
-                if (genBtn2) genBtn2.addEventListener('click', () => generateSingle('resume', genBtn2));
-            }
-            return;
-        }
 
         if (subTabsEl) subTabsEl.style.display = '';
 
@@ -2101,6 +2117,61 @@
     }
 
     /**
+     * Shorten noisy Gemini quota / rate-limit errors for toasts (matches dashboard-home.js).
+     * @param {string} raw
+     * @returns {string}
+     */
+    function formatWorkflowFailureDetail(raw) {
+        if (raw == null || typeof raw !== 'string') return '';
+        let s = raw.trim();
+        if (!s) return '';
+        s = s.replace(/^\[[^\]]+\]\s*/u, '').trim();
+        if (!s) return '';
+        const upper = s.toUpperCase();
+        const low = s.toLowerCase();
+        if (upper.includes('RESOURCE_EXHAUSTED')) {
+            return 'The AI quota or rate limit for the configured API key was reached. Try again in a little while, review your plan and quotas for that key, or update your key under Settings \u2192 AI Setup.';
+        }
+        if (s.includes('429') && (low.includes('quota') || low.includes('exceeded your current quota'))) {
+            return 'The AI quota or rate limit for the configured API key was reached. Try again in a little while, review your plan and quotas for that key, or update your key under Settings \u2192 AI Setup.';
+        }
+        if (low.includes('free_tier') && low.includes('quota')) {
+            return 'The AI quota or rate limit for the configured API key was reached. Try again in a little while, review your plan and quotas for that key, or update your key under Settings \u2192 AI Setup.';
+        }
+        return decodeEntities(s);
+    }
+
+    /**
+     * @param {any} errData
+     * @param {string} fallback
+     * @returns {string}
+     */
+    function apiErrorMessage(errData, fallback) {
+        if (!errData || typeof errData !== 'object') return fallback;
+        const raw = typeof errData.message === 'string'
+            ? errData.message
+            : (typeof errData.detail === 'string' ? errData.detail : '');
+        if (raw.trim()) {
+            const formatted = formatWorkflowFailureDetail(raw);
+            return formatted || decodeEntities(raw.trim());
+        }
+        return fallback;
+    }
+
+    /**
+     * @param {string[]|undefined|null} errorMessages
+     * @param {string} fallback
+     * @returns {string}
+     */
+    function workflowFailureMessage(errorMessages, fallback) {
+        if (Array.isArray(errorMessages) && errorMessages.length > 0) {
+            const formatted = formatWorkflowFailureDetail(String(errorMessages[0] || ''));
+            if (formatted) return formatted;
+        }
+        return fallback;
+    }
+
+    /**
      * @param {string} message
      * @param {string} [type]
      */
@@ -2108,6 +2179,7 @@
         // @ts-ignore
         const app = window.app;
         const notifType = type === 'success' ? 'success' : 'error';
+        const dismissMs = type === 'success' ? TOAST_DISMISS_MS_SUCCESS : TOAST_DISMISS_MS_ERROR;
         // @ts-ignore
         const bus = window.eventBus; const busEvents = window.BusEvents;
         if (bus && busEvents) {
@@ -2115,12 +2187,15 @@
             bus.emit(evtMap[notifType] ?? busEvents.NOTIFY_INFO, { message });
         }
         if (app && typeof app.showNotification === 'function') {
-            app.showNotification(message, notifType);
+            app.showNotification(message, notifType, dismissMs);
             return;
         }
-        // Fallback: inline toast
+        // Fallback: inline toast (application detail — window.app is not loaded)
         const toast = document.createElement('div');
-        toast.style.cssText = `position:fixed;bottom:20px;right:20px;background:${type === 'success' ? '#10b981' : '#ef4444'};color:white;padding:.75rem 1.25rem;border-radius:8px;z-index:9999;font-size:.85rem;animation:slideIn .3s ease`;
+        const bg = type === 'success' ? '#10b981' : '#ef4444';
+        toast.style.cssText = 'position:fixed;bottom:20px;right:20px;max-width:min(420px,calc(100vw - 2rem));'
+            + 'line-height:1.5;background:' + bg + ';color:white;padding:.75rem 1.25rem;border-radius:8px;'
+            + 'z-index:9999;font-size:.85rem;animation:slideIn .3s ease;box-shadow:0 4px 16px rgba(0,0,0,.35)';
         toast.textContent = message;
         document.body.appendChild(toast);
         if (_toastOutTimer !== null) clearTimeout(_toastOutTimer);
@@ -2129,7 +2204,7 @@
             toast.style.animation = 'slideOut .3s ease';
             _toastRemoveTimer = window.setTimeout(() => { toast.remove(); _toastRemoveTimer = null; }, 300);
             _toastOutTimer = null;
-        }, 2000);
+        }, dismissMs);
     }
 
     /** @param {string|null} paneId */
@@ -2165,21 +2240,42 @@
         const endpoint = which === 'cover'
             ? `${API_BASE}/workflow/regenerate-cover-letter/${currentSessionId}`
             : `${API_BASE}/workflow/regenerate-resume/${currentSessionId}`;
+        const job = applicationData ? (/** @type {Record<string,any>} */ (applicationData))['job_analysis'] || {} : {};
         try {
             const res = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${getAuthToken()}`, 'Content-Type': 'application/json' },
             });
-            if (res.status === 429) { showToast('Rate limit reached. Try again in a few minutes.', 'error'); return; }
+            if (res.status === 429) {
+                const errData = await res.json().catch(() => ({}));
+                showToast(apiErrorMessage(errData, 'Rate limit reached. Try again in a few minutes.'), 'error');
+                if (which === 'resume') {
+                    if (applicationData) (/** @type {Record<string,unknown>} */ (applicationData))['resume_recommendations'] = null;
+                    _renderResumeTipsEmptyState();
+                } else {
+                    if (applicationData) (/** @type {Record<string,unknown>} */ (applicationData))['cover_letter'] = null;
+                    renderCoverLetter({}, job);
+                }
+                return;
+            }
             if (!res.ok) {
                 const errData = await res.json().catch(() => ({}));
-                throw new Error(/** @type {any} */ (errData).message || /** @type {any} */ (errData).detail || 'Generation failed');
+                throw new Error(apiErrorMessage(errData, 'Generation failed'));
             }
             showToast(which === 'cover' ? 'Cover letter generated!' : 'Resume tips generated!');
             loadApplicationData();
         } catch (error) {
             const err = /** @type {Error} */ (error);
-            showToast(err.message || 'Generation failed', 'error');
+            const toastMsg = formatWorkflowFailureDetail(err.message) || err.message || 'Generation failed';
+            showToast(toastMsg, 'error');
+            if (which === 'resume') {
+                if (applicationData) (/** @type {Record<string,unknown>} */ (applicationData))['resume_recommendations'] = null;
+                _renderResumeTipsEmptyState();
+            } else {
+                if (applicationData) (/** @type {Record<string,unknown>} */ (applicationData))['cover_letter'] = null;
+                renderCoverLetter({}, job);
+            }
+        } finally {
             btn.disabled = false;
             btn.classList.remove('loading');
         }
@@ -2209,7 +2305,7 @@
             }
             if (!res.ok) {
                 const errData = await res.json().catch(() => ({}));
-                throw new Error(/** @type {any} */ (errData).message || /** @type {any} */ (errData).detail || 'Failed to continue workflow');
+                throw new Error(apiErrorMessage(errData, 'Failed to continue workflow'));
             }
 
             // Poll until completed or failed
@@ -2236,7 +2332,10 @@
                             return;
                         }
                         if (sd.status === 'failed') {
-                            showToast('Analysis failed. Please try again.', 'error');
+                            showToast(
+                                workflowFailureMessage(sd.error_messages, 'Analysis failed. Please try again.'),
+                                'error'
+                            );
                             _continuingWorkflow = false;
                             if (btn) { btn.disabled = false; btn.classList.remove('loading'); }
                             return;
@@ -2275,11 +2374,15 @@
             });
 
             if (res.status === 429) {
-                showToast('Rate limit reached. Try again in a few minutes.', 'error');
+                const errData = await res.json().catch(() => ({}));
+                showToast(apiErrorMessage(errData, 'Rate limit reached. Try again in a few minutes.'), 'error');
                 return;
             }
 
-            if (!res.ok) throw new Error('Failed to regenerate');
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(apiErrorMessage(errData, 'Failed to regenerate cover letter'));
+            }
 
             const data = await res.json();
             const newLetter = data.cover_letter?.content || data.cover_letter?.cover_letter_text || '';
@@ -2294,7 +2397,8 @@
             }
         } catch (error) {
             console.error('Error regenerating:', error);
-            showToast('Failed to regenerate cover letter', 'error');
+            const err = /** @type {Error} */ (error);
+            showToast(err.message || 'Failed to regenerate cover letter', 'error');
         } finally {
             btn.classList.remove('loading');
             btn.disabled = false;
@@ -2320,11 +2424,17 @@
             });
 
             if (res.status === 429) {
-                showToast('Rate limit reached. Try again in a few minutes.', 'error');
+                const errData = await res.json().catch(() => ({}));
+                showToast(apiErrorMessage(errData, 'Rate limit reached. Try again in a few minutes.'), 'error');
+                if (applicationData) (/** @type {Record<string,unknown>} */ (applicationData))['resume_recommendations'] = null;
+                _renderResumeTipsEmptyState();
                 return;
             }
 
-            if (!res.ok) throw new Error('Failed to regenerate');
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(apiErrorMessage(errData, 'Failed to regenerate resume advice'));
+            }
 
             const data = await res.json();
             if (applicationData) (/** @type {Record<string,unknown>} */ (applicationData))['resume_recommendations'] = data.result;
@@ -2332,7 +2442,11 @@
             showToast('Resume advice regenerated!');
         } catch (error) {
             console.error('Error regenerating resume:', error);
-            showToast('Failed to regenerate resume advice', 'error');
+            const err = /** @type {Error} */ (error);
+            const toastMsg = formatWorkflowFailureDetail(err.message) || err.message || 'Failed to regenerate resume advice';
+            showToast(toastMsg, 'error');
+            if (applicationData) (/** @type {Record<string,unknown>} */ (applicationData))['resume_recommendations'] = null;
+            _renderResumeTipsEmptyState();
         } finally {
             btn.classList.remove('loading');
             btn.disabled = false;
@@ -2349,8 +2463,15 @@
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${getAuthToken()}`, 'Content-Type': 'application/json' },
             });
-            if (res.status === 429) { showToast('Rate limit reached. Try again in a few minutes.', 'error'); return; }
-            if (!res.ok) throw new Error('Failed to start generation');
+            if (res.status === 429) {
+                const errData = await res.json().catch(() => ({}));
+                showToast(apiErrorMessage(errData, 'Rate limit reached. Try again in a few minutes.'), 'error');
+                return;
+            }
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(apiErrorMessage(errData, 'Failed to start generation'));
+            }
             showToast('Generating your documents… this may take a minute.');
             // Poll for completion
             let attempts = 0;
@@ -2365,7 +2486,10 @@
                         await loadApplicationData();
                         showToast('Documents generated!');
                     } else if (status.status === 'failed') {
-                        showToast('Generation failed. Please try again.', 'error');
+                        showToast(
+                            workflowFailureMessage(status.error_messages, 'Generation failed. Please try again.'),
+                            'error'
+                        );
                         btns.forEach(b => { b.disabled = false; b.classList.remove('loading'); });
                     } else {
                         setTimeout(poll, 3000);
@@ -2375,7 +2499,8 @@
             setTimeout(poll, 3000);
         } catch (error) {
             console.error('Error generating documents:', error);
-            showToast('Failed to start generation', 'error');
+            const err = /** @type {Error} */ (error);
+            showToast(err.message || 'Failed to start generation', 'error');
             btns.forEach(b => { b.disabled = false; b.classList.remove('loading'); });
         }
     }
@@ -2398,11 +2523,15 @@
             });
 
             if (res.status === 429) {
-                showToast('Rate limit reached. Try again in a few minutes.', 'error');
+                const errData = await res.json().catch(() => ({}));
+                showToast(apiErrorMessage(errData, 'Rate limit reached. Try again in a few minutes.'), 'error');
                 return;
             }
 
-            if (!res.ok) throw new Error('Failed to generate');
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(apiErrorMessage(errData, 'Failed to generate interview preparation'));
+            }
 
             const data = await res.json();
             // Store the interview prep in local data
@@ -2415,7 +2544,8 @@
             showToast('Interview preparation generated!');
         } catch (error) {
             console.error('Error generating interview prep:', error);
-            showToast('Failed to generate interview preparation', 'error');
+            const err = /** @type {Error} */ (error);
+            showToast(err.message || 'Failed to generate interview preparation', 'error');
         } finally {
             btn.classList.remove('loading');
             btn.disabled = false;
@@ -2438,6 +2568,8 @@
     document.head.appendChild(style);
 
     // ---- Public API: functions accessible from inline HTML handlers ----
+    // @ts-ignore
+    window.showApplicationToast = showToast;
     // @ts-ignore
     window.copyCoverLetter = copyCoverLetter;
     // @ts-ignore

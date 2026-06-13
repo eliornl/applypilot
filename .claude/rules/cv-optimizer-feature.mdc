@@ -1,6 +1,6 @@
 ---
-description: CV Optimizer — iterative hiring-manager loop, background task, Redis lock, application detail tab
-globs: agents/cv_optimizer_loop.py,agents/hiring_manager.py,api/cv_optimizer.py,ui/static/js/cv-optimizer.js
+description: CV Optimizer — iterative hiring-manager loop, background task, Redis lock, application detail tab, CV export
+globs: agents/cv_optimizer_loop.py,agents/hiring_manager.py,api/cv_optimizer.py,ui/static/js/cv-optimizer.js,utils/cv_html_normalize.py,utils/cv_docx_export.py,ui/dashboard/application.html
 alwaysApply: false
 ---
 
@@ -15,7 +15,7 @@ Hiring Manager (evaluate) → convergence check → CV Optimizer (revise) → re
 → Cover Letter Finalizer → optimized CV + cover letter + gap analysis
 ```
 
-Loop stops when: score ≥ threshold, max iterations reached, score decreases vs best, or plateau detected.
+Loop stops when: score ≥ threshold, max iterations reached, score decreases vs best, plateau detected, or **API quota/rate limit** (`stop_reason: api_rate_limit`, `status: partial` — saves best progress so far; cover letter skipped if quota hit before it runs).
 
 Initial CV is composed from the user profile via `_compose_cv_from_profile()`. Job description comes from `job_input_data["job_input"]` with fallback to `_synthesize_jd_from_analysis(job_analysis)` when raw paste text is missing.
 
@@ -55,13 +55,13 @@ Background task uses `get_session()`, not `get_database()`. Top-level `except` m
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/v1/cv-optimizer/{session_id}/start` | Start optimization loop (optional `max_iterations` 1–7, `score_threshold` 7.0–9.5) |
+| `POST` | `/api/v1/cv-optimizer/{session_id}/start` | Start optimization loop (optional `max_iterations` 2–7, `score_threshold` 7.0–9.5) |
 | `GET` | `/api/v1/cv-optimizer/{session_id}` | Full result (`has_result`, `result`) |
 | `GET` | `/api/v1/cv-optimizer/{session_id}/status` | Running / completed flags |
-| `GET` | `/api/v1/cv-optimizer/{session_id}/download-cv` | ODT download (LibreOffice headless) |
+| `GET` | `/api/v1/cv-optimizer/{session_id}/download-cv` | Formatted CV download (`.odt` or `.docx`) |
 | `DELETE` | `/api/v1/cv-optimizer/{session_id}` | Clear result (DB + cache); 409 if running |
 
-Rate limits: **5 starts/hour** per user (`{user_id}:cv_optimizer`), **10 ODT downloads/hour** (`{user_id}:cv_optimizer_download`).
+Rate limits: **10 starts/hour** per user (`{user_id}:cv_optimizer`), **10 downloads/hour** (`{user_id}:cv_optimizer_download`). Redis key prefix: `rate_limit:{identifier}` — dev reset: `redis-cli DEL "rate_limit:{user_uuid}:cv_optimizer_download"`.
 
 ## Ownership Before Cache
 
@@ -77,7 +77,7 @@ if not user_api_key and not server_has_key:
     raise no_api_key_error(...)
 ```
 
-Frontend (`cv-optimizer.js`) shows `#cvo-byok-warning` and links to `/dashboard/settings?tab=ai-setup` on `CFG_6001`.
+Frontend (`cv-optimizer.js`) checks `/api/v1/profile/api-key/status` on tab open and shows `#cvo-ai-setup-warning` when no credentials are configured; handles `CFG_6001` on start **and** on download.
 
 ## Persistence
 
@@ -91,26 +91,58 @@ Frontend listens on `window` event `applypilot:ws` (same WS as workflow). Pollin
 
 | WS message type | Meaning |
 |---|---|
-| `cv_optimization_started` | Loop began — show progress UI |
+| `cv_optimization_started` | Loop began — hide `#cvo-setup`, show `#cvo-progress` |
 | `cv_optimization_iteration` | One evaluate/revise cycle — update score + iteration log |
-| `cv_optimization_complete` | Result saved — fetch GET result |
-| `cv_optimization_error` | Failed — show error view |
+| `cv_optimization_complete` | Result saved — fetch GET result, show `#cvo-results` |
+| `cv_optimization_error` | Failed — toast + return to setup |
 
-## Application Detail Tab
+## Application Detail Tab (UI)
 
 8th tab: **Optimize CV** (`data-tab="optimize"`, `#pane-optimize`, `#cvOptimizeContent`).
 
-JS: `ui/static/js/cv-optimizer.js` — `window.initCvOptimizerTab(sessionId)` called from `application-detail.js` when the Optimize tab is activated.
+**Setup state** (`#cvo-setup.cvo-setup-empty`) matches Cover Letter / Resume empty states: centered icon, `empty-state-title` / `empty-state-desc`, config grid, **`regen-btn`** “Start Optimization” (not gradient `btn-primary`). Copy uses full tab width via `--tab-empty-padding-x` (same as other empty tabs).
+
+**Section visibility:** only one of `#cvo-setup`, `#cvo-progress`, `#cvo-results` visible. Toggle with `.is-hidden`. Because `#cvo-setup` uses `display: flex` for layout, **must** include companion rule `#cvo-setup.cvo-setup-empty.is-hidden { display: none; }` (same pattern as `.job-badge.is-hidden` — see `security-middleware.mdc`).
+
+**Partial / quota results:** yellow `#cvo-results-notice` banner explains quota; if `cover_letter` is empty show `#cvo-cover-letter-missing` (dashed stub) — **never** put error text inside `.cover-letter-box` or show fake “0 words / Generated” metadata.
+
+JS: `ui/static/js/cv-optimizer.js` — `window.initCvOptimizerTab(sessionId)` from `application-detail.js` on tab activate. Toasts via `window.showApplicationToast`.
 
 | `data-action` | Handler |
 |---|---|
-| `startCvOptimization` | POST `/start` |
+| `startCvOptimization` | POST `/start` — on success hide setup, show progress |
 | `clearCvOptimization` | DELETE (re-run) |
-| `resetCvOptimization` | Return to setup after error |
 | `copyOptimizedCv` / `copyCvoCoverLetter` | Clipboard |
 | `downloadOptimizedCvOdt` | GET `/download-cv` blob |
 
-Score progression chart: set **`data-score`** on bar elements, then assign `element.style.width` in JS — never `style="width: X%"` in HTML strings (CSP).
+## CV export (`GET /download-cv`)
+
+Converts stored `optimized_cv` markdown to a downloadable file. **End users never install LibreOffice** — conversion runs on the server.
+
+**Primary path (LibreOffice available):**
+
+1. Gemini converts markdown → HTML (`CV_TO_HTML_SYSTEM_CONTEXT` in `api/cv_optimizer.py`)
+2. **`normalize_cv_export_html()`** in `utils/cv_html_normalize.py` — unwrap `<li><p>`, dedupe bullet paragraphs, rename sections (`RELEVANT EXPERIENCE`, `CORE TECHNOLOGIES`), split combined role headings, reorder contact before title, **convert `<ul>/<li>` to `•` paragraphs** (LibreOffice writerweb8 duplicates list items otherwise)
+3. LibreOffice headless (`soffice --headless --convert-to odt`) → **`.odt`**
+4. Docker: `libreoffice-writer` + `fonts-liberation` in Dockerfile
+5. One Gemini call per download (BYOK or server key)
+
+**Fallback path (no LibreOffice, or non-quota conversion failure):**
+
+- `utils/cv_docx_export.py` — `markdown_cv_to_docx_bytes()` via **`python-docx`**
+- Structured résumé layout (name, contact, bullets, skill categories) → **`.docx`**
+
+**Errors:**
+
+- App rate limit / Gemini quota → **`rate_limit_error()` (429, `RATE_4001`)** — frontend shows toast via `_notify()` / `showApplicationToast`; **no** markdown fallback on 429
+- Gemini quota during export re-raised as 429 (not opaque 500)
+- Other export failures on server ≥500 may fall back to downloading `optimized-cv.md` with warning toast
+
+Legacy `utils/cv_odt_export.py` remains for unit tests only.
+
+Implementation: `_export_optimized_cv_file()` in `api/cv_optimizer.py`.
+
+Score progression chart: **`data-score`** + JS width assignment — never inline `style="width: X%"` (CSP).
 
 ## Prerequisite
 
@@ -121,6 +153,8 @@ Score progression chart: set **`data-score`** on bar elements, then assign `elem
 ```bash
 pytest tests/test_api/test_cv_optimizer.py -v
 pytest tests/test_agents/test_cv_optimizer_loop.py -v
+pytest tests/test_cv_html_normalize.py -v
+pytest tests/test_cv_docx_export.py -v
 ```
 
-Ownership-before-cache and cache unwrap regressions live in `tests/test_api/test_cv_optimizer.py`.
+Ownership-before-cache, download rate-limit (429), and Gemini-quota-on-export tests live in `tests/test_api/test_cv_optimizer.py`.

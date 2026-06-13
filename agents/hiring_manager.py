@@ -50,8 +50,9 @@ Step 6: Provide concrete, actionable improvement items (what could be rephrased/
 ## CONSTRAINTS
 - Only evaluate what is written in the CV — do not assume unlisted experience
 - Action items must only suggest rephrasing, reordering, or emphasizing existing content
-- Never suggest fabricating experience, degrees, or skills
-- Be specific: "Quantify the impact of the migration project in the 2022 role" is better than "Add metrics"
+- Never suggest fabricating experience, degrees, skills, or metrics
+- Never suggest changing employment dates or inventing numbers to improve the score
+- Be specific: "Quantify the impact of the migration project in the 2022 role" is better than "Add metrics" — but only when the CV already mentions that project
 """
 
 EVALUATION_PROMPT_TEMPLATE: str = """# CV Evaluation — Iteration {iteration}

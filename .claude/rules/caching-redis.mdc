@@ -151,6 +151,8 @@ response.headers["X-RateLimit-Reset"]     = str(result.reset_seconds)
 | Career tools (most) | `POST /tools/…` | 10/hour | user_id |
 | Salary coach | `POST /tools/salary-coach` | 5/hour | user_id |
 | Interview prep generate | `POST /interview-prep/{id}/generate` | 5/hour | user_id |
+| CV optimizer start | `POST /cv-optimizer/{id}/start` | 10/hour | `{user_id}:cv_optimizer` |
+| CV optimizer CV download | `GET /cv-optimizer/{id}/download-cv` | 10/hour | `{user_id}:cv_optimizer_download` |
 | BYOK API key validate | `POST /profile/api-key/validate` | 10/hour | user_id |
 | Delete account | `DELETE /profile/delete-account` | 3/hour | user_id |
 | Clear data | `DELETE /profile/clear-data` | 5/hour | user_id |
