@@ -134,10 +134,13 @@ class TestRegistration:
 
     @pytest.mark.asyncio
     async def test_register_rate_limited_returns_429(self):
+        import api.auth as _auth_module
+
         payload = _reg_payload("_rl")
-        with patch("api.auth.check_rate_limit", AsyncMock(return_value=(False, 0))):
-            async with _make_client() as client:
-                resp = await client.post(f"{BASE}/register", json=payload)
+        with patch.object(_auth_module.settings, "testing", False):
+            with patch("api.auth.check_rate_limit", AsyncMock(return_value=(False, 0))):
+                async with _make_client() as client:
+                    resp = await client.post(f"{BASE}/register", json=payload)
         assert resp.status_code == 429
 
 

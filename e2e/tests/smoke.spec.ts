@@ -123,7 +123,7 @@ test.describe('Smoke Tests', () => {
   });
 
   test.describe('Dashboard & Navigation', () => {
-    test.describe.configure({ timeout: 60000 });
+    test.describe.configure({ mode: 'serial', timeout: 60000 });
     let page: any;
     
     test.beforeAll(async ({ browser }) => {
@@ -167,21 +167,31 @@ test.describe('Smoke Tests', () => {
     });
 
     test('can navigate to new application', async () => {
-      await page.click('a[href*="new-application"], button:has-text("New"), button:has-text("Analyze")');
+      await page.goto('/dashboard');
+      await page.waitForLoadState('domcontentloaded');
+      const link = page.locator('a.action-btn[href="/dashboard/new-application"]');
+      await expect(link).toBeVisible({ timeout: 10000 });
+      await link.click();
       await page.waitForURL(/new-application/, { timeout: 10000 });
       expect(page.url()).toContain('new-application');
-      await page.goBack();
     });
 
     test('can navigate to career tools', async () => {
-      await page.click('a[href*="tools"], button:has-text("Tools")');
+      await page.goto('/dashboard');
+      await page.waitForLoadState('domcontentloaded');
+      const link = page.locator('a.action-btn[href="/dashboard/tools"]');
+      await expect(link).toBeVisible({ timeout: 10000 });
+      await link.click();
       await page.waitForURL(/tools/, { timeout: 10000 });
       expect(page.url()).toContain('tools');
-      await page.goBack();
     });
 
     test('can navigate to settings', async () => {
-      await page.click('a[href*="settings"], button:has-text("Settings")');
+      await page.goto('/dashboard');
+      await page.waitForLoadState('domcontentloaded');
+      const link = page.locator('a.nav-btn[href="/dashboard/settings"]');
+      await expect(link).toBeVisible({ timeout: 10000 });
+      await link.click();
       await page.waitForURL(/settings/, { timeout: 10000 });
       expect(page.url()).toContain('settings');
     });
