@@ -9,10 +9,13 @@ from typing import Optional
 import typer
 
 from cli import __version__
+from cli.admin_visibility import admin_help_visible
+from cli.commands.admin import admin_app
 from cli.commands.applications import apps_app
 from cli.commands.auth import auth_app
 from cli.commands.cv import cv_app
 from cli.commands.doctor import doctor_app
+from cli.commands.extension import extension_app
 from cli.commands.interview import interview_app
 from cli.commands.profile import profile_app
 from cli.commands.tools import tools_app
@@ -73,6 +76,10 @@ app.add_typer(apps_app, name="apps")
 app.add_typer(interview_app, name="interview")
 app.add_typer(cv_app, name="cv")
 app.add_typer(tools_app, name="tools")
+app.add_typer(extension_app, name="extension")
+
+_admin_help_visible = admin_help_visible()
+app.add_typer(admin_app, name="admin", hidden=not _admin_help_visible)
 
 
 def main() -> None:

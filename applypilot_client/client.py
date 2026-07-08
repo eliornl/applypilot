@@ -297,3 +297,17 @@ class ApplyPilotClient:
         from applypilot_client.resources.tools import ToolsResource
 
         return ToolsResource(self)
+
+    @property
+    def extension(self):
+        """Chrome extension API resource."""
+        from applypilot_client.resources.extension import ExtensionResource
+
+        return ExtensionResource(self)
+
+    @property
+    def admin(self):
+        """Admin and monitoring API resource."""
+        from applypilot_client.resources.admin import AdminResource
+
+        return AdminResource(self)
