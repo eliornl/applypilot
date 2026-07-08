@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status, Response
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from utils.logging_config import get_structured_logger, mask_email, sanitize_log_value
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, case, or_, exists
@@ -197,17 +197,19 @@ class ApplicationStatsResponse(BaseModel):
     )
 
 
+def _validate_application_status(v: str) -> str:
+    valid_statuses = [s.value for s in ApplicationStatus]
+    if v not in valid_statuses:
+        raise ValueError(f"Invalid status. Must be one of: {valid_statuses}")
+    return v
+
+
 class StatusUpdateRequest(BaseModel):
     """Request model for application status updates."""
 
     new_status: str = Field(..., description="New application status")
 
-    @validator("new_status")
-    def validate_status(cls, v):
-        valid_statuses = [s.value for s in ApplicationStatus]
-        if v not in valid_statuses:
-            raise ValueError(f"Invalid status. Must be one of: {valid_statuses}")
-        return v
+    validate_status = field_validator("new_status")(_validate_application_status)
 
 
 class NotesUpdateRequest(BaseModel):

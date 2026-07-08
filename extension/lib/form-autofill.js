@@ -2083,9 +2083,8 @@
 
   function decodeHtmlEntities(str) {
     if (str == null) return '';
-    var textarea = document.createElement('textarea');
-    textarea.innerHTML = String(str);
-    return textarea.value;
+    var doc = new DOMParser().parseFromString(String(str), 'text/html');
+    return doc.documentElement.textContent || '';
   }
 
   function setNativeValue(el, value) {

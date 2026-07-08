@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-import utils.llm_client as llm_mod
 from utils.llm_client import (
     GeminiClient,
     GeminiError,
@@ -205,7 +204,10 @@ async def test_close_gemini_client() -> None:
         )
         await get_gemini_client()
         await close_gemini_client()
-        assert llm_mod._gemini_client is None
+        import importlib
+
+        llm_client_module = importlib.import_module("utils.llm_client")
+        assert llm_client_module._gemini_client is None
 
 
 def test_text_indicates_gemini_quota_empty() -> None:
