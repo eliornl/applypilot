@@ -61,3 +61,19 @@ def test_format_all_includes_errors() -> None:
     )
     assert "## Errors" in text
     assert "Job analyzer failed" in text
+
+
+def test_format_company_section() -> None:
+    text = format_workflow_results(
+        {
+            "session_id": "abc",
+            "status": "completed",
+            "company_research": {
+                "company_name": "Acme Corp",
+                "company_overview": "A leading builder of tools.",
+            },
+        },
+        section="company",
+    )
+    assert "## Company Research" in text
+    assert "Acme Corp" in text

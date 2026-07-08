@@ -93,7 +93,7 @@ jobs:
         run: |
           pytest tests/test_agents/ tests/test_api/ tests/test_utils/ tests/test_workflows/ \
             tests/test_cv_html_normalize.py tests/test_cv_docx_export.py tests/test_cv_odt_export.py \
-            tests/test_gemini_api_key_format.py tests/test_security.py \
+            tests/test_gemini_api_key_format.py tests/test_security.py tests/test_cli_integration/ \
             -v --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml \
             --cov-config=.coveragerc --cov-fail-under=97 --override-ini="addopts="
 

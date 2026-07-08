@@ -6,9 +6,23 @@ alwaysApply: false
 
 # Python Testing
 
-**Approximate counts (CI suites):** ~227 agent unit tests in `tests/test_agents/`, ~221 API integration tests in `tests/test_api/` (run with `--override-ini="addopts="`).
+**Approximate counts (CI suites):** ~227 agent unit tests in `tests/test_agents/`, ~221 API integration tests in `tests/test_api/`, **328** mocked CLI tests in `tests/test_cli/`, **5** ASGI CLI integration tests in `tests/test_cli_integration/` (run with `--override-ini="addopts="`).
 
 ## Test Suites
+
+### CLI Tests (`tests/test_cli/`)
+Typer `CliRunner` + mocked `ApplyPilotClient` — no running server required.
+```bash
+make cli-test
+# or:
+pip install -e ".[cli]" && pytest tests/test_cli/ -v --override-ini="addopts="
+```
+
+### CLI ASGI Integration (`tests/test_cli_integration/`)
+Real FastAPI app + Postgres (same stack as `test_api/`). Run locally with `DATABASE_URL` set, or in CI `python-tests` job.
+```bash
+pytest tests/test_cli_integration/ -v --override-ini="addopts="
+```
 
 ### Unit Tests (`tests/test_agents/`)
 Pure pytest, fully mocked LLM clients, no network required.

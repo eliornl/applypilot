@@ -4,6 +4,8 @@ Command-line client for a running ApplyPilot server. Full API parity for auth, p
 
 **Implementation plan:** [cli-implementation-plan.md](./cli-implementation-plan.md)
 
+**Status:** Implemented on branch `feature/cli` — 88 leaf commands, 328 mocked CLI tests + 5 ASGI integration tests.
+
 ---
 
 ## Install
@@ -64,6 +66,14 @@ applypilot --show-completion
 
 ---
 
+## `version`
+
+| Command | Description |
+|---------|-------------|
+| `version` | Print package version (`0.0.0` until release tagging) |
+
+---
+
 ## `doctor`
 
 | Command | API / action |
@@ -81,14 +91,14 @@ applypilot doctor --format json
 
 | Command | API |
 |---------|-----|
-| `auth login [--email]` | `POST /api/v1/auth/login` |
+| `auth login [--email] [--remember-me]` | `POST /api/v1/auth/login` |
 | `auth logout` | `POST /api/v1/auth/logout` + clear local credentials |
 | `auth whoami` | `GET /api/v1/auth/verify` |
 | `auth refresh` | `POST /api/v1/auth/refresh` |
 | `auth register` | `POST /api/v1/auth/register` (does **not** save JWT) |
-| `auth verify-code CODE` | `POST /api/v1/auth/verify-code` (saves JWT) |
+| `auth verify-code --email EMAIL --code CODE` | `POST /api/v1/auth/verify-code` (saves JWT) |
 | `auth change-password` | `PUT /api/v1/auth/change-password` |
-| `auth token set` | Local only (stdin or paste) |
+| `auth token set [--token TOKEN] [--from-stdin]` | Local only (paste, getpass, or stdin) |
 | `auth token show` | Local only (masked) |
 | `auth email-status` | `GET /api/v1/auth/email-status` |
 | `auth resend-verification` | `POST /api/v1/auth/resend-verification` |
@@ -114,13 +124,15 @@ Google OAuth users: log in via the browser, then `applypilot auth token set`.
 | `profile set notifications` | `PUT /api/v1/profile/notifications` |
 | `profile resume upload FILE` | `POST /api/v1/profile/parse-resume` (10 MB max) |
 | `profile resume show` | `GET /api/v1/profile/resume` |
-| `profile resume delete --confirm` | `DELETE /api/v1/profile/resume` |
+| `profile resume delete` | `DELETE /api/v1/profile/resume` |
 | `profile api-key status` | `GET /api/v1/profile/api-key/status` |
 | `profile api-key set` | `POST /api/v1/profile/api-key` |
-| `profile api-key delete --confirm` | `DELETE /api/v1/profile/api-key` |
+| `profile api-key delete` | `DELETE /api/v1/profile/api-key` |
 | `profile api-key validate` | `POST /api/v1/profile/api-key/validate` |
 | `profile workflow-preferences show` | `GET /api/v1/profile/preferences` |
-| `profile workflow-preferences set --file` | `PATCH /api/v1/profile/preferences` |
+| `profile workflow-preferences set` | `PATCH /api/v1/profile/preferences` |
+
+**Workflow preferences flags:** `--file`, `--gate-threshold`, `--auto-generate-documents` / `--no-auto-generate-documents`, `--cover-letter-tone`, `--resume-length`, `--preferred-model`
 | `profile export [--out FILE]` | `GET /api/v1/profile/export` |
 | `profile clear-data --confirm` | `DELETE /api/v1/profile/clear-data` |
 | `profile delete-account --confirm` | `DELETE /api/v1/profile/delete-account` |
@@ -137,6 +149,9 @@ JSON sections accept `--file path.json` or `--file -` (stdin).
 | `workflow analyze job.txt` | same (file contents) |
 | `workflow analyze --upload job.pdf` | multipart `job_file` (`.pdf`, `.txt`, `.docx`; 5 MB) |
 | `workflow analyze --url URL` | optional posting URL metadata (not fetched) |
+| `workflow analyze --source-url URL` | source page URL (extension parity) |
+| `workflow analyze --title TITLE` | optional detected job title |
+| `workflow analyze --company COMPANY` | optional detected company name |
 | `workflow status SESSION` | `GET /api/v1/workflow/status/{id}` |
 | `workflow results SESSION` | `GET /api/v1/workflow/results/{id}` |
 | `workflow history` | `GET /api/v1/workflow/history` |
@@ -144,8 +159,11 @@ JSON sections accept `--file path.json` or `--file -` (stdin).
 | `workflow generate-documents SESSION` | `POST /api/v1/workflow/generate-documents/{id}` |
 | `workflow regenerate cover-letter SESSION` | `POST .../regenerate-cover-letter/{id}` |
 | `workflow regenerate resume SESSION` | `POST .../regenerate-resume/{id}` |
+| `workflow generate-interview-prep SESSION` | `POST .../generate-interview-prep/{id}` (legacy — prefer `interview generate`) |
 
 **Analyze flags:** `--wait`, `--section cover-letter|resume|fit|company|all`, `--open`
+
+**History filters:** `--page`, `--per-page`, `--status`, `--sort`
 
 **Polling stops at:** `completed`, `failed`, `awaiting_confirmation`, `analysis_complete`
 
@@ -267,7 +285,7 @@ applypilot tools salary-coach --file offer.json --format json
 - Server must be running (`make start-local` or Docker)
 - Login once: `applypilot auth login` or `auth token set`
 - Global flags go **before** subcommands
-- Destructive commands need `--confirm`
+- Destructive commands need `--confirm` (account/data/application deletes; not resume or API-key delete)
 - `422 CFG_6001` → user needs API key (`profile api-key set` or server key)
 
 ---
@@ -275,8 +293,9 @@ applypilot tools salary-coach --file offer.json --format json
 ## Testing
 
 ```bash
-make cli-test                              # pytest tests/test_cli/
+make cli-test                              # pytest tests/test_cli/ (328 tests)
+pytest tests/test_cli_integration/ -v      # ASGI integration (5 tests; needs Postgres)
 ./scripts/cli_smoke.sh                     # optional live server smoke
 ```
 
-CI runs `pytest tests/test_cli/ -v` on every push/PR.
+CI: `cli-tests` job runs mocked suite; `python-tests` job also runs `tests/test_cli_integration/`.

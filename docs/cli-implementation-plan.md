@@ -1,6 +1,6 @@
 # ApplyPilot CLI — Implementation Plan
 
-**Status:** Final (audited against full repo 2026-07-08)  
+**Status:** Implemented (Phases 0–9 complete on `feature/cli`, 2026-07-08)  
 **Last updated:** 2026-07-08  
 **Audience:** Engineers implementing the CLI and reviewers signing off each phase  
 
@@ -39,7 +39,7 @@ Build a **full-parity CLI** for ApplyPilot that talks to the existing FastAPI se
 | Safe defaults | Destructive commands require `--confirm` or an interactive Typer/Click confirmation prompt. |
 | Two output modes | `--format human` (default) and `--format json` (machine-readable for AI agents). |
 | Long jobs poll | `--wait` blocks with progress until a **stop state** (see §5.5 workflow statuses). |
-| Config on disk | `~/.applypilot/config.toml` + `~/.applypilot/credentials` (mode `0600`). |
+| Config on disk | `~/.applypilot/config.toml` + `~/.applypilot/credentials.json` (mode `0600`). |
 | No secrets in logs | Never print JWT, BYOK keys, or passwords except masked. |
 
 ---
@@ -178,7 +178,7 @@ poll_timeout_seconds = 600
 
 Override per invocation: `applypilot --base-url https://... workflow analyze ...`
 
-### 4.2 Credentials — `~/.applypilot/credentials`
+### 4.2 Credentials — `~/.applypilot/credentials.json`
 
 ```json
 {
@@ -756,13 +756,14 @@ Reuse patterns from `tests/test_api/test_career_tools.py` for fixture payloads.
 **Goal:** Ship-ready CLI for contributors and Claude Code users.
 
 **Deliverables:**
-- [ ] `docs/cli-reference.md` — full command reference
-- [ ] `USER_GUIDE.md` — new "CLI" section
-- [ ] `README.md` — Quick Start CLI block
-- [ ] Shell completion: `applypilot --install-completion`
-- [ ] CI job: `pytest tests/test_cli/ -v`
-- [ ] `CHANGELOG.md` entry
-- [ ] `.cursor/rules/cli.mdc` — conventions for future CLI changes
+- [x] `docs/cli-reference.md` — full command reference
+- [x] `USER_GUIDE.md` — new "CLI" section
+- [x] `README.md` — Quick Start CLI block
+- [x] Shell completion: `applypilot --install-completion`
+- [x] CI job: `pytest tests/test_cli/ -v`
+- [x] `CHANGELOG.md` entry
+- [x] `.cursor/rules/cli.mdc` — conventions for future CLI changes
+- [x] Expanded test suite: 328 mocked CLI tests + 5 ASGI integration tests (`tests/test_cli_integration/`)
 
 **Tests:**
 
@@ -779,10 +780,10 @@ Optional live smoke (manual / nightly):
 ```
 
 **Code review checklist (final):**
-- [ ] Full command tree matches Section 5
-- [ ] All test_cli files pass in CI
-- [ ] No duplicate HTTP logic between commands (everything through client)
-- [ ] Security review: credentials, confirm flags, no shell injection in `--file` paths
+- [x] Full command tree matches Section 5
+- [x] All test_cli files pass in CI
+- [x] No duplicate HTTP logic between commands (everything through client)
+- [x] Security review: credentials, confirm flags, no shell injection in `--file` paths
 
 **Exit criteria:** New user can follow README CLI section end-to-end.
 
