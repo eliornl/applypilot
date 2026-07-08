@@ -1,4 +1,4 @@
-.PHONY: start start-d start-local stop-local setup dev test lint clean build-frontend \
+.PHONY: start start-d start-local stop-local setup dev test cli-test lint clean build-frontend \
         docker-build docker-up docker-up-d docker-down docker-logs docker-reset \
         _create_env _create_env_system _macos_sign_venv _macos_sign_node _ensure_docker
 
@@ -241,6 +241,10 @@ command.current(cfg, verbose=True);"
 # Run unit tests
 test:
 	$(PYTHON) -m pytest tests/ -v
+
+cli-test:
+	$(PIP) install -e ".[cli]" -q
+	$(PYTHON) -m pytest tests/test_cli/ -v --override-ini="addopts="
 
 # Run linter
 lint:
