@@ -14,5 +14,8 @@
   "js/dashboard.js": "src/pages/dashboard.ts",
   "js/dashboard-new-application.js": "src/pages/dashboard-new-application.ts",
   "js/navbar-notifications.js": "src/pages/navbar-notifications.ts",
-  "js/profile-completion-sync.js": "src/pages/profile-completion-sync.ts"
+  "js/profile-completion-sync.js": "src/pages/profile-completion-sync.ts",
+  "js/dashboard-settings.js": "src/pages/dashboard-settings.ts",
+  "js/dashboard-tools.js": "src/pages/dashboard-tools.ts",
+  "js/dashboard-interview-prep.js": "src/pages/dashboard-interview-prep.ts"
 }
