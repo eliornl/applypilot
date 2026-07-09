@@ -17,5 +17,7 @@
   "js/profile-completion-sync.js": "src/pages/profile-completion-sync.ts",
   "js/dashboard-settings.js": "src/pages/dashboard-settings.ts",
   "js/dashboard-tools.js": "src/pages/dashboard-tools.ts",
-  "js/dashboard-interview-prep.js": "src/pages/dashboard-interview-prep.ts"
+  "js/dashboard-interview-prep.js": "src/pages/dashboard-interview-prep.ts",
+  "js/application-detail.js": "src/pages/application-detail.ts",
+  "js/cv-optimizer.js": "src/pages/cv-optimizer.ts"
 }

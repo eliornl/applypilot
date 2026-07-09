@@ -1,4 +1,9 @@
 /**
+ * Migrated from ui/static/js/cv-optimizer.js
+ * Behavior preserved 1:1. Typed gradually; @ts-nocheck until fully annotated.
+ */
+// @ts-nocheck
+/**
  * CV Optimization Loop — tab logic for the application detail page.
  *
  * Handles the "Optimize CV" 9th tab: start/poll/render the iterative
