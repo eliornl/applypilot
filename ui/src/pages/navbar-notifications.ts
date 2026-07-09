@@ -1,4 +1,9 @@
 /**
+ * Migrated from ui/static/js/navbar-notifications.js
+ * Behavior preserved 1:1. Typed gradually; @ts-nocheck until fully annotated.
+ */
+// @ts-nocheck
+/**
  * navbar-notifications.js
  *
  * Cross-page analysis completion notifications for dashboard subpages.

@@ -1,4 +1,9 @@
 /**
+ * Migrated from ui/static/js/profile-completion-sync.js
+ * Behavior preserved 1:1. Typed gradually; @ts-nocheck until fully annotated.
+ */
+// @ts-nocheck
+/**
  * @fileoverview Sync localStorage profile_completed from GET /api/v1/profile/.
  *
  * Dashboard pages must not redirect using stale localStorage alone (e.g. after

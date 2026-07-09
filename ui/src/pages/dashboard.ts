@@ -1,4 +1,9 @@
 /**
+ * Migrated from ui/static/js/dashboard.js
+ * Behavior preserved 1:1. Typed gradually; @ts-nocheck until fully annotated.
+ */
+// @ts-nocheck
+/**
  * @fileoverview ApplyPilot - Dashboard JavaScript
  * Handles workflow management, AI processing, and dashboard interactions.
  * 

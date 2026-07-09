@@ -9,5 +9,10 @@
   "js/landing.js": "src/pages/landing.ts",
   "js/analytics.js": "src/pages/analytics.ts",
   "js/cookie-consent.js": "src/pages/cookie-consent.ts",
-  "js/onboarding.js": "src/pages/onboarding.ts"
+  "js/onboarding.js": "src/pages/onboarding.ts",
+  "js/dashboard-home.js": "src/pages/dashboard-home.ts",
+  "js/dashboard.js": "src/pages/dashboard.ts",
+  "js/dashboard-new-application.js": "src/pages/dashboard-new-application.ts",
+  "js/navbar-notifications.js": "src/pages/navbar-notifications.ts",
+  "js/profile-completion-sync.js": "src/pages/profile-completion-sync.ts"
 }
