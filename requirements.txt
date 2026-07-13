@@ -5,7 +5,7 @@ alembic==1.14.0
 annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.14.1
-asyncpg==0.30.0
+asyncpg==0.31.0
 attrs==26.1.0
 bcrypt==4.3.0
 beautifulsoup4==4.15.0
