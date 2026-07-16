@@ -165,7 +165,7 @@
             /* Page Tabs - Navigation */
             .page-tabs {
                 display: grid;
-                grid-template-columns: repeat(9, minmax(0, 1fr));
+                grid-template-columns: repeat(10, minmax(0, 1fr));
                 margin-bottom: 0;
                 background: var(--bg-secondary);
                 border-left: 1px solid var(--border-color);
@@ -179,17 +179,17 @@
             .page-tab {
                 width: 100%;
                 min-width: 0;
-                padding: 0.75rem 1rem;
+                padding: 0.65rem 0.35rem;
                 background: var(--bg-secondary);
                 border: none;
                 color: var(--text-muted);
-                font-size: 0.78rem;
+                font-size: 0.7rem;
                 font-weight: 500;
                 cursor: pointer;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                gap: 0.4rem;
+                gap: 0.25rem;
                 transition: all 0.2s;
                 border-bottom: 3px solid transparent;
                 position: relative;
@@ -198,6 +198,8 @@
 
             .page-tab span {
                 text-align: center;
+                overflow: hidden;
+                text-overflow: ellipsis;
             }
 
             .page-tab:not(:last-child) {
@@ -217,7 +219,8 @@
             }
 
             .page-tab i {
-                font-size: 0.9rem;
+                font-size: 0.75rem;
+                flex-shrink: 0;
             }
 
             /* Tab Content Area */
@@ -3459,6 +3462,22 @@
                 display: none;
             }
 
+            /* With 10 tabs, hide labels earlier than other mobile rules */
+            @media (max-width: 992px) {
+                .page-tab {
+                    padding: 0.7rem 0.5rem;
+                    gap: 0;
+                }
+
+                .page-tab span {
+                    display: none;
+                }
+
+                .page-tab i {
+                    font-size: 0.85rem;
+                }
+            }
+
             /* Responsive */
             @media (max-width: 768px) {
                 :root {
@@ -3485,10 +3504,6 @@
                     padding: 0.7rem 0.65rem;
                     font-size: 0.75rem;
                     gap: 0.3rem;
-                }
-
-                .page-tab span {
-                    display: none;
                 }
 
                 .tab-pane {
@@ -4203,6 +4218,230 @@
                 padding: 0.25rem 0 1rem;
             }
 
+            /* ── Hiring Outreach ──────────────────────────────────────── */
+
+            .ho-section { margin-top: 0; }
+
+            #ho-setup.ho-setup-empty.is-hidden,
+            #ho-progress.is-hidden,
+            #ho-results.is-hidden {
+                display: none;
+            }
+
+            #ho-setup.ho-setup-empty {
+                text-align: center;
+                padding: 3rem var(--tab-empty-padding-x);
+                min-height: var(--tab-empty-min-height);
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+            }
+
+            .ho-setup-note {
+                font-size: 0.85rem;
+                color: var(--text-muted);
+                line-height: 1.6;
+                max-width: 420px;
+                margin: 0.5rem 0 0;
+            }
+
+            .ho-setup-empty .ho-ai-setup-warning {
+                max-width: 420px;
+                width: 100%;
+                text-align: left;
+                margin-top: 1.25rem;
+            }
+
+            .ho-ai-setup-warning.is-hidden {
+                display: none;
+            }
+
+            .ho-setup-empty .ho-generate-btn {
+                margin-top: 1.25rem;
+            }
+
+            #ho-progress {
+                padding: 0.25rem 0 1rem;
+            }
+
+            .ho-progress-banner {
+                margin-bottom: 0;
+            }
+
+            #ho-results {
+                padding: 0.25rem 0 1rem;
+            }
+
+            .ho-results-header {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 1rem;
+                margin-bottom: 1rem;
+            }
+
+            .ho-results-banner {
+                flex: 1;
+                min-width: 200px;
+            }
+
+            .ho-results-header .regen-btn {
+                flex-shrink: 0;
+            }
+
+            .ho-summary {
+                font-size: 0.95rem;
+                color: var(--text-secondary);
+                line-height: 1.7;
+                margin: 0;
+            }
+
+            .ho-contacts {
+                display: flex;
+                flex-direction: column;
+                gap: 1.25rem;
+            }
+
+            .ho-contact-card {
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-lg);
+                padding: 1.25rem;
+                background: var(--bg-card, var(--bg-secondary));
+            }
+
+            .ho-contact-header {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 0.75rem;
+                margin-bottom: 0.5rem;
+            }
+
+            .ho-contact-name {
+                font-size: 1rem;
+                font-weight: 600;
+                color: var(--text-primary);
+                margin: 0 0 0.15rem;
+            }
+
+            .ho-contact-title {
+                font-size: 0.85rem;
+                color: var(--text-muted);
+                margin: 0;
+            }
+
+            .ho-contact-badges {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.4rem;
+                justify-content: flex-end;
+            }
+
+            .ho-contact-insights {
+                margin: 0.5rem 0 0.85rem;
+                border: none;
+            }
+
+            .ho-contact-insights > summary {
+                list-style: none;
+                cursor: pointer;
+                font-size: 0.8rem;
+                font-weight: 500;
+                color: var(--text-muted);
+                user-select: none;
+            }
+
+            .ho-contact-insights > summary::-webkit-details-marker {
+                display: none;
+            }
+
+            .ho-contact-insights > summary:hover {
+                color: var(--text-primary);
+            }
+
+            .ho-contact-insights > summary::before {
+                content: '›';
+                display: inline-block;
+                margin-right: 0.35rem;
+                font-size: 0.95rem;
+                line-height: 1;
+                transition: transform 0.15s ease;
+            }
+
+            .ho-contact-insights[open] > summary::before {
+                transform: rotate(90deg);
+            }
+
+            .ho-contact-insights-body {
+                margin-top: 0.5rem;
+                padding: 0.65rem 0.75rem;
+                border-left: 3px solid var(--accent-primary);
+                background: var(--bg-secondary);
+                border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            }
+
+            .ho-contact-meta {
+                font-size: 0.85rem;
+                color: var(--text-secondary);
+                line-height: 1.6;
+                margin: 0 0 0.5rem;
+            }
+
+            .ho-contact-meta:last-child {
+                margin-bottom: 0;
+            }
+
+            .ho-contact-meta-label {
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+
+            .ho-draft-block {
+                margin-top: 0.85rem;
+            }
+
+            .ho-draft-block .section-title {
+                margin-bottom: 0.5rem;
+                font-size: 0.9rem;
+                padding-bottom: 0.5rem;
+            }
+
+            .ho-draft-block .cover-letter-body {
+                padding: 1.25rem 1.5rem;
+                font-size: 0.88rem;
+                line-height: 1.75;
+            }
+
+            .ho-contacts-empty {
+                font-size: 0.9rem;
+                color: var(--text-muted);
+                font-style: italic;
+                margin: 0;
+            }
+
+            .ho-fallback-reason {
+                font-size: 0.9rem;
+                color: var(--text-secondary);
+                margin: 0 0 1rem;
+            }
+
+            .ho-fallback-body .ho-draft-block:first-child {
+                margin-top: 0;
+            }
+
+            #ho-fallback.is-hidden {
+                display: none;
+            }
+
+            @media (max-width: 768px) {
+                #ho-setup.ho-setup-empty {
+                    padding: 2rem 1rem;
+                }
+            }
+
             /* ── CV Optimizer ─────────────────────────────────────────── */
 
             /* Section visibility — companion rules beat layout display (see app.css .is-hidden) */
@@ -4602,17 +4841,21 @@
                         <i class="fas fa-file-alt"></i>
                         <span>Resume</span>
                     </button>
-                    <button class="page-tab" data-tab="interview">
-                        <i class="fas fa-chalkboard-teacher"></i>
-                        <span>Interview</span>
-                    </button>
                     <button class="page-tab" data-tab="optimize">
                         <i class="fas fa-chart-line"></i>
                         <span>Optimize CV</span>
                     </button>
+                    <button class="page-tab" data-tab="interview">
+                        <i class="fas fa-chalkboard-teacher"></i>
+                        <span>Interview</span>
+                    </button>
                     <button class="page-tab" data-tab="practice">
                         <i class="fas fa-microphone"></i>
-                        <span>Practice Interview</span>
+                        <span>Mock Session</span>
+                    </button>
+                    <button class="page-tab" data-tab="outreach">
+                        <i class="fas fa-paper-plane"></i>
+                        <span>Outreach</span>
                     </button>
                 </div>
 
@@ -4646,19 +4889,6 @@
                             <div class="sub-pane" id="sub-resume-keywords"></div>
                             <div class="sub-pane" id="sub-resume-summary"></div>
                             <div id="resumeRegenBtn"></div>
-                        </div>
-                    </div>
-                    <div class="tab-pane" id="pane-interview">
-                        <div id="interviewContent">
-                            <div class="sub-tabs" data-parent="interview">
-                                <button class="sub-tab active" data-subtab="process"><i class="fas fa-route"></i> Process</button>
-                                <button class="sub-tab" data-subtab="questions"><i class="fas fa-question-circle"></i> Questions</button>
-                                <button class="sub-tab" data-subtab="preparation"><i class="fas fa-tasks"></i> Preparation</button>
-                            </div>
-                            <div class="sub-pane active" id="sub-interview-process"></div>
-                            <div class="sub-pane" id="sub-interview-questions"></div>
-                            <div class="sub-pane" id="sub-interview-preparation"></div>
-                            <div id="interviewRegenBtn"></div>
                         </div>
                     </div>
                     <div class="tab-pane" id="pane-optimize">
@@ -4828,11 +5058,24 @@
                             </div>
                         </div>
                     </div>
+                    <div class="tab-pane" id="pane-interview">
+                        <div id="interviewContent">
+                            <div class="sub-tabs" data-parent="interview">
+                                <button class="sub-tab active" data-subtab="process"><i class="fas fa-route"></i> Process</button>
+                                <button class="sub-tab" data-subtab="questions"><i class="fas fa-question-circle"></i> Questions</button>
+                                <button class="sub-tab" data-subtab="preparation"><i class="fas fa-tasks"></i> Preparation</button>
+                            </div>
+                            <div class="sub-pane active" id="sub-interview-process"></div>
+                            <div class="sub-pane" id="sub-interview-questions"></div>
+                            <div class="sub-pane" id="sub-interview-preparation"></div>
+                            <div id="interviewRegenBtn"></div>
+                        </div>
+                    </div>
                     <div class="tab-pane" id="pane-practice">
                         <div id="mockInterviewContent">
                             <div id="mi-setup" class="mi-section mi-setup-empty">
                                 <i class="fas fa-microphone empty-state-icon" aria-hidden="true"></i>
-                                <p class="empty-state-title">Practice Your Interview</p>
+                                <p class="empty-state-title">Mock Session</p>
                                 <p class="empty-state-desc">
                                     Run a timed practice interview grounded in this application: an AI interviewer
                                     asks questions in your chosen style, you answer by voice or typing, and when
@@ -4869,7 +5112,7 @@
 
                                 <button id="mi-start-btn" type="button" class="regen-btn mi-start-btn" data-action="miStart">
                                     <span class="spinner"></span>
-                                    <span class="btn-text">Start Practice Interview</span>
+                                    <span class="btn-text">Start mock session</span>
                                 </button>
                             </div>
 
@@ -4879,7 +5122,7 @@
                                         <i class="fas fa-comments apply-icon" id="mi-session-icon" aria-hidden="true"></i>
                                         <div>
                                             <div class="apply-answer" id="mi-countdown">—</div>
-                                            <div class="apply-rec" id="mi-session-status">Practice in progress</div>
+                                            <div class="apply-rec" id="mi-session-status">Mock session in progress</div>
                                         </div>
                                     </div>
                                     <div class="mi-session-toolbar">
@@ -4951,17 +5194,92 @@
                                                 <div class="apply-answer">
                                                     <span id="mi-final-score">–</span><span class="cvo-score-denom"> / 10</span>
                                                 </div>
-                                                <div class="apply-rec" id="mi-result-rec">Practice complete</div>
+                                                <div class="apply-rec" id="mi-result-rec">Mock session complete</div>
                                             </div>
                                         </div>
                                     </div>
                                     <button type="button" class="regen-btn" data-action="miPracticeAgain">
-                                        <span class="btn-text">Practice again</span>
+                                        <span class="btn-text">Try again</span>
                                     </button>
                                 </div>
                                 <div id="mi-debrief"></div>
                             </div>
                         </div>
+                    </div>
+                    <div class="tab-pane" id="pane-outreach">
+                        <div id="hiringOutreachContent">
+                            <div id="ho-setup" class="ho-section ho-setup-empty">
+                                <i class="fas fa-paper-plane empty-state-icon" aria-hidden="true"></i>
+                                <p class="empty-state-title">Find Who to Contact</p>
+                                <p class="empty-state-desc">
+                                    Find hiring contacts from public web sources for this role, then copy draft
+                                    messages to send yourself — we never send them for you.
+                                </p>
+
+                                <div id="ho-ai-setup-warning" class="alert alert-warning ho-ai-setup-warning is-hidden" role="alert">
+                                    <i class="fas fa-key me-2" aria-hidden="true"></i>
+                                    AI isn&rsquo;t configured yet. Choose a provider and add an API key in
+                                    <a href="/dashboard/settings?tab=ai-setup" class="alert-link">Settings &rarr; AI Setup</a>,
+                                    or ask your instance admin to enable Vertex AI.
+                                </div>
+
+                                <button id="ho-generate-btn" type="button" class="regen-btn ho-generate-btn" data-action="generateHiringOutreach">
+                                    <span class="spinner"></span>
+                                    <span class="btn-text">Find who to contact</span>
+                                </button>
+                            </div>
+
+                            <div id="ho-progress" class="ho-section is-hidden">
+                                <div class="apply-decision-banner apply-muted ho-progress-banner">
+                                    <div class="apply-main">
+                                        <i class="fas fa-paper-plane apply-icon" aria-hidden="true"></i>
+                                        <div>
+                                            <div class="apply-answer">Finding contacts&hellip;</div>
+                                            <div class="apply-rec">Searching public web sources and drafting messages</div>
+                                        </div>
+                                    </div>
+                                    <div class="apply-badges">
+                                        <span class="fit-badge badge-muted"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Working</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div id="ho-results" class="ho-section is-hidden">
+                                <div class="ho-results-header">
+                                    <div class="apply-decision-banner apply-good ho-results-banner">
+                                        <div class="apply-main">
+                                            <i class="fas fa-users apply-icon" aria-hidden="true"></i>
+                                            <div>
+                                                <div class="apply-answer">Contacts ready</div>
+                                                <div class="apply-rec">Copy drafts to send yourself — verify before sending; we never send for you</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button type="button" class="regen-btn" data-action="regenerateHiringOutreach">
+                                        <span class="spinner"></span>
+                                        <span class="btn-text"><i class="fas fa-redo" aria-hidden="true"></i> Find again</span>
+                                    </button>
+                                </div>
+
+                                <div class="content-section">
+                                    <div class="section-title"><i class="fas fa-search"></i> Summary</div>
+                                    <p id="ho-summary" class="ho-summary"></p>
+                                </div>
+
+                                <div class="content-section">
+                                    <div class="section-title"><i class="fas fa-address-book"></i> Suggested contacts</div>
+                                    <div id="ho-contacts" class="ho-contacts"></div>
+                                </div>
+
+                                <div id="ho-fallback" class="content-section is-hidden">
+                                    <div class="section-title"><i class="fas fa-envelope-open-text"></i> Generic outreach</div>
+                                    <p id="ho-fallback-reason" class="ho-fallback-reason"></p>
+                                    <div id="ho-fallback-body" class="ho-fallback-body"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     </div>
                 </div>
             </div>
@@ -4972,4 +5290,5 @@
 <script src="{{ asset_url('js/application-detail.js') }}"></script>
 <script src="{{ asset_url('js/cv-optimizer.js') }}"></script>
 <script src="{{ asset_url('js/mock-interview.js') }}"></script>
+<script src="{{ asset_url('js/hiring-outreach.js') }}"></script>
 {% endblock %}
