@@ -23,7 +23,7 @@
 
 Separate tools, separate tabs, separate sites — none of them talking to each other. Generic output. Over an hour per application.
 
-Paste a job description, upload a PDF / TXT / DOCX, or pull the posting from any job site with the Chrome extension — and five AI agents run an orchestrated pipeline: analyzing the role, scoring your fit, researching the company, writing a targeted cover letter, and producing resume tips for the role. Sequential where it needs to be, parallel where it can be, each agent's output feeding the next.
+Paste a job description, upload a PDF / TXT / DOCX, or pull the posting from any job site with the Chrome extension — and five AI agents run an orchestrated pipeline in under 30 seconds: analyzing the role, scoring your fit, researching the company, writing a targeted cover letter, and producing resume tips for the role. Sequential where it needs to be, parallel where it can be, each agent's output feeding the next.
 
 Also includes a dashboard to track every application. And tools for everything around it: interview prep, timed mock sessions, hiring outreach drafts, salary negotiation, job comparison, follow-ups, thank you notes, and references.
 
