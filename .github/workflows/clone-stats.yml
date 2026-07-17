@@ -1,0 +1,48 @@
+# Persist GitHub Traffic clone counts beyond the 14-day API window.
+# Runs daily; commits docs/clone-stats.json when totals change.
+name: Clone stats
+
+on:
+  schedule:
+    # 06:15 UTC — after Traffic for "yesterday" usually settles
+    - cron: "15 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clone-stats
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Need a token that can push; default GITHUB_TOKEN works for same-repo commits
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch Traffic clones
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${{ github.repository }}/traffic/clones" > /tmp/clones.json
+          python3 -c "import json; d=json.load(open('/tmp/clones.json')); print(f\"API window: {d.get('count')} clones / {d.get('uniques')} uniques\")"
+
+      - name: Merge into docs/clone-stats.json
+        run: python3 scripts/update_clone_stats.py --input /tmp/clones.json --stats docs/clone-stats.json
+
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- docs/clone-stats.json; then
+            echo "No clone-stats changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/clone-stats.json
+          git commit -m "chore: update clone stats [skip ci]"
+          git push
