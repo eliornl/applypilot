@@ -13,6 +13,28 @@ REPO = "https://github.com/eliornl/rolemule"
 QUICK = f"{REPO}#quick-start"
 
 
+def strip_first_script_element(html: str) -> str:
+    """Remove the first <script>...</script> block from trusted template HTML.
+
+    Uses index scans (not a tag-filter regexp) so closing tags with whitespace or
+    extra attributes (e.g. ``</script >``, ``</script foo="bar">``) are still removed.
+    """
+    lower = html.lower()
+    start = lower.find("<script")
+    if start < 0:
+        return html
+    open_end = html.find(">", start)
+    if open_end < 0:
+        return html
+    close = lower.find("</script", open_end)
+    if close < 0:
+        return html
+    close_end = html.find(">", close)
+    if close_end < 0:
+        return html
+    return html[:start] + html[close_end + 1 :]
+
+
 def extract_style(html: str) -> str:
     m = re.search(
         r'<style[^>]*>\s*(.*?)\s*</style>',
@@ -34,13 +56,7 @@ def extract_content(html: str) -> str:
         raise SystemExit("content block not found")
     content = m.group(1)
     # Drop jinja nonce scripts used only for app back-link switching
-    content = re.sub(
-        r"<script[^>]*>.*?</script>",
-        "",
-        content,
-        count=1,
-        flags=re.DOTALL | re.IGNORECASE,
-    )
+    content = strip_first_script_element(content)
     # App-only absolute paths → marketing / GitHub equivalents
     content = content.replace('href="/dashboard/new-application"', f'href="{QUICK}"')
     content = content.replace('href="/dashboard"', 'href="index.html"')
@@ -226,13 +242,7 @@ def main() -> None:
     )
     assert help_content_match
     help_body = help_content_match.group(1)
-    help_body = re.sub(
-        r"<script[^>]*>.*?</script>",
-        "",
-        help_body,
-        count=1,
-        flags=re.DOTALL | re.IGNORECASE,
-    )
+    help_body = strip_first_script_element(help_body)
     help_body = help_body.replace('href="/dashboard/new-application"', f'href="{QUICK}"')
     help_body = help_body.replace('href="/dashboard"', "href=\"index.html\"")
     help_body = help_body.strip()
