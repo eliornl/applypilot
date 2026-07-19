@@ -11,7 +11,7 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-orange.svg)](https://langchain-ai.github.io/langgraph/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192.svg)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-DC382D.svg)](https://redis.io/)
-[![Node.js](https://img.shields.io/badge/Node.js-339933.svg)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6.svg)](https://www.typescriptlang.org/)
 [![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-4285F4.svg)](https://developer.chrome.com/docs/extensions/)
 [![Gemini](https://img.shields.io/badge/Gemini-4285F4.svg)](https://ai.google.dev/gemini-api)
 [![OpenAI](https://img.shields.io/badge/OpenAI-412991.svg)](https://platform.openai.com/)
